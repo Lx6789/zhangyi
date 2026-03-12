@@ -3,6 +3,7 @@
 import http from '@/services/utils/http-interceptor'
 import * as savingApi from '@/api/saving'
 import { notificationService } from '@/services'
+import businessDataService from '@/services/business-data.service' // 导入业务数据服务
 
 class SavingService {
     constructor() {
@@ -77,7 +78,7 @@ class SavingService {
             forceRefresh = false,
             params = {},
             showNotification = true,
-            alwaysFetchFromServer = true // 新增：缓存为空时是否总是请求服务器
+            alwaysFetchFromServer = true
         } = options
 
         console.log(`【Cache-First】开始获取数据: ${cacheKey}, 强制刷新: ${forceRefresh}, 总是请求服务器: ${alwaysFetchFromServer}`)
@@ -121,7 +122,6 @@ class SavingService {
         }
 
         // 2. 检查是否应该请求服务器
-        // 总是尝试请求服务器，除非 explicitly 设置 alwaysFetchFromServer = false
         const shouldFetchFromServer = alwaysFetchFromServer || forceRefresh || !cacheHit
 
         if (shouldFetchFromServer) {
@@ -129,7 +129,6 @@ class SavingService {
             try {
                 console.log(`【Cache-First】从服务器获取数据: ${cacheKey}, 当前网络状态: ${navigator.onLine ? '在线' : '离线'}`)
 
-                // 即使离线也尝试请求（可能会失败，但我们要尝试）
                 const serverData = await fetchFromServer()
 
                 // 4. 更新缓存
@@ -148,12 +147,7 @@ class SavingService {
             } catch (error) {
                 console.error(`【Cache-First】服务器请求失败: ${cacheKey}`, error)
 
-                // 服务器请求失败，但有缓存数据（即使是空的）？
                 if (cacheHit) {
-                    // 有缓存数据（可能是空的），返回缓存
-                    console.log(`【Cache-First】返回缓存数据（服务器请求失败）: ${cacheKey}`)
-
-                    // 检查缓存是否为空，用于提示
                     const isEmpty = this._isCacheDataEmpty(cachedData, strategy)
 
                     return {
@@ -165,7 +159,6 @@ class SavingService {
                     }
                 }
 
-                // 无任何数据可用，返回空数据
                 const emptyData = this.getEmptyDataByStrategy(strategy)
                 return {
                     code: error.response?.status || 500,
@@ -176,8 +169,6 @@ class SavingService {
                 }
             }
         } else {
-            // 不应该请求服务器，但这种情况很少发生
-            // 返回空数据
             return {
                 code: 200,
                 data: this.getEmptyDataByStrategy(strategy),
@@ -203,11 +194,9 @@ class SavingService {
 
             case 'DEPOSIT_RECORDS':
                 if (data && typeof data === 'object') {
-                    // 检查 records 数组
                     if (data.records && Array.isArray(data.records)) {
                         return data.records.length === 0
                     }
-                    // 检查直接是数组的情况
                     if (Array.isArray(data)) {
                         return data.length === 0
                     }
@@ -257,7 +246,6 @@ class SavingService {
      * 从缓存获取数据
      */
     async getFromCache(cacheKey, strategy, allowStale = false) {
-        // 解析缓存键
         const [type, ...keyParts] = cacheKey.split(':')
 
         try {
@@ -273,18 +261,15 @@ class SavingService {
                     const [pId, memberId, page, size] = keyParts
                     const filters = {}
 
-                    // 解析 memberId（可能是 'null' 字符串）
                     if (memberId && memberId !== 'null' && memberId !== 'undefined' && memberId !== '') {
                         filters.memberId = parseInt(memberId)
                     }
 
-                    // 从缓存获取所有记录
                     const records = await groupSavingCache.getCachedDepositRecordsByGroupId(
                         parseInt(pId),
                         filters
                     )
 
-                    // 分页处理
                     const currentPage = parseInt(page) || 1
                     const pageSize = parseInt(size) || 20
                     const start = (currentPage - 1) * pageSize
@@ -333,7 +318,6 @@ class SavingService {
                     if (data) {
                         await groupSavingCache.updateGroupSavingCache(data)
 
-                        // 如果有成员数据，也缓存成员
                         if (data.members && Array.isArray(data.members)) {
                             await groupSavingCache.cacheMembers(data.members, planId)
                         }
@@ -350,7 +334,6 @@ class SavingService {
                 case 'member-records':
                     const [planId3, memberId3] = keyParts
                     if (Array.isArray(data)) {
-                        // 为成员记录添加计划ID信息
                         const recordsWithPlanId = data.map(r => ({
                             ...r,
                             groupSavingId: parseInt(planId3)
@@ -400,7 +383,6 @@ class SavingService {
         for (const strategy of strategies) {
             switch (strategy) {
                 case 'PLAN_LIST':
-                    // 重新获取计划列表
                     refreshPromises.push(
                         this.getGroupSavingsList({}, true)
                     )
@@ -416,9 +398,7 @@ class SavingService {
 
                 case 'DEPOSIT_RECORDS':
                     if (context.planId) {
-                        // 清除记录缓存
                         await groupSavingCache.deleteDepositRecordsByGroupId(context.planId)
-                        // 重新获取第一页
                         refreshPromises.push(
                             this.getPlanSavingRecordsByPost(context.planId, { page: 1, size: 20 }, true)
                         )
@@ -427,9 +407,7 @@ class SavingService {
 
                 case 'MEMBER_RECORDS':
                     if (context.planId && context.memberId) {
-                        // 清除成员记录缓存
                         await groupSavingCache.deleteDepositRecordsByGroupId(context.planId)
-                        // 重新获取
                         refreshPromises.push(
                             this.getMemberSavingRecords(context.planId, context.memberId, true)
                         )
@@ -438,7 +416,6 @@ class SavingService {
 
                 case 'MEMBERS':
                     if (context.planId) {
-                        // 清除成员缓存
                         await groupSavingCache.deleteMembersByGroupId(context.planId)
                     }
                     break
@@ -450,6 +427,8 @@ class SavingService {
     }
 
     // ==================== 多人存钱计划 ====================
+    // 多人存钱部分保持不变，仍然调用后端API
+    // ...
 
     /**
      * 获取多人存钱计划列表（Cache-First）
@@ -469,7 +448,7 @@ class SavingService {
                 strategy: 'PLAN_LIST',
                 forceRefresh,
                 params,
-                alwaysFetchFromServer: true // 缓存为空时总是请求服务器
+                alwaysFetchFromServer: true
             }
         )
     }
@@ -491,7 +470,7 @@ class SavingService {
             {
                 strategy: 'PLAN_DETAIL',
                 forceRefresh,
-                alwaysFetchFromServer: true // 缓存为空时总是请求服务器
+                alwaysFetchFromServer: true
             }
         )
     }
@@ -506,7 +485,6 @@ class SavingService {
 
             notificationService.showNotification('创建成功', 'success')
 
-            // 刷新计划列表缓存
             await this.refreshAfterOperation('join', { planId: response?.id })
 
             return {
@@ -564,7 +542,6 @@ class SavingService {
 
             notificationService.showNotification('删除成功', 'success')
 
-            // 刷新计划列表缓存
             await this.refreshAfterOperation('delete', { planId: Number(id) })
 
             return {
@@ -639,7 +616,6 @@ class SavingService {
                 'success'
             )
 
-            // 刷新相关缓存
             await this.refreshAfterOperation('leave', {
                 planId: Number(id),
                 memberId: data.memberId || this.currentUserId
@@ -678,7 +654,6 @@ class SavingService {
 
             notificationService.showNotification(`成功存入 ¥${data.amount}`, 'success')
 
-            // 刷新相关缓存
             await this.refreshAfterOperation('deposit', {
                 planId: Number(planId),
                 memberId: Number(data.memberId)
@@ -704,7 +679,7 @@ class SavingService {
     }
 
     /**
-     * 获取计划的存钱记录（Cache-First，缓存为空时总是请求服务器）
+     * 获取计划的存钱记录（Cache-First）
      */
     async getPlanSavingRecordsByPost(planId, params = {}, forceRefresh = false) {
         if (!planId) {
@@ -717,7 +692,6 @@ class SavingService {
 
         const targetPlanId = Number(planId)
 
-        // 构建缓存键时包含成员ID
         const memberIdValue = params.memberId && params.memberId !== '' && params.memberId !== 'null' ? params.memberId : 'all'
         const cacheKey = `deposit-records:${targetPlanId}:${memberIdValue}:${params.page || 1}:${params.size || 20}`
 
@@ -732,13 +706,11 @@ class SavingService {
         return this.cacheFirst(
             cacheKey,
             async () => {
-                // 构建请求参数
                 const requestData = {
                     page: params.page ? Number(params.page) : 1,
                     size: params.size ? Number(params.size) : 20
                 }
 
-                // 重要：只有memberId有有效值时才添加到请求中
                 if (params.memberId && params.memberId !== '' && params.memberId !== 'null' && params.memberId !== 'undefined') {
                     requestData.memberId = Number(params.memberId)
                     console.log('【按成员查询】发送到服务器的memberId:', requestData.memberId)
@@ -756,7 +728,6 @@ class SavingService {
                 const requestConfig = savingApi.getSavingRecordsByPost(planId, requestData)
                 const response = await http.post(requestConfig.url, requestConfig.data)
 
-                // 直接返回后端响应，不做前端处理
                 return response
             },
             {
@@ -769,7 +740,7 @@ class SavingService {
     }
 
     /**
-     * 获取成员的存钱记录（Cache-First，缓存为空时总是请求服务器）
+     * 获取成员的存钱记录（Cache-First）
      */
     async getMemberSavingRecords(planId, memberId, forceRefresh = false) {
         const pId = Number(planId)
@@ -784,7 +755,6 @@ class SavingService {
                 const requestConfig = savingApi.getMemberSavingRecords(pId, mId)
                 const response = await http.get(requestConfig.url)
 
-                // 直接返回后端响应
                 return response
             },
             {
@@ -795,142 +765,196 @@ class SavingService {
         )
     }
 
-    // ==================== 个人存钱计划 ====================
+    // ==================== 个人存钱计划（前端存储） ====================
 
     /**
      * 获取个人存钱计划列表
+     * 从 IndexedDB 中获取数据
      */
     async getPersonalSavingsList(params = {}) {
         try {
-            const requestConfig = savingApi.getPersonalSavingList(params)
-            const response = await http.get(requestConfig.url, { params: requestConfig.params })
+            // 确保业务数据服务已初始化
+            await businessDataService.init(this.currentUserId)
+
+            // 从 IndexedDB 获取个人存钱计划
+            const plans = await businessDataService.getSavingsPlans(params.status)
 
             return {
                 code: 200,
-                data: response || []
+                data: plans || [],
+                message: '获取成功'
             }
         } catch (error) {
             console.error('获取个人存钱计划列表失败:', error)
 
-            if (this.isNetworkError(error)) {
-                return {
-                    code: 200,
-                    data: [],
-                    message: 'offline-mode'
-                }
+            return {
+                code: 500,
+                data: [],
+                message: '获取失败: ' + error.message
             }
-
-            notificationService.showNotification('获取个人计划列表失败', 'error')
-            return { code: 500, data: [], message: '获取失败' }
         }
     }
 
     /**
      * 创建个人存钱计划
+     * 保存到 IndexedDB 中
      */
     async createPersonalSavings(data) {
         try {
-            const requestConfig = savingApi.createPersonalSaving(data)
-            const response = await http.post(requestConfig.url, requestConfig.data)
+            // 确保业务数据服务已初始化
+            await businessDataService.init(this.currentUserId)
+
+            // 准备数据
+            const planData = {
+                ...data,
+                status: 'active',
+                createTime: new Date().toISOString(),
+                updateTime: new Date().toISOString()
+            }
+
+            // 保存到 IndexedDB
+            const result = await businessDataService.addSavingsPlan(planData)
 
             notificationService.showNotification('创建成功', 'success')
+
             return {
                 code: 200,
-                data: response,
+                data: result,
                 message: '创建成功'
             }
         } catch (error) {
             console.error('创建个人存钱计划失败:', error)
 
-            if (this.isNetworkError(error)) {
-                notificationService.showNotification('当前处于离线模式，无法创建计划', 'warning')
-                return { code: 503, message: 'service unavailable' }
+            notificationService.showNotification('创建失败: ' + error.message, 'error')
+            return {
+                code: 500,
+                message: '创建失败: ' + error.message
             }
-
-            notificationService.showNotification('创建失败，请重试', 'error')
-            return { code: 500, message: '创建失败' }
         }
     }
 
     /**
      * 更新个人存钱计划
+     * 更新 IndexedDB 中的数据
      */
     async updatePersonalSavings(id, data) {
         try {
-            const requestConfig = savingApi.updatePersonalSaving(id, data)
-            const response = await http.put(requestConfig.url, requestConfig.data)
+            // 确保业务数据服务已初始化
+            await businessDataService.init(this.currentUserId)
 
-            notificationService.showNotification('更新成功', 'success')
-            return {
-                code: 200,
-                data: response,
-                message: '更新成功'
+            // 准备更新数据
+            const updateData = {
+                ...data,
+                updateTime: new Date().toISOString()
+            }
+
+            // 更新 IndexedDB
+            const result = await businessDataService.updateSavingsPlan(id, updateData)
+
+            if (result) {
+                notificationService.showNotification('更新成功', 'success')
+                return {
+                    code: 200,
+                    data: result,
+                    message: '更新成功'
+                }
+            } else {
+                throw new Error('计划不存在或无权更新')
             }
         } catch (error) {
             console.error('更新个人存钱计划失败:', error)
 
-            if (this.isNetworkError(error)) {
-                notificationService.showNotification('当前处于离线模式，无法更新计划', 'warning')
-                return { code: 503, message: 'service unavailable' }
+            notificationService.showNotification('更新失败: ' + error.message, 'error')
+            return {
+                code: 500,
+                message: '更新失败: ' + error.message
             }
-
-            notificationService.showNotification('更新失败，请重试', 'error')
-            return { code: 500, message: '更新失败' }
         }
     }
 
     /**
      * 删除个人存钱计划
+     * 从 IndexedDB 中删除数据
      */
     async deletePersonalSavings(id) {
         try {
-            const requestConfig = savingApi.deletePersonalSaving(id)
-            await http.delete(requestConfig.url)
+            // 确保业务数据服务已初始化
+            await businessDataService.init(this.currentUserId)
 
-            notificationService.showNotification('删除成功', 'success')
-            return {
-                code: 200,
-                message: '删除成功'
+            // 从 IndexedDB 删除
+            const result = await businessDataService.deleteSavingsPlan(id)
+
+            if (result) {
+                notificationService.showNotification('删除成功', 'success')
+                return {
+                    code: 200,
+                    message: '删除成功'
+                }
+            } else {
+                throw new Error('计划不存在或无权删除')
             }
         } catch (error) {
             console.error('删除个人存钱计划失败:', error)
 
-            if (this.isNetworkError(error)) {
-                notificationService.showNotification('当前处于离线模式，无法删除计划', 'warning')
-                return { code: 503, message: 'service unavailable' }
+            notificationService.showNotification('删除失败: ' + error.message, 'error')
+            return {
+                code: 500,
+                message: '删除失败: ' + error.message
             }
-
-            notificationService.showNotification('删除失败，请重试', 'error')
-            return { code: 500, message: '删除失败' }
         }
     }
 
     /**
      * 个人存钱 - 存钱
+     * 更新计划中的已存金额
      */
     async depositToPersonalSaving(planId, data) {
         try {
-            const requestConfig = savingApi.depositToPersonalSaving(planId, data)
-            const response = await http.post(requestConfig.url, requestConfig.data)
+            // 确保业务数据服务已初始化
+            await businessDataService.init(this.currentUserId)
+
+            // 获取当前计划
+            const plans = await businessDataService.getSavingsPlans()
+            const currentPlan = plans.find(p => p.id === planId)
+
+            if (!currentPlan) {
+                throw new Error('计划不存在')
+            }
+
+            // 更新金额
+            const newAmount = (currentPlan.currentAmount || 0) + data.amount
+            const updateData = {
+                currentAmount: newAmount,
+                updateTime: new Date().toISOString()
+            }
+
+            // 保存更新
+            const result = await businessDataService.updateSavingsPlan(planId, updateData)
+
+            // 计算进度
+            const progress = Math.min(Math.round((newAmount / currentPlan.targetAmount) * 100), 100)
 
             notificationService.showNotification(`成功存入 ¥${data.amount}`, 'success')
 
             return {
                 code: 200,
                 message: '存钱成功',
-                data: response
+                data: {
+                    ...result,
+                    currentAmount: newAmount,
+                    progress: progress,
+                    completed: newAmount >= currentPlan.targetAmount
+                }
             }
 
         } catch (error) {
             console.error('个人存钱失败:', error)
 
-            if (this.isNetworkError(error)) {
-                notificationService.showNotification('当前网络不可用，请稍后重试', 'warning')
-                return { code: 503, message: 'service unavailable' }
+            notificationService.showNotification('存钱失败: ' + error.message, 'error')
+            return {
+                code: 500,
+                message: '存钱失败: ' + error.message
             }
-
-            notificationService.showNotification('存钱失败，请重试', 'error')
-            return { code: 500, message: '存钱失败' }
         }
     }
 }
