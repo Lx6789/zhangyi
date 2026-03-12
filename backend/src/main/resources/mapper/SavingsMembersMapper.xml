@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="org.lx.mapper.SavingsMembersMapper">
+
+    <!-- 批量插入成员 -->
+    <insert id="batchInsert" parameterType="list">
+        INSERT INTO savings_members (
+        group_saving_id,
+        user_id,
+        member_name,
+        amount,
+        is_owner,
+        joined_at,
+        update_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.groupSavingId},
+            #{item.userId},
+            #{item.memberName},
+            #{item.amount},
+            #{item.isOwner},
+            #{item.joinedAt},
+            #{item.updateAt}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

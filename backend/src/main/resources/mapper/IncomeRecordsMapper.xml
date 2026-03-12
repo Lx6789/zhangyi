@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.lx.mapper.IncomeRecordsMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="org.lx.pojo.IncomeRecords">
+        <id column="id" property="id" />
+        <result column="user_id" property="userId" />
+        <result column="category" property="category" />
+        <result column="channel" property="channel" />
+        <result column="customer" property="customer" />
+        <result column="quantity" property="quantity" />
+        <result column="price" property="price" />
+        <result column="amount" property="amount" />
+        <result column="payment_method" property="paymentMethod" />
+        <result column="transaction_date" property="transactionDate" />
+        <result column="note" property="note" />
+        <result column="photo_url" property="photoUrl" />
+        <result column="created_at" property="createdAt" />
+        <result column="record_type" property="recordType" />
+    </resultMap>
+
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        id, user_id, category, channel, customer, quantity, price, amount, payment_method, transaction_date, note, photo_url, created_at, record_type
+    </sql>
+
+</mapper>
