@@ -35,7 +35,7 @@ public class SavingController {
         return groupSavingsService.getSavingsGroupLIst();
     }
 
-    @ApiOperation(value = "新增多人存钱计划")
+    @ApiOperation(value = "创建多人存钱计划")
     @PostMapping("/group/create")
     public RespBean createSavingGroup(@RequestBody GroupSavingRequestDTO createGroupSavingRequestDTO) {
         return groupSavingsService.createSavingGroup(createGroupSavingRequestDTO);

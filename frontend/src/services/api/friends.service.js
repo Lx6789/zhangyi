@@ -1,7 +1,7 @@
 // services/friends.service.js
 import notificationService from '@/services/utils/notification.service.js'
 import * as friendsApi from '@/api/friends'
-import friendsCacheService from '@/services/friends-cache.service.js'  // 导入缓存服务
+import friendsCacheService from '@/services/friends-cache.service.js'
 
 class FriendsService {
     /**
@@ -10,7 +10,6 @@ class FriendsService {
      */
     async getFriendsList(forceRefresh = false) {
         try {
-            // 如果不是强制刷新，先尝试从缓存获取
             if (!forceRefresh) {
                 const cachedFriends = await friendsCacheService.getFriendsList()
                 if (cachedFriends && cachedFriends.length > 0) {
@@ -19,29 +18,59 @@ class FriendsService {
                 }
             }
 
-            // 从 API 获取
             console.log('从 API 获取好友列表')
-            const data = await friendsApi.getFriendsList()
-            const friendsList = data || []
+            const response = await friendsApi.getFriendsList()
 
-            // 保存到缓存
-            if (friendsList.length > 0) {
-                await friendsCacheService.saveFriendsList(friendsList)
+            // 处理不同的响应格式
+            let friendsList = []
+            if (response && response.code === 200) {
+                friendsList = response.data || []
+            } else if (Array.isArray(response)) {
+                friendsList = response
             }
 
-            return friendsList
+            // 根据后端 FriendsVO 映射字段
+            const processedList = friendsList.map(friend => ({
+                // 后端返回的原始字段
+                id: friend.id,                    // 好友关系ID
+                friendId: friend.friendId,        // 好友的用户ID（重要！）
+                phone: friend.phone,              // 手机号
+                nickname: friend.nickname,        // 昵称
+                avatar: friend.avatar,
+                addTime: friend.addTime,
+
+                // 前端使用的字段（兼容性处理）
+                userId: friend.friendId,           // 将 friendId 映射为 userId（用户ID）
+                name: friend.nickname || friend.phone, // 显示名称
+
+                // 保留原始数据
+                ...friend
+            }))
+
+            console.log('处理后的好友列表:', processedList.map(f => ({
+                id: f.id,
+                userId: f.userId,        // 用户ID（来自friendId）
+                friendId: f.friendId,     // 好友关系ID
+                nickname: f.nickname,
+                phone: f.phone
+            })))
+
+            // 保存到缓存
+            if (processedList.length > 0) {
+                await friendsCacheService.saveFriendsList(processedList)
+            }
+
+            return processedList
         } catch (error) {
             console.error('获取好友列表失败:', error)
 
-            // API 失败时，尝试从缓存获取
+            // 尝试从缓存获取
             const cachedFriends = await friendsCacheService.getFriendsList()
             if (cachedFriends && cachedFriends.length > 0) {
-                console.log('API 失败，使用缓存数据')
-                notificationService.showNotification('使用离线数据', 'info')
+                console.log('使用缓存的好友列表（API失败）')
                 return cachedFriends
             }
 
-            notificationService.showNotification(error.message || '获取好友列表失败', 'error')
             return []
         }
     }
@@ -75,8 +104,11 @@ class FriendsService {
      */
     async getReceivedRequests() {
         try {
-            const data = await friendsApi.getReceivedRequests()
-            return data || []
+            const response = await friendsApi.getReceivedRequests()
+            if (response && response.code === 200) {
+                return response.data || []
+            }
+            return []
         } catch (error) {
             console.error('获取收到的申请失败:', error)
             notificationService.showNotification(error.message || '获取好友申请失败', 'error')
@@ -89,8 +121,11 @@ class FriendsService {
      */
     async getSentRequests() {
         try {
-            const data = await friendsApi.getSentRequests()
-            return data || []
+            const response = await friendsApi.getSentRequests()
+            if (response && response.code === 200) {
+                return response.data || []
+            }
+            return []
         } catch (error) {
             console.error('获取发送的申请失败:', error)
             notificationService.showNotification(error.message || '获取好友申请失败', 'error')
@@ -136,7 +171,7 @@ class FriendsService {
 
     /**
      * 删除好友
-     * @param {number} friendId 好友ID
+     * @param {number} friendId 好友关系ID
      */
     async deleteFriend(friendId) {
         try {

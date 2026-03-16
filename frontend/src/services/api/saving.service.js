@@ -3,7 +3,8 @@
 import http from '@/services/utils/http-interceptor'
 import * as savingApi from '@/api/saving'
 import { notificationService } from '@/services'
-import businessDataService from '@/services/business-data.service' // 导入业务数据服务
+import businessDataService from '@/services/business-data.service'
+// import groupSavingCache from '@/services/cache/group-saving-cache.service'
 
 class SavingService {
     constructor() {
@@ -63,7 +64,11 @@ class SavingService {
     setCurrentUser(userId) {
         this.currentUserId = userId
         // 初始化缓存服务
-        groupSavingCache.init(userId).catch(console.warn)
+        if (groupSavingCache && groupSavingCache.init) {
+            groupSavingCache.init(userId).catch(console.warn)
+        }
+        // 初始化业务数据服务
+        businessDataService.init(userId).catch(console.warn)
     }
 
     /**
@@ -426,9 +431,7 @@ class SavingService {
         console.log(`【缓存刷新】完成: ${operation}`)
     }
 
-    // ==================== 多人存钱计划 ====================
-    // 多人存钱部分保持不变，仍然调用后端API
-    // ...
+    // ==================== 多人存钱计划（后端API） ====================
 
     /**
      * 获取多人存钱计划列表（Cache-First）
@@ -476,16 +479,102 @@ class SavingService {
     }
 
     /**
-     * 创建多人存钱计划
+     * 创建多人存钱计划 - 修复版
+     * 适配后端的 GroupSavingRequestDTO
      */
     async createGroupSavings(data) {
         try {
-            const requestConfig = savingApi.createGroupSaving(data)
-            const response = await http.post(requestConfig.url, requestConfig.data)
+            console.log('创建多人存钱计划 - 原始数据:', data)
+
+            // 深拷贝数据，避免修改原对象
+            const requestData = JSON.parse(JSON.stringify(data))
+
+            // 1. 处理必填字段
+            if (!requestData.name?.trim()) {
+                throw new Error('计划名称不能为空')
+            }
+
+            // 2. 处理金额 - 转换为 BigDecimal 需要的数字格式
+            requestData.targetAmount = parseFloat(requestData.targetAmount) || 0
+            if (requestData.targetAmount <= 0) {
+                throw new Error('目标金额必须大于0')
+            }
+
+            // 3. 处理理由 - 非必填，如果没有则传空字符串
+            requestData.reason = requestData.reason?.trim() || ''
+
+            // 4. 处理描述 - 如果没有则使用理由或空字符串
+            requestData.description = requestData.description?.trim() || requestData.reason || ''
+
+            // 5. 处理截止日期
+            if (requestData.deadline) {
+                // 确保日期格式正确 (YYYY-MM-DD)
+                requestData.deadline = requestData.deadline.split('T')[0]
+            }
+
+            // 6. 处理类型
+            requestData.type = requestData.type || '日常储蓄'
+
+            // 7. 处理成员数据 - 关键修复！确保所有成员都被发送
+            if (requestData.members && Array.isArray(requestData.members)) {
+                console.log('处理前的成员列表:', requestData.members)
+
+                // 计算总金额
+                let totalAmount = 0
+
+                // 映射所有成员，不要过滤掉任何人
+                const processedMembers = requestData.members.map(member => {
+                    // 转换 userId 为数字
+                    let userId = parseInt(member.userId || member.id)
+
+                    // 如果 userId 无效，尝试使用其他字段
+                    if (isNaN(userId) || userId <= 0) {
+                        userId = parseInt(member.friendId) || 0
+                    }
+
+                    const amount = parseFloat(member.amount) || 0
+                    totalAmount += amount
+
+                    // 严格按照后端 DTO 的 GroupSavingMemberRequestDTO 格式
+                    return {
+                        userId: userId,  // 后端用 Integer 接收
+                        name: member.name || member.nickname || '',
+                        amount: amount,  // BigDecimal
+                        isCreator: member.isCreator || false
+                    }
+                }).filter(member =>
+                    member.userId > 0 // 只过滤掉 userId 为 0 的无效成员
+                )
+
+                console.log('处理后的成员列表:', processedMembers)
+
+                // 验证是否有成员
+                if (processedMembers.length === 0) {
+                    throw new Error('至少需要一位有效成员')
+                }
+
+                // 验证是否有创建者
+                const hasCreator = processedMembers.some(m => m.isCreator)
+                if (!hasCreator) {
+                    throw new Error('必须有一位创建者')
+                }
+
+                requestData.members = processedMembers
+                requestData.currentAmount = totalAmount
+            } else {
+                throw new Error('成员列表不能为空')
+            }
+
+            console.log('最终发送到后端的请求数据:', requestData)
+
+            // 调用后端 API
+            const requestConfig = savingApi.createGroupSaving(requestData)
+            const response = await http.post(requestConfig.url, requestData)
+
+            // 刷新缓存
+            await this.refreshAfterOperation('join', { planId: response?.id })
 
             notificationService.showNotification('创建成功', 'success')
-
-            await this.refreshAfterOperation('join', { planId: response?.id })
 
             return {
                 code: 200,
@@ -494,14 +583,11 @@ class SavingService {
             }
         } catch (error) {
             console.error('创建多人存钱计划失败:', error)
-
-            if (this.isNetworkError(error)) {
-                notificationService.showNotification('当前处于离线模式，无法创建计划', 'warning')
-                return { code: 503, message: 'service unavailable' }
+            notificationService.showNotification(error.message || '创建失败', 'error')
+            return {
+                code: 500,
+                message: error.message || '创建失败'
             }
-
-            notificationService.showNotification('创建失败，请重试', 'error')
-            return { code: 500, message: '创建失败' }
         }
     }
 
@@ -510,10 +596,76 @@ class SavingService {
      */
     async updateGroupSavings(id, data) {
         try {
-            const requestConfig = savingApi.updateGroupSaving(id, data)
-            const response = await http.put(requestConfig.url, requestConfig.data)
+            console.log('更新多人存钱计划 - 原始数据:', id, data)
+
+            // 深拷贝数据，避免修改原对象
+            const requestData = JSON.parse(JSON.stringify(data))
+
+            // 处理必填字段
+            if (!requestData.name?.trim()) {
+                throw new Error('计划名称不能为空')
+            }
+
+            requestData.targetAmount = parseFloat(requestData.targetAmount) || 0
+            if (requestData.targetAmount <= 0) {
+                throw new Error('目标金额必须大于0')
+            }
+
+            requestData.reason = requestData.reason?.trim() || ''
+            requestData.description = requestData.description?.trim() || requestData.reason || ''
+
+            if (requestData.deadline) {
+                requestData.deadline = requestData.deadline.split('T')[0]
+            }
+
+            requestData.type = requestData.type || '日常储蓄'
+
+            // 处理成员数据
+            if (requestData.members && Array.isArray(requestData.members)) {
+                let totalAmount = 0
+
+                const processedMembers = requestData.members.map(member => {
+                    let userId = parseInt(member.userId || member.id)
+
+                    if (isNaN(userId) || userId <= 0) {
+                        userId = parseInt(member.friendId) || 0
+                    }
+
+                    const amount = parseFloat(member.amount) || 0
+                    totalAmount += amount
+
+                    return {
+                        userId: userId,
+                        name: member.name || member.nickname || '',
+                        amount: amount,
+                        isCreator: member.isCreator || false
+                    }
+                }).filter(member => member.userId > 0)
+
+                if (processedMembers.length === 0) {
+                    throw new Error('至少需要一位有效成员')
+                }
+
+                const hasCreator = processedMembers.some(m => m.isCreator)
+                if (!hasCreator) {
+                    throw new Error('必须有一位创建者')
+                }
+
+                requestData.members = processedMembers
+                requestData.currentAmount = totalAmount
+            } else {
+                throw new Error('成员列表不能为空')
+            }
+
+            console.log('更新多人存钱计划 - 处理后数据:', requestData)
+
+            const requestConfig = savingApi.updateGroupSaving(id, requestData)
+            const response = await http.put(requestConfig.url, requestData)
+
+            await this.refreshAfterOperation('join', { planId: id })
 
             notificationService.showNotification('更新成功', 'success')
+
             return {
                 code: 200,
                 data: response,
@@ -521,14 +673,11 @@ class SavingService {
             }
         } catch (error) {
             console.error('更新多人存钱计划失败:', error)
-
-            if (this.isNetworkError(error)) {
-                notificationService.showNotification('当前处于离线模式，无法更新计划', 'warning')
-                return { code: 503, message: 'service unavailable' }
+            notificationService.showNotification(error.message || '更新失败', 'error')
+            return {
+                code: 500,
+                message: error.message || '更新失败'
             }
-
-            notificationService.showNotification('更新失败，请重试', 'error')
-            return { code: 500, message: '更新失败' }
         }
     }
 
@@ -562,54 +711,76 @@ class SavingService {
     }
 
     /**
-     * 加入多人存钱计划
+     * 向多人存钱计划存钱
      */
-    async joinGroupSavings(id, data) {
+    async depositToGroupSaving(planId, data) {
         try {
-            const requestConfig = savingApi.joinGroupSaving(id, data)
-            const response = await http.post(requestConfig.url, requestConfig.data)
+            console.log('多人存钱 - 原始数据:', planId, data)
 
-            notificationService.showNotification('加入成功', 'success')
+            const requestData = {
+                memberId: parseInt(data.memberId),
+                amount: parseFloat(data.amount) || 0,
+                note: data.note || ''
+            }
+
+            if (isNaN(requestData.memberId) || requestData.memberId <= 0) {
+                throw new Error('成员ID无效')
+            }
+
+            if (requestData.memberId > 2147483647) {
+                throw new Error('成员ID格式错误')
+            }
+
+            if (requestData.amount <= 0) {
+                throw new Error('存入金额必须大于0')
+            }
+
+            console.log('多人存钱 - 处理后数据:', requestData)
+
+            const requestConfig = savingApi.depositToGroupSaving(planId, requestData)
+            const response = await http.post(requestConfig.url, requestData)
+
+            notificationService.showNotification(`成功存入 ¥${requestData.amount}`, 'success')
+
+            await this.refreshAfterOperation('deposit', {
+                planId: Number(planId),
+                memberId: requestData.memberId
+            })
+
             return {
                 code: 200,
                 data: response,
-                message: '加入成功'
+                message: '存钱成功'
             }
         } catch (error) {
-            console.error('加入多人存钱计划失败:', error)
-
-            if (this.isNetworkError(error)) {
-                notificationService.showNotification('当前处于离线模式，无法加入计划', 'warning')
-                return { code: 503, message: 'service unavailable' }
+            console.error('多人存钱失败:', error)
+            notificationService.showNotification(error.message || '存钱失败', 'error')
+            return {
+                code: 500,
+                message: error.message || '存钱失败'
             }
-
-            notificationService.showNotification('加入失败，请重试', 'error')
-            return { code: 500, message: '加入失败' }
         }
     }
 
     /**
      * 退出多人存钱计划
      */
-    async leaveGroupSavings(id, data) {
+    async leaveGroupSavings(planId, data) {
         try {
-            console.log('【SavingService】退出计划参数:', { id, data });
-
-            const requestConfig = savingApi.leaveGroupSaving(id, data)
+            console.log('退出计划参数:', { planId, data })
 
             const requestData = {
                 isCreator: data.isCreator || false
             }
 
             if (data.isCreator && data.newCreatorId) {
-                requestData.newCreatorId = data.newCreatorId
+                requestData.newCreatorId = parseInt(data.newCreatorId)
             }
 
-            console.log('【SavingService】发送到后端的请求数据:', requestData)
+            console.log('发送到后端的请求数据:', requestData)
 
+            const requestConfig = savingApi.leaveGroupSaving(planId, requestData)
             const response = await http.post(requestConfig.url, requestData)
-
-            console.log('【SavingService】退出计划接口响应:', response)
 
             notificationService.showNotification(
                 data.isCreator ? '退出成功，已移交创建者权限' : '退出计划成功',
@@ -617,7 +788,7 @@ class SavingService {
             )
 
             await this.refreshAfterOperation('leave', {
-                planId: Number(id),
+                planId: Number(planId),
                 memberId: data.memberId || this.currentUserId
             })
 
@@ -628,7 +799,7 @@ class SavingService {
             }
 
         } catch (error) {
-            console.error('【SavingService】退出多人存钱计划失败:', error)
+            console.error('退出多人存钱计划失败:', error)
 
             if (this.isNetworkError(error)) {
                 notificationService.showNotification('当前网络不可用，请稍后重试', 'warning')
@@ -637,44 +808,6 @@ class SavingService {
 
             notificationService.showNotification('退出失败，请重试', 'error')
             return { code: 500, message: '退出失败' }
-        }
-    }
-
-    /**
-     * 多人存钱计划 - 存钱
-     */
-    async depositToGroupSaving(planId, data) {
-        try {
-            console.log(`调用存钱接口: 计划ID=${planId}, 成员ID=${data.memberId}, 金额=${data.amount}`)
-
-            const requestConfig = savingApi.depositToGroupSaving(planId, data)
-            const response = await http.post(requestConfig.url, requestConfig.data)
-
-            console.log('存钱接口响应:', response)
-
-            notificationService.showNotification(`成功存入 ¥${data.amount}`, 'success')
-
-            await this.refreshAfterOperation('deposit', {
-                planId: Number(planId),
-                memberId: Number(data.memberId)
-            })
-
-            return {
-                code: 200,
-                message: '存钱成功',
-                data: response
-            }
-
-        } catch (error) {
-            console.error('存钱失败:', error)
-
-            if (this.isNetworkError(error)) {
-                notificationService.showNotification('当前网络不可用，请稍后重试', 'warning')
-                return { code: 503, message: 'service unavailable' }
-            }
-
-            notificationService.showNotification('存钱失败，请重试', 'error')
-            return { code: 500, message: '存钱失败' }
         }
     }
 
@@ -801,16 +934,35 @@ class SavingService {
      */
     async createPersonalSavings(data) {
         try {
+            console.log('创建个人存钱计划 - 原始数据:', data)
+
             // 确保业务数据服务已初始化
             await businessDataService.init(this.currentUserId)
 
-            // 准备数据
+            // 处理金额字段
+            const targetAmount = parseFloat(data.targetAmount) || 0
+            const currentAmount = parseFloat(data.currentAmount) || 0
+
+            if (targetAmount <= 0) {
+                throw new Error('目标金额必须大于0')
+            }
+
+            if (currentAmount > targetAmount) {
+                throw new Error('已存金额不能大于目标金额')
+            }
+
+            // 理由非必填
             const planData = {
                 ...data,
+                reason: data.reason?.trim() || '',
+                targetAmount,
+                currentAmount,
                 status: 'active',
                 createTime: new Date().toISOString(),
                 updateTime: new Date().toISOString()
             }
+
+            console.log('创建个人存钱计划 - 处理后数据:', planData)
 
             // 保存到 IndexedDB
             const result = await businessDataService.addSavingsPlan(planData)
@@ -825,10 +977,10 @@ class SavingService {
         } catch (error) {
             console.error('创建个人存钱计划失败:', error)
 
-            notificationService.showNotification('创建失败: ' + error.message, 'error')
+            notificationService.showNotification(error.message || '创建失败', 'error')
             return {
                 code: 500,
-                message: '创建失败: ' + error.message
+                message: error.message || '创建失败'
             }
         }
     }
@@ -839,14 +991,33 @@ class SavingService {
      */
     async updatePersonalSavings(id, data) {
         try {
+            console.log('更新个人存钱计划 - 原始数据:', id, data)
+
             // 确保业务数据服务已初始化
             await businessDataService.init(this.currentUserId)
+
+            // 处理金额字段
+            const targetAmount = parseFloat(data.targetAmount) || 0
+            const currentAmount = parseFloat(data.currentAmount) || 0
+
+            if (targetAmount <= 0) {
+                throw new Error('目标金额必须大于0')
+            }
+
+            if (currentAmount > targetAmount) {
+                throw new Error('已存金额不能大于目标金额')
+            }
 
             // 准备更新数据
             const updateData = {
                 ...data,
+                reason: data.reason?.trim() || '',
+                targetAmount,
+                currentAmount,
                 updateTime: new Date().toISOString()
             }
+
+            console.log('更新个人存钱计划 - 处理后数据:', updateData)
 
             // 更新 IndexedDB
             const result = await businessDataService.updateSavingsPlan(id, updateData)
@@ -864,10 +1035,10 @@ class SavingService {
         } catch (error) {
             console.error('更新个人存钱计划失败:', error)
 
-            notificationService.showNotification('更新失败: ' + error.message, 'error')
+            notificationService.showNotification(error.message || '更新失败', 'error')
             return {
                 code: 500,
-                message: '更新失败: ' + error.message
+                message: error.message || '更新失败'
             }
         }
     }
@@ -878,6 +1049,8 @@ class SavingService {
      */
     async deletePersonalSavings(id) {
         try {
+            console.log('删除个人存钱计划:', id)
+
             // 确保业务数据服务已初始化
             await businessDataService.init(this.currentUserId)
 
@@ -896,10 +1069,10 @@ class SavingService {
         } catch (error) {
             console.error('删除个人存钱计划失败:', error)
 
-            notificationService.showNotification('删除失败: ' + error.message, 'error')
+            notificationService.showNotification(error.message || '删除失败', 'error')
             return {
                 code: 500,
-                message: '删除失败: ' + error.message
+                message: error.message || '删除失败'
             }
         }
     }
@@ -910,8 +1083,16 @@ class SavingService {
      */
     async depositToPersonalSaving(planId, data) {
         try {
+            console.log('个人存钱 - 原始数据:', planId, data)
+
             // 确保业务数据服务已初始化
             await businessDataService.init(this.currentUserId)
+
+            const amount = parseFloat(data.amount) || 0
+
+            if (amount <= 0) {
+                throw new Error('存入金额必须大于0')
+            }
 
             // 获取当前计划
             const plans = await businessDataService.getSavingsPlans()
@@ -922,11 +1103,18 @@ class SavingService {
             }
 
             // 更新金额
-            const newAmount = (currentPlan.currentAmount || 0) + data.amount
+            const newAmount = (currentPlan.currentAmount || 0) + amount
+
+            if (newAmount > currentPlan.targetAmount) {
+                throw new Error(`存入金额不能超过目标金额，最多可存 ¥${currentPlan.targetAmount - (currentPlan.currentAmount || 0)}`)
+            }
+
             const updateData = {
                 currentAmount: newAmount,
                 updateTime: new Date().toISOString()
             }
+
+            console.log('个人存钱 - 处理后数据:', updateData)
 
             // 保存更新
             const result = await businessDataService.updateSavingsPlan(planId, updateData)
@@ -934,13 +1122,14 @@ class SavingService {
             // 计算进度
             const progress = Math.min(Math.round((newAmount / currentPlan.targetAmount) * 100), 100)
 
-            notificationService.showNotification(`成功存入 ¥${data.amount}`, 'success')
+            notificationService.showNotification(`成功存入 ¥${amount}`, 'success')
 
             return {
                 code: 200,
                 message: '存钱成功',
                 data: {
                     ...result,
+                    id: planId,
                     currentAmount: newAmount,
                     progress: progress,
                     completed: newAmount >= currentPlan.targetAmount
@@ -950,10 +1139,10 @@ class SavingService {
         } catch (error) {
             console.error('个人存钱失败:', error)
 
-            notificationService.showNotification('存钱失败: ' + error.message, 'error')
+            notificationService.showNotification(error.message || '存钱失败', 'error')
             return {
                 code: 500,
-                message: '存钱失败: ' + error.message
+                message: error.message || '存钱失败'
             }
         }
     }

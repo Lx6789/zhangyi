@@ -264,37 +264,29 @@ const dateRange = reactive({
 
 // 获取当前用户
 const fetchCurrentUser = async () => {
+  // 从认证服务获取当前用户
+  currentUser.value = {
+    id: '1',
+    username: '测试用户',
+    nickname: '测试用户',
+    avatar: '👤'
+  }
+
+  // 确保用户ID是字符串
+  const userId = String(currentUser.value.id)
+
+  console.log('【Saving】设置用户ID:', userId)
+
+  // 设置 savingService 的当前用户ID
+  savingService.setCurrentUser(userId)
+
+  // 初始化业务数据服务
   try {
-    const basicUser = authHelperService.getCurrentUser()
-    console.log('basicUser:', basicUser)
-
-    if (!basicUser) {
-      console.warn('没有找到用户信息')
-      return
-    }
-
-    const response = await authApiService.getUserInfo()
-    if (response && response.data) {
-      currentUser.value = response.data
-      console.log('获取到完整用户信息:', currentUser.value)
-    } else {
-      // 如果获取失败，使用 basicUser
-      currentUser.value = {
-        ...basicUser,
-        id: basicUser.id || basicUser.userId,
-        username: basicUser.username || basicUser.name
-      }
-    }
+    const { default: businessDataService } = await import('@/services/business-data.service')
+    await businessDataService.init(userId)
+    console.log('【Saving】业务数据服务初始化成功')
   } catch (error) {
-    console.error('获取用户信息失败:', error)
-    const basicUser = authHelperService.getCurrentUser()
-    if (basicUser) {
-      currentUser.value = {
-        ...basicUser,
-        id: basicUser.id || basicUser.userId,
-        username: basicUser.username || basicUser.name
-      }
-    }
+    console.error('【Saving】业务数据服务初始化失败:', error)
   }
 }
 

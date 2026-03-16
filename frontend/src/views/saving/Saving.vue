@@ -64,21 +64,6 @@
         @reset-form="resetForm"
     />
 
-    <!-- 好友选择器弹窗（仅用于多人存钱） -->
-    <FriendSelector
-        v-if="showFriendSelector"
-        :friends-list="friendsList"
-        :loading-friends="loadingFriends"
-        :selected-friends="selectedFriends"
-        :friend-search-keyword="friendSearchKeyword"
-        :filtered-friends="filteredFriends"
-        @update:friend-search-keyword="friendSearchKeyword = $event"
-        @toggle-select="toggleSelectFriend"
-        @confirm="confirmSelectFriends"
-        @close="showFriendSelector = false"
-        @go-to-add-friend="goToAddFriend"
-    />
-
     <!-- 多人存钱弹窗 -->
     <div v-if="showAddMoneyModal" class="add-money-modal" @click.self="showAddMoneyModal = false">
       <div class="add-money-content">
@@ -277,17 +262,18 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 
 // 导入子组件
 import PersonalSaving from './components/PersonalSaving.vue'
 import GroupSaving from './components/GroupSaving.vue'
 import SavingForm from './components/SavingForm.vue'
-import FriendSelector from './components/FriendSelector.vue'
 import PlanDetailModal from './components/PlanDetailModal.vue'
 
 // 导入服务
-import { savingService } from '@/services'
-import { notificationService } from '@/services'
+import { savingService, authService, authHelperService, notificationService } from '@/services'
+
+const router = useRouter()
 
 // ========== 状态定义 ==========
 // 存钱类型选项
@@ -351,13 +337,6 @@ const isOnline = ref(navigator.onLine)
 // 当前用户信息
 const currentUser = ref(null)
 
-// 好友选择器（用于多人存钱）
-const showFriendSelector = ref(false)
-const friendsList = ref([])
-const loadingFriends = ref(false)
-const friendSearchKeyword = ref('')
-const selectedFriends = ref([])
-
 // 多人存钱弹窗
 const showAddMoneyModal = ref(false)
 const showPlanDetailModal = ref(false)
@@ -395,15 +374,6 @@ const dateRange = reactive({
 const otherMembersInPlan = computed(() => {
   if (!planToLeave.value || !planToLeave.value.members) return []
   return planToLeave.value.members.filter(m => m.userId !== currentUser.value?.id)
-})
-
-const filteredFriends = computed(() => {
-  if (!friendSearchKeyword.value) return friendsList.value
-  const keyword = friendSearchKeyword.value.toLowerCase()
-  return friendsList.value.filter(friend =>
-      friend.nickname?.toLowerCase().includes(keyword) ||
-      friend.phone?.includes(keyword)
-  )
 })
 
 // ========== 工具函数 ==========
@@ -466,6 +436,99 @@ const calculateProgress = (current, target) => {
   return Math.min(Math.round(progress), 100)
 }
 
+// ========== 用户信息获取 ==========
+/**
+ * 从认证服务获取当前用户信息
+ */
+const fetchCurrentUser = async () => {
+  console.log('开始获取当前用户信息...')
+
+  // 1. 先从 localStorage 获取
+  const token = authHelperService.getToken()
+  const userFromStorage = authHelperService.getCurrentUser()
+
+  console.log('Token:', token ? '存在' : '不存在')
+  console.log('本地存储的用户信息:', userFromStorage)
+
+  if (!token) {
+    console.warn('用户未登录，准备跳转到登录页')
+    // 未登录，重定向到登录页
+    authHelperService.redirectToLogin(router)
+    return
+  }
+
+  if (userFromStorage && userFromStorage.id) {
+    console.log('从本地存储获取用户信息成功，用户ID:', userFromStorage.id)
+    currentUser.value = {
+      id: userFromStorage.id,
+      username: userFromStorage.username || userFromStorage.nickname || '用户',
+      avatar: userFromStorage.avatar || '👤'
+    }
+    return
+  }
+
+  // 2. 如果有token但没有用户信息，调用 getUserInfo 接口
+  console.log('本地无用户信息，尝试从API获取...')
+  await fetchUserInfoFromApi()
+}
+
+/**
+ * 从API获取用户信息
+ */
+const fetchUserInfoFromApi = async () => {
+  try {
+    console.log('调用 getUserInfo API...')
+    const response = await authService.getUserInfo()
+    console.log('getUserInfo 响应:', response)
+
+    if (response.code === 200 && response.data) {
+      const userData = response.data
+      console.log('获取用户信息成功:', userData)
+
+      // 尝试从不同字段获取用户ID
+      const userId = userData.id || userData.userId || userData.uid
+      const username = userData.username || userData.nickname || userData.name || '用户'
+
+      if (userId) {
+        currentUser.value = {
+          id: userId,
+          username: username,
+          avatar: userData.avatar || '👤'
+        }
+
+        // 保存到 authHelperService
+        authHelperService.saveAuthData(authHelperService.getToken(), {
+          id: userId,
+          username: username,
+          avatar: userData.avatar
+        })
+
+        console.log('用户信息已保存，用户ID:', userId)
+      } else {
+        console.error('API返回的用户数据中没有ID字段:', userData)
+        showNotification('获取用户信息失败：数据格式错误', 'error')
+      }
+    } else {
+      console.error('获取用户信息失败:', response?.message || '未知错误')
+      showNotification('获取用户信息失败，请重新登录', 'error')
+      // 跳转到登录页
+      setTimeout(() => {
+        authHelperService.redirectToLogin(router)
+      }, 1500)
+    }
+  } catch (error) {
+    console.error('获取用户信息异常:', error)
+    showNotification('获取用户信息失败: ' + (error.message || '网络错误'), 'error')
+  }
+}
+
+/**
+ * 显示通知
+ */
+const showNotification = (message, type = 'info') => {
+  notificationService.showNotification(message, type)
+}
+
 // ========== 表单相关方法 ==========
 const initForm = () => {
   Object.assign(form, {
@@ -500,14 +563,14 @@ const handleSubmitSuccess = (planData, action) => {
   if (action === 'create') {
     // 新增：添加到列表开头
     personalSavings.value.unshift(planData)
-    notificationService.showNotification('计划创建成功', 'success')
+    showNotification('计划创建成功', 'success')
   } else if (action === 'update') {
     // 更新：替换列表中对应的项
     const index = personalSavings.value.findIndex(p => p.id === planData.id)
     if (index !== -1) {
       personalSavings.value[index] = planData
     }
-    notificationService.showNotification('计划更新成功', 'success')
+    showNotification('计划更新成功', 'success')
   }
 
   // 重置编辑状态
@@ -528,55 +591,6 @@ const handleUpdatePlan = (updatedPlan) => {
   }
 }
 
-// ========== 用户信息 ==========
-const fetchCurrentUser = () => {
-  // 从认证服务获取当前用户
-  // 这里使用模拟数据
-  currentUser.value = {
-    id: '1',
-    username: '测试用户',
-    avatar: '👤'
-  }
-}
-
-// ========== 好友列表（多人存钱用）==========
-const loadFriendsList = () => {
-  // 空实现，实际使用时从API获取
-  friendsList.value = []
-}
-
-const toggleSelectFriend = (friend) => {
-  const index = selectedFriends.value.findIndex(f => f.friendId === friend.friendId)
-  if (index === -1) {
-    if (!form.members.some(m => m.friendId === friend.friendId && !m.isCreator)) {
-      selectedFriends.value.push({...friend, amount: 0, avatar: friend.avatar || friend.nickname?.charAt(0)})
-    }
-  } else {
-    selectedFriends.value.splice(index, 1)
-  }
-}
-
-const confirmSelectFriends = () => {
-  form.members = form.members.filter(m => m.isCreator)
-  selectedFriends.value.forEach(friend => {
-    form.members.push({
-      name: friend.nickname,
-      friendId: friend.friendId,
-      userId: friend.id,
-      amount: 0,
-      avatar: friend.avatar || friend.nickname?.charAt(0),
-      isCreator: false
-    })
-  })
-  showFriendSelector.value = false
-  friendSearchKeyword.value = ''
-}
-
-const goToAddFriend = () => {
-  showFriendSelector.value = false
-  // 可以跳转到添加好友页面
-}
-
 // ========== 加载数据方法 ==========
 const loadPersonalSavings = async () => {
   loading.value = true
@@ -585,11 +599,11 @@ const loadPersonalSavings = async () => {
     if (response.code === 200) {
       personalSavings.value = response.data || []
     } else {
-      notificationService.showNotification(response.message || '加载失败', 'error')
+      showNotification(response.message || '加载失败', 'error')
     }
   } catch (error) {
     console.error('加载个人存钱计划失败:', error)
-    notificationService.showNotification('加载失败: ' + error.message, 'error')
+    showNotification('加载失败: ' + error.message, 'error')
     personalSavings.value = []
   } finally {
     loading.value = false
@@ -603,7 +617,7 @@ const loadGroupSavings = async () => {
     if (response.code === 200) {
       groupSavings.value = response.data || []
     } else {
-      notificationService.showNotification(response.message || '加载多人计划失败', 'error')
+      showNotification(response.message || '加载多人计划失败', 'error')
     }
   } catch (error) {
     console.error('加载多人存钱计划失败:', error)
@@ -619,7 +633,6 @@ const switchSavingsType = (type) => {
   resetForm()
   if (type === 'group') {
     loadGroupSavings()
-    loadFriendsList()
   } else {
     loadPersonalSavings()
   }
@@ -672,7 +685,6 @@ const editGroupPlan = (plan) => {
   editingId.value = plan.id
   editingType.value = 'group'
   currentSavingsType.value = 'group'
-  selectedFriends.value = []
 
   scrollToForm()
 }
@@ -706,9 +718,9 @@ const handleDeletePlan = async () => {
         if (index !== -1) {
           personalSavings.value.splice(index, 1)
         }
-        notificationService.showNotification('删除成功', 'success')
+        showNotification('删除成功', 'success')
       } else {
-        notificationService.showNotification(response.message || '删除失败', 'error')
+        showNotification(response.message || '删除失败', 'error')
         return
       }
     } else {
@@ -720,9 +732,9 @@ const handleDeletePlan = async () => {
         if (index !== -1) {
           groupSavings.value.splice(index, 1)
         }
-        notificationService.showNotification('删除成功', 'success')
+        showNotification('删除成功', 'success')
       } else {
-        notificationService.showNotification(response.message || '删除失败', 'error')
+        showNotification(response.message || '删除失败', 'error')
         return
       }
     }
@@ -732,7 +744,7 @@ const handleDeletePlan = async () => {
 
   } catch (error) {
     console.error('删除失败:', error)
-    notificationService.showNotification('删除失败: ' + error.message, 'error')
+    showNotification('删除失败: ' + error.message, 'error')
   } finally {
     deleting.value = false
   }
@@ -763,9 +775,9 @@ const handleLeavePlan = async (newCreatorId) => {
       if (index !== -1) {
         groupSavings.value.splice(index, 1)
       }
-      notificationService.showNotification('退出成功', 'success')
+      showNotification('退出成功', 'success')
     } else {
-      notificationService.showNotification(response.message || '退出失败', 'error')
+      showNotification(response.message || '退出失败', 'error')
     }
 
     showLeaveConfirmModal.value = false
@@ -773,7 +785,7 @@ const handleLeavePlan = async (newCreatorId) => {
 
   } catch (error) {
     console.error('退出失败:', error)
-    notificationService.showNotification('退出失败: ' + error.message, 'error')
+    showNotification('退出失败: ' + error.message, 'error')
   } finally {
     leaving.value = false
   }
@@ -791,13 +803,13 @@ const openAddMoneyModal = (plan) => {
 
 const handleAddMoney = async () => {
   if (!addMoneyForm.memberId || !addMoneyForm.amount) {
-    notificationService.showNotification('请选择成员并输入金额', 'warning')
+    showNotification('请选择成员并输入金额', 'warning')
     return
   }
 
   const amount = parseFloat(addMoneyForm.amount)
   if (amount <= 0) {
-    notificationService.showNotification('金额必须大于0', 'warning')
+    showNotification('金额必须大于0', 'warning')
     return
   }
 
@@ -811,7 +823,7 @@ const handleAddMoney = async () => {
     })
 
     if (response.code === 200) {
-      notificationService.showNotification(`成功存入 ¥${amount}`, 'success')
+      showNotification(`成功存入 ¥${amount}`, 'success')
 
       // 刷新计划列表
       await loadGroupSavings()
@@ -821,11 +833,11 @@ const handleAddMoney = async () => {
       addMoneyForm.amount = ''
       addMoneyForm.note = ''
     } else {
-      notificationService.showNotification(response.message || '存钱失败', 'error')
+      showNotification(response.message || '存钱失败', 'error')
     }
   } catch (error) {
     console.error('存钱失败:', error)
-    notificationService.showNotification('存钱失败: ' + error.message, 'error')
+    showNotification('存钱失败: ' + error.message, 'error')
   } finally {
     submitting.value = false
   }
@@ -914,7 +926,7 @@ const searchRecordsByDate = async () => {
     }
   } catch (error) {
     console.error('搜索记录失败:', error)
-    notificationService.showNotification('搜索失败', 'error')
+    showNotification('搜索失败', 'error')
     filteredRecords.value = []
     totalRecords.value = 0
   } finally {
@@ -938,20 +950,20 @@ const changePage = (page) => {
 // ========== 网络状态 ==========
 const handleOnline = () => {
   isOnline.value = true
-  notificationService.showNotification('网络已连接', 'success')
+  showNotification('网络已连接', 'success')
 }
 
 const handleOffline = () => {
   isOnline.value = false
-  notificationService.showNotification('网络已断开，当前处于离线模式', 'warning')
+  showNotification('网络已断开，当前处于离线模式', 'warning')
 }
 
 // ========== 生命周期 ==========
 onMounted(async () => {
-  fetchCurrentUser()
+  console.log('Saving组件挂载，开始初始化...')
+  await fetchCurrentUser()  // 先获取用户信息
   initForm()
   await loadPersonalSavings()
-  loadFriendsList()
 
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
@@ -962,8 +974,11 @@ onUnmounted(() => {
   window.removeEventListener('offline', handleOffline)
 })
 
-watch(() => currentUser.value, () => {
-  loadPersonalSavings()
+watch(() => currentUser.value, (newUser) => {
+  console.log('当前用户信息更新:', newUser)
+  if (newUser?.id) {
+    loadPersonalSavings()
+  }
 })
 
 watch(selectedMemberForRecords, () => {
