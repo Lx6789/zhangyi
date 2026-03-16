@@ -726,6 +726,9 @@ const submitForm = async () => {
           ...submitData,
           id: props.editingId
         }, 'update')
+
+        // 成功后重置表单
+        resetForm()
       } else {
         notificationService.showNotification(response.message || '更新失败', 'error')
         return
@@ -740,18 +743,24 @@ const submitForm = async () => {
 
       if (response.code === 200 && response.data) {
         notificationService.showNotification('计划创建成功', 'success')
-        emit('submit-success', {
+
+        // 构建完整的计划数据返回给父组件
+        const planData = {
           ...submitData,
-          id: response.data.id || Date.now()
-        }, 'create')
+          id: response.data.id,
+          // 确保包含后端返回的完整数据
+          ...response.data
+        }
+
+        emit('submit-success', planData, 'create')
+
+        // 成功后重置表单
+        resetForm()
       } else {
         notificationService.showNotification(response.message || '创建失败', 'error')
         return
       }
     }
-
-    // 成功后重置表单
-    resetForm()
 
   } catch (error) {
     console.error('提交失败:', error)

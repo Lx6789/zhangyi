@@ -1,4 +1,4 @@
-package org.lx.config.security;
+package org.lx.config;
 
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
 import org.apache.ibatis.reflection.MetaObject;
@@ -41,7 +41,11 @@ public class MyMetaObjectHandler implements MetaObjectHandler {
         this.setFieldValByName("updatedAt", now, metaObject);
         this.setFieldValByName("updateAt", now, metaObject);
 
-        // 注意：deletedAt 是在逻辑删除时填充，不是在普通更新时填充
-        // 所以这里不设置 deletedAt
+        // 检查是否有 deleted 字段被设置为 1（即将被逻辑删除）
+        Object deleted = this.getFieldValByName("deleted", metaObject);
+        if (deleted != null && (deleted.equals(1) || deleted.equals(1L))) {
+            // 如果 deleted 被设置为 1，则自动填充 deleted_at
+            this.setFieldValByName("deletedAt", now, metaObject);
+        }
     }
 }

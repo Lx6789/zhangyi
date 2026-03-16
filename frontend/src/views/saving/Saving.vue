@@ -559,16 +559,26 @@ const scrollToForm = async () => {
 }
 
 // ========== 处理表单提交成功 ==========
-const handleSubmitSuccess = (planData, action) => {
+const handleSubmitSuccess = async (planData, action) => {
   if (action === 'create') {
-    // 新增：添加到列表开头
-    personalSavings.value.unshift(planData)
+    if (currentSavingsType.value === 'personal') {
+      // 个人存钱：添加到列表开头
+      personalSavings.value.unshift(planData)
+    } else {
+      // 多人存钱：重新加载列表以获取最新数据
+      await loadGroupSavings()
+    }
     showNotification('计划创建成功', 'success')
   } else if (action === 'update') {
-    // 更新：替换列表中对应的项
-    const index = personalSavings.value.findIndex(p => p.id === planData.id)
-    if (index !== -1) {
-      personalSavings.value[index] = planData
+    if (currentSavingsType.value === 'personal') {
+      // 个人存钱：替换列表中对应的项
+      const index = personalSavings.value.findIndex(p => p.id === planData.id)
+      if (index !== -1) {
+        personalSavings.value[index] = planData
+      }
+    } else {
+      // 多人存钱：重新加载列表以获取最新数据
+      await loadGroupSavings()
     }
     showNotification('计划更新成功', 'success')
   }
