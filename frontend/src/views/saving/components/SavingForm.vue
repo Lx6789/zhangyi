@@ -110,10 +110,10 @@
             </button>
           </div>
 
-          <!-- 成员列表 -->
-          <div class="members-list" v-if="form.members && form.members.length > 0">
+          <!-- 成员列表 - 只显示未删除的成员 -->
+          <div class="members-list" v-if="displayMembers.length > 0">
             <div
-                v-for="(member, index) in form.members"
+                v-for="(member, index) in displayMembers"
                 :key="member.userId || index"
                 class="member-item-form"
                 :class="{ 'creator-item': member.isCreator }"
@@ -209,7 +209,7 @@
       </div>
     </form>
 
-    <!-- 好友选择器弹窗（直接放在 SavingForm 中管理） -->
+    <!-- 好友选择器弹窗 -->
     <FriendSelector
         v-model:visible="showFriendSelector"
         :initial-selected="selectedFriends"
@@ -239,7 +239,6 @@ const props = defineProps({
       currentAmount: '',
       deadline: '',
       type: '日常储蓄'
-      // 注意：个人模式没有 members 字段
     })
   },
   isEditing: {
@@ -315,12 +314,12 @@ const form = reactive({
   currentAmount: '',
   deadline: getDefaultDeadline(),
   type: '日常储蓄',
-  members: [] // 仅在多人模式下使用
+  members: [] // 仅在多人模式下使用，包含所有成员（包括已删除的）
 })
 
-// 好友选择器状态 - 直接在 SavingForm 中管理
+// 好友选择器状态
 const showFriendSelector = ref(false)
-const selectedFriends = ref([]) // 暂存选中的好友，用于传递给 FriendSelector
+const selectedFriends = ref([])
 
 // 提交状态
 const submitting = ref(false)
@@ -328,7 +327,7 @@ const submitting = ref(false)
 // 验证错误
 const validationError = ref('')
 
-// 获取今天日期（用于日期选择器的最小值）
+// 获取今天日期
 const today = computed(() => {
   const date = new Date()
   return date.toISOString().split('T')[0]
@@ -339,11 +338,29 @@ const currentAmountPlaceholder = computed(() => {
   return props.isEditing ? '当前已存金额' : '留空则默认为0'
 })
 
-// 计算总已存金额（多人模式）
+// ========== 软删除相关计算属性 ==========
+/**
+ * 获取要显示的成员列表（过滤掉已删除的）
+ */
+const displayMembers = computed(() => {
+  if (props.currentSavingsType !== 'group') return []
+  return form.members.filter(m => m.deleted !== 1)
+})
+
+/**
+ * 获取活跃成员列表（用于计算总金额）
+ */
+const activeMembers = computed(() => {
+  if (props.currentSavingsType !== 'group') return []
+  return form.members.filter(m => m.deleted !== 1)
+})
+
+/**
+ * 计算总已存金额（只计算未删除的成员）
+ */
 const totalCurrentAmount = computed(() => {
   if (props.currentSavingsType !== 'group') return '0'
-  if (!form.members || form.members.length === 0) return '0'
-  const total = form.members.reduce((sum, member) => {
+  const total = activeMembers.value.reduce((sum, member) => {
     const amount = Number(member.amount) || 0
     return sum + amount
   }, 0)
@@ -352,16 +369,10 @@ const totalCurrentAmount = computed(() => {
 
 // 表单是否有效
 const isFormValid = computed(() => {
-  // 目标金额必须有值且大于0
   if (!form.targetAmount || form.targetAmount <= 0) return false
-
-  // 名称不能为空
   if (!form.name.trim()) return false
-
-  // 截止日期不能为空
   if (!form.deadline) return false
 
-  // 个人模式：验证已存金额
   if (props.currentSavingsType === 'personal') {
     if (form.currentAmount !== '' && form.currentAmount !== null) {
       const current = Number(form.currentAmount)
@@ -371,9 +382,8 @@ const isFormValid = computed(() => {
     return true
   }
 
-  // 多人模式：必须有成员
   if (props.currentSavingsType === 'group') {
-    if (!form.members || form.members.length === 0) return false
+    if (activeMembers.value.length === 0) return false
   }
 
   return true
@@ -389,44 +399,43 @@ const submitButtonText = computed(() => {
 // 监听初始表单数据变化
 watch(() => props.initialForm, (newVal) => {
   if (newVal && Object.keys(newVal).length > 0) {
-    // 基础字段赋值
     form.name = newVal.name || ''
     form.reason = newVal.reason || ''
     form.targetAmount = newVal.targetAmount || ''
     form.deadline = newVal.deadline || getDefaultDeadline()
     form.type = newVal.type || '日常储蓄'
 
-    // 个人模式：处理 currentAmount
     if (props.currentSavingsType === 'personal') {
       form.currentAmount = newVal.currentAmount !== undefined ? newVal.currentAmount : ''
-      form.members = [] // 清空成员列表
+      form.members = []
     }
 
-    // 多人模式：处理成员数据
     if (props.currentSavingsType === 'group') {
-      form.currentAmount = '' // 个人存金额在多人模式下不使用
+      form.currentAmount = ''
       if (newVal.members) {
+        // 保留所有成员（包括已删除的）
         form.members = newVal.members.map(m => ({
           ...m,
-          amount: m.amount || 0
+          amount: m.amount || 0,
+          deleted: m.deleted || 0,
+          deletedAt: m.deletedAt || null
         }))
+        ensureCreatorInMembers()
       } else {
         form.members = []
-        // 确保创建者在成员列表中
         ensureCreatorInMembers()
       }
     }
   }
-}, { immediate: true, deep: true })
+}, {immediate: true, deep: true})
 
-// 监听当前金额变化，验证是否超过目标金额（个人模式）
+// 监听金额变化
 watch(() => form.currentAmount, () => {
   if (props.currentSavingsType === 'personal') {
     validateAmounts()
   }
 })
 
-// 监听目标金额变化（所有模式都需要验证）
 watch(() => form.targetAmount, () => {
   validateAmounts()
 })
@@ -434,13 +443,11 @@ watch(() => form.targetAmount, () => {
 // 监听存钱类型变化
 watch(() => props.currentSavingsType, (newType) => {
   if (newType === 'group' && !props.isEditing) {
-    // 新增多人计划时，自动添加当前用户作为创建者
     ensureCreatorInMembers()
   } else if (newType === 'personal') {
-    // 切换到个人模式时，清空成员数据
     form.members = []
   }
-})
+}, { immediate: true })
 
 // ========== 方法 ==========
 // 验证金额
@@ -460,8 +467,7 @@ const validateAmounts = () => {
       validationError.value = ''
     }
   } else if (props.currentSavingsType === 'group') {
-    // 多人模式：验证成员金额总和
-    const total = form.members.reduce((sum, m) => sum + (Number(m.amount) || 0), 0)
+    const total = activeMembers.value.reduce((sum, m) => sum + (Number(m.amount) || 0), 0)
     const target = Number(form.targetAmount) || 0
     if (target > 0 && total > target) {
       validationError.value = '成员已存金额总和不能大于目标金额'
@@ -471,38 +477,60 @@ const validateAmounts = () => {
   }
 }
 
-// 更新总金额（触发计算属性更新）- 仅多人模式使用
+// 更新总金额
 const updateTotalAmount = () => {
   validateAmounts()
 }
 
-// 确保创建者在成员列表中 - 仅多人模式使用
+/**
+ * 确保创建者在成员列表中
+ */
 const ensureCreatorInMembers = () => {
   if (props.currentSavingsType !== 'group') return
   if (!props.currentUser || !props.currentUser.id) return
 
-  const hasCreator = form.members.some(m => m.isCreator)
+  const hasActiveCreator = activeMembers.value.some(m => m.isCreator)
 
-  if (!hasCreator) {
-    form.members.unshift({
-      userId: parseInt(props.currentUser.id),
-      name: props.currentUser.username || '我',
-      avatar: props.currentUser.avatar,
-      amount: 0,
-      isCreator: true
-    })
+  if (!hasActiveCreator) {
+    const deletedCreator = form.members.find(m => m.isCreator && m.deleted === 1)
+    if (deletedCreator) {
+      console.log('【SavingForm】恢复已删除的创建者:', deletedCreator.name)
+      deletedCreator.deleted = 0
+      deletedCreator.deletedAt = null
+      deletedCreator.userId = parseInt(props.currentUser.id)
+      deletedCreator.name = props.currentUser.username || '我'
+      deletedCreator.avatar = props.currentUser.avatar
+    } else {
+      console.log('【SavingForm】添加新的创建者:', props.currentUser.username || '我')
+      const creatorMember = {
+        userId: parseInt(props.currentUser.id),
+        name: props.currentUser.username || '我',
+        avatar: props.currentUser.avatar,
+        amount: 0,
+        isCreator: true,
+        deleted: 0,
+        deletedAt: null
+      }
+      form.members.unshift(creatorMember)
+    }
+  } else {
+    const creator = form.members.find(m => m.isCreator)
+    if (creator && creator.deleted === 1) {
+      console.log('【SavingForm】修复创建者删除状态')
+      creator.deleted = 0
+      creator.deletedAt = null
+    }
   }
 }
 
 /**
- * 打开好友选择器 - 直接在 SavingForm 中处理
+ * 打开好友选择器
  */
 const openFriendSelector = () => {
   if (props.currentSavingsType !== 'group') return
 
-  // 如果是编辑模式，从 form.members 中取出非创建者的成员作为已选中的好友
   if (props.isEditing && form.members.length > 0) {
-    selectedFriends.value = form.members
+    selectedFriends.value = activeMembers.value
         .filter(m => !m.isCreator)
         .map(m => ({
           friendId: m.friendId || m.userId,
@@ -514,30 +542,34 @@ const openFriendSelector = () => {
     selectedFriends.value = []
   }
 
-  // 直接显示好友选择器
   showFriendSelector.value = true
 }
 
 /**
- * 处理好友确认选择 - 从 FriendSelector 接收选中的好友
- * @param {Array} selected - 选中的好友列表
+ * 处理好友确认选择
  */
 const handleFriendConfirm = (selected) => {
   console.log('从 FriendSelector 接收选中的好友:', selected)
 
-  // 清空现有非创建者成员
-  form.members = form.members.filter(m => m.isCreator)
+  // 保存原有的创建者
+  const existingCreator = form.members.find(m => m.isCreator)
+
+  // 清空现有非创建者成员（只保留创建者）
+  if (existingCreator) {
+    form.members = [existingCreator]
+    console.log('【SavingForm】保留创建者:', existingCreator.name)
+  } else {
+    form.members = []
+  }
 
   // 添加选中的好友
   selected.forEach(friend => {
-    // 验证数据
     if (!friend.userId || !friend.friendId) {
       console.error('好友数据不完整:', friend)
       notificationService.showNotification(`好友 ${friend.name || friend.nickname} 信息不完整`, 'error')
       return
     }
 
-    // 确保 userId 是数字且在 Integer 范围内
     const userId = parseInt(friend.userId)
     if (isNaN(userId) || userId <= 0 || userId > 2147483647) {
       console.error('userId 无效:', friend.userId)
@@ -545,7 +577,6 @@ const handleFriendConfirm = (selected) => {
       return
     }
 
-    // friendId 也应该是数字
     const friendId = parseInt(friend.friendId)
     if (isNaN(friendId) || friendId <= 0) {
       console.error('friendId 无效:', friend.friendId)
@@ -553,27 +584,96 @@ const handleFriendConfirm = (selected) => {
       return
     }
 
-    form.members.push({
-      userId: userId,                    // users 表的 id
-      friendId: friendId,                 // friends 表的 id
-      name: friend.name || friend.nickname || `用户${userId}`,
-      avatar: friend.avatar,
-      phone: friend.phone,                // 手机号仅用于显示
-      amount: 0,
-      isCreator: false
-    })
+    const existingMember = form.members.find(m => m.userId === userId)
+
+    if (existingMember) {
+      if (existingMember.deleted === 1) {
+        existingMember.deleted = 0
+        existingMember.deletedAt = null
+        existingMember.name = friend.name || friend.nickname || `用户${userId}`
+        existingMember.avatar = friend.avatar
+        existingMember.phone = friend.phone
+        existingMember.friendId = friendId
+        console.log('已恢复之前删除的成员:', {
+          userId,
+          name: existingMember.name,
+          deleted: existingMember.deleted,
+          deletedAt: existingMember.deletedAt
+        })
+      }
+    } else {
+      form.members.push({
+        userId: userId,
+        friendId: friendId,
+        name: friend.name || friend.nickname || `用户${userId}`,
+        avatar: friend.avatar,
+        phone: friend.phone,
+        amount: 0,
+        isCreator: false,
+        deleted: 0,
+        deletedAt: null
+      })
+      console.log('【SavingForm】添加新成员:', friend.name || friend.nickname)
+    }
   })
+
+  // 确保创建者存在且状态正确
+  if (existingCreator) {
+    const currentCreator = form.members.find(m => m.isCreator)
+    if (!currentCreator) {
+      form.members.unshift(existingCreator)
+      console.log('【SavingForm】创建者被意外移除，已重新添加')
+    } else if (currentCreator.deleted === 1) {
+      currentCreator.deleted = 0
+      currentCreator.deletedAt = null
+      console.log('【SavingForm】恢复被标记删除的创建者')
+    }
+  } else {
+    ensureCreatorInMembers()
+  }
 
   showFriendSelector.value = false
 }
 
-// 移除成员 - 仅多人模式使用
+/**
+ * 移除成员 - 软删除
+ */
 const removeMember = (index) => {
-  form.members.splice(index, 1)
+  const memberToRemove = displayMembers.value[index]
+
+  if (memberToRemove.isCreator) {
+    console.warn('【SavingForm】不能删除创建者')
+    notificationService.showNotification('不能删除计划创建者', 'warning')
+    return
+  }
+
+  const realIndex = form.members.findIndex(m =>
+      m.userId === memberToRemove.userId &&
+      m.isCreator === memberToRemove.isCreator
+  )
+
+  if (realIndex !== -1) {
+    if (form.members[realIndex].deleted === 1) {
+      console.log('【SavingForm】成员已经是删除状态，无需重复操作')
+      return
+    }
+
+    const now = new Date().toISOString()
+    form.members[realIndex].deleted = 1
+    form.members[realIndex].deletedAt = now
+
+    console.log('成员已标记为删除:', {
+      userId: form.members[realIndex].userId,
+      name: form.members[realIndex].name,
+      deleted: form.members[realIndex].deleted,
+      deletedAt: form.members[realIndex].deletedAt
+    })
+  }
+
   validateAmounts()
 }
 
-// 初始化表单（用于新增模式）
+// 初始化表单
 const initForm = () => {
   form.name = ''
   form.reason = ''
@@ -601,9 +701,8 @@ const resetToAdd = () => {
   resetForm()
 }
 
-// 提交表单
+// ========== 提交表单 ==========
 const submitForm = async () => {
-  // 验证表单
   if (!form.name.trim()) {
     validationError.value = '请输入存钱目标名称'
     return
@@ -619,17 +718,17 @@ const submitForm = async () => {
     return
   }
 
-  // 多人模式：验证是否有成员
-  if (props.currentSavingsType === 'group' && (!form.members || form.members.length === 0)) {
-    validationError.value = '请至少添加一位成员'
-    return
+  if (props.currentSavingsType === 'group') {
+    ensureCreatorInMembers()
+    if (activeMembers.value.length === 0) {
+      validationError.value = '请至少添加一位成员'
+      return
+    }
   }
 
-  // 处理金额 - 个人模式
   let finalCurrentAmount = 0
 
   if (props.currentSavingsType === 'personal') {
-    // 个人模式：使用输入的值
     if (props.isEditing) {
       finalCurrentAmount = form.currentAmount !== '' && form.currentAmount !== null
           ? Number(form.currentAmount)
@@ -640,18 +739,15 @@ const submitForm = async () => {
           : 0
     }
 
-    // 验证已存金额是否超过目标金额
     if (finalCurrentAmount > Number(form.targetAmount)) {
       validationError.value = '已存金额不能大于目标金额'
       return
     }
   }
 
-  // 处理金额 - 多人模式
   let submitData = {}
 
   if (props.currentSavingsType === 'personal') {
-    // 个人模式提交数据
     submitData = {
       name: form.name.trim(),
       reason: form.reason?.trim() || '',
@@ -665,20 +761,47 @@ const submitForm = async () => {
       completed: finalCurrentAmount >= Number(form.targetAmount)
     }
   } else {
-    // 多人模式提交数据
-    const totalAmount = form.members.reduce((sum, member) => {
+    ensureCreatorInMembers()
+
+    const hasCreator = activeMembers.value.some(m => m.isCreator)
+    if (!hasCreator) {
+      console.error('【SavingForm】提交时发现没有创建者，添加当前用户')
+      const creatorMember = {
+        userId: parseInt(props.currentUser.id),
+        name: props.currentUser.username || '我',
+        avatar: props.currentUser.avatar,
+        amount: 0,
+        isCreator: true,
+        deleted: 0,
+        deletedAt: null
+      }
+      form.members.unshift(creatorMember)
+    }
+
+    const creatorIndex = form.members.findIndex(m => m.isCreator)
+    if (creatorIndex !== -1 && form.members[creatorIndex].deleted === 1) {
+      console.log('【SavingForm】提交时发现创建者被标记为删除，恢复创建者')
+      form.members[creatorIndex].deleted = 0
+      form.members[creatorIndex].deletedAt = null
+    }
+
+    const totalAmount = activeMembers.value.reduce((sum, member) => {
       return sum + (Number(member.amount) || 0)
     }, 0)
 
-    // 验证总金额是否超过目标金额
     if (totalAmount > Number(form.targetAmount)) {
       validationError.value = '成员已存金额总和不能大于目标金额'
       return
     }
 
+    const creator = form.members.find(m => m.isCreator)
+    const now = new Date().toISOString()
+
+    // 关键：发送所有成员（包括已删除的）给后端
     submitData = {
       name: form.name.trim(),
       reason: form.reason?.trim() || '',
+      description: form.reason?.trim() || '',
       targetAmount: Number(form.targetAmount),
       currentAmount: totalAmount,
       deadline: form.deadline,
@@ -687,25 +810,31 @@ const submitForm = async () => {
       color: getColorByType(form.type),
       progress: calculateProgress(totalAmount, Number(form.targetAmount)),
       completed: totalAmount >= Number(form.targetAmount),
+      creatorId: creator ? creator.userId : parseInt(props.currentUser.id),
       members: form.members.map(m => ({
         userId: m.userId,
-        friendId: m.friendId,  // 添加 friendId
         name: m.name,
-        avatar: m.avatar,
         amount: Number(m.amount) || 0,
-        isCreator: m.isCreator || false
+        isCreator: m.isCreator || false,
+        deleted: m.deleted === 1 ? 1 : 0,
+        deletedAt: m.deleted === 1 ? (m.deletedAt || now) : null
       }))
     }
 
-    // 设置创建者ID
-    const creator = form.members.find(m => m.isCreator)
-    if (creator) {
-      submitData.creatorId = creator.userId
-      submitData.creatorName = creator.name
-    }
+    console.log('【SavingForm】多人模式提交数据:', {
+      name: submitData.name,
+      targetAmount: submitData.targetAmount,
+      creatorId: submitData.creatorId,
+      memberCount: submitData.members.length,
+      members: submitData.members.map(m => ({
+        name: m.name,
+        isCreator: m.isCreator,
+        deleted: m.deleted,
+        deletedAt: m.deletedAt
+      }))
+    })
   }
 
-  // 验证通过，开始提交
   validationError.value = ''
   submitting.value = true
 
@@ -713,58 +842,66 @@ const submitForm = async () => {
     let response
 
     if (props.isEditing) {
-      // 编辑模式
       if (props.currentSavingsType === 'personal') {
         response = await savingService.updatePersonalSavings(props.editingId, submitData)
       } else {
         response = await savingService.updateGroupSavings(props.editingId, submitData)
       }
 
-      if (response.code === 200) {
+      console.log('【SavingForm】编辑响应:', response)
+
+      if (response && response.code === 200) {
         notificationService.showNotification('计划更新成功', 'success')
         emit('submit-success', {
           ...submitData,
           id: props.editingId
         }, 'update')
-
-        // 成功后重置表单
         resetForm()
       } else {
-        notificationService.showNotification(response.message || '更新失败', 'error')
+        const errorMsg = response?.message || response?.msg || '更新失败'
+        notificationService.showNotification(errorMsg, 'error')
         return
       }
     } else {
-      // 新增模式
       if (props.currentSavingsType === 'personal') {
         response = await savingService.createPersonalSavings(submitData)
       } else {
+        console.log('【SavingForm】调用创建多人计划服务，数据:', submitData)
         response = await savingService.createGroupSavings(submitData)
       }
 
-      if (response.code === 200 && response.data) {
-        notificationService.showNotification('计划创建成功', 'success')
+      console.log('【SavingForm】创建响应:', response)
 
-        // 构建完整的计划数据返回给父组件
+      if (response && response.code === 200 && response.data) {
+        notificationService.showNotification('计划创建成功', 'success')
         const planData = {
           ...submitData,
           id: response.data.id,
-          // 确保包含后端返回的完整数据
           ...response.data
         }
-
         emit('submit-success', planData, 'create')
-
-        // 成功后重置表单
         resetForm()
       } else {
-        notificationService.showNotification(response.message || '创建失败', 'error')
+        const errorMsg = response?.message || response?.msg || '创建失败'
+        notificationService.showNotification(errorMsg, 'error')
         return
       }
     }
 
   } catch (error) {
-    console.error('提交失败:', error)
-    notificationService.showNotification('操作失败，请重试', 'error')
+    console.error('【SavingForm】提交失败:', error)
+
+    if (error.response) {
+      const status = error.response.status
+      const errorMsg = error.response.data?.message || error.response.data?.msg || `请求失败 (${status})`
+      notificationService.showNotification(errorMsg, 'error')
+    } else if (error.request) {
+      notificationService.showNotification('服务器无响应，请检查网络连接', 'error')
+    } else if (error.message) {
+      notificationService.showNotification(error.message, 'error')
+    } else {
+      notificationService.showNotification('操作失败，请重试', 'error')
+    }
   } finally {
     submitting.value = false
   }
@@ -779,6 +916,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 样式保持不变，与之前相同 */
 .add-savings-form {
   background-color: var(--white);
   border-radius: 20px;
@@ -891,7 +1029,6 @@ onMounted(() => {
   flex: 1;
 }
 
-/* 输入提示 */
 .input-hint {
   font-size: 12px;
   color: var(--text-light);
@@ -906,7 +1043,6 @@ onMounted(() => {
   color: var(--accent-color);
 }
 
-/* 成员管理区域 */
 .members-section {
   margin-top: 20px;
   margin-bottom: 20px;
@@ -1108,7 +1244,6 @@ onMounted(() => {
   margin: 0;
 }
 
-/* 验证错误提示 */
 .validation-error {
   background-color: #fee;
   color: #e74c3c;
@@ -1126,7 +1261,6 @@ onMounted(() => {
   font-size: 16px;
 }
 
-/* 表单操作按钮 */
 .form-actions {
   display: flex;
   gap: 15px;
@@ -1171,7 +1305,6 @@ onMounted(() => {
   background-color: rgba(128, 164, 146, 0.2);
 }
 
-/* 响应式设计 */
 @media (max-width: 768px) {
   .form-row {
     flex-direction: column;

@@ -72,7 +72,7 @@
                 <img :src="friend.avatar || defaultAvatar" alt="avatar">
               </div>
               <div class="friend-info">
-                <div class="friend-name">{{ friend.nickname }}</div>
+                <div class="friend-name">{{ friend.nickname || friend.name }}</div>
                 <div class="friend-phone">{{ friend.phone }}</div>
                 <div class="friend-time">添加于: {{ formatDate(friend.addTime) }}</div>
               </div>
@@ -101,6 +101,7 @@
                 @click="requestsTab = 'received'"
             >
               收到的申请
+              <span v-if="pendingRequestsCount > 0" class="badge-small">{{ pendingRequestsCount }}</span>
             </button>
             <button
                 class="sub-tab-btn"
@@ -123,10 +124,10 @@
                   <img :src="req.fromUserAvatar || defaultAvatar" alt="avatar">
                 </div>
                 <div class="request-info">
-                  <div class="request-name">{{ req.fromUserNickname }}</div>
+                  <div class="request-name">{{ req.fromUserNickname || req.fromUserName }}</div>
                   <div class="request-phone">{{ req.fromUserPhone }}</div>
                   <div v-if="req.message" class="request-message">留言：{{ req.message }}</div>
-                  <div class="request-time">{{ formatDate(req.createdAt) }}</div>
+                  <div class="request-time">{{ formatDate(req.createdAt || req.createTime) }}</div>
                 </div>
                 <div class="request-actions">
                   <button class="request-btn accept" @click="acceptRequest(req.id)" title="同意">
@@ -156,10 +157,10 @@
                   <img :src="req.toUserAvatar || defaultAvatar" alt="avatar">
                 </div>
                 <div class="request-info">
-                  <div class="request-name">{{ req.toUserNickname }}</div>
+                  <div class="request-name">{{ req.toUserNickname || req.toUserName }}</div>
                   <div class="request-phone">{{ req.toUserPhone }}</div>
                   <div v-if="req.message" class="request-message">留言：{{ req.message }}</div>
-                  <div class="request-time">{{ formatDate(req.createdAt) }}</div>
+                  <div class="request-time">{{ formatDate(req.createdAt || req.createTime) }}</div>
                 </div>
                 <div class="request-status">
                   <span :class="getStatusClass(req.status)">{{ getStatusText(req.status) }}</span>
@@ -197,6 +198,7 @@
                 type="text"
                 v-model="targetPhone"
                 placeholder="输入对方手机号"
+                @keyup.enter="handleSendRequest"
             >
           </div>
           <div class="form-group">
@@ -280,6 +282,7 @@ const filteredFriends = computed(() => {
   const keyword = searchKeyword.value.toLowerCase()
   return friends.value.filter(friend =>
       friend.nickname?.toLowerCase().includes(keyword) ||
+      friend.name?.toLowerCase().includes(keyword) ||
       friend.phone?.includes(keyword)
   )
 })
@@ -299,14 +302,14 @@ const loadFriends = async (force = false) => {
 
   loading.value = true
   try {
-    // 使用修改后的 service，传入 force 参数
     const data = await friendsService.getFriendsList(force)
     friends.value = data || []
     friendsLoaded.value = true
-    console.log('好友列表加载完成')
+    console.log('好友列表加载完成，数量:', friends.value.length)
+    console.log('好友列表详情:', friends.value)
   } catch (error) {
     console.error('加载好友列表失败:', error)
-    // 错误时尝试从缓存获取（service 已经处理了，这里不用再处理）
+    friends.value = []
   } finally {
     loading.value = false
   }
@@ -322,11 +325,27 @@ const loadReceivedRequests = async (force = false) => {
 
   try {
     const data = await friendsService.getReceivedRequests()
-    receivedRequests.value = data || []
+    console.log('收到的申请原始数据:', data)
+
+    // 处理数据，兼容字段名
+    receivedRequests.value = (data || []).map(req => ({
+      id: req.id,
+      fromUserId: req.fromUserId,
+      fromUserPhone: req.fromUserPhone,
+      fromUserNickname: req.fromUserNickname,
+      fromUserName: req.fromUserName,
+      fromUserAvatar: req.fromUserAvatar,
+      message: req.message,
+      status: req.status,
+      createTime: req.createTime,
+      createdAt: req.createTime || req.createdAt,
+      ...req
+    }))
     receivedLoaded.value = true
-    console.log('收到的申请加载完成')
+    console.log('处理后的收到的申请:', receivedRequests.value)
   } catch (error) {
     console.error('加载收到的申请失败:', error)
+    receivedRequests.value = []
   }
 }
 
@@ -340,11 +359,27 @@ const loadSentRequests = async (force = false) => {
 
   try {
     const data = await friendsService.getSentRequests()
-    sentRequests.value = data || []
+    console.log('发出的申请原始数据:', data)
+
+    // 处理数据，映射字段名（后端返回 touserPhone，前端期望 toUserPhone）
+    sentRequests.value = (data || []).map(req => ({
+      id: req.id,
+      toUserId: req.touserId || req.toUserId,
+      toUserPhone: req.touserPhone || req.toUserPhone,
+      toUserNickname: req.touserNickname || req.toUserNickname,
+      toUserName: req.toUserName,
+      toUserAvatar: req.touserAvatar || req.toUserAvatar,
+      message: req.message,
+      status: req.status,
+      createTime: req.createTime,
+      createdAt: req.createTime || req.createdAt,
+      ...req
+    }))
     sentLoaded.value = true
-    console.log('发出的申请加载完成')
+    console.log('处理后的发出的申请:', sentRequests.value)
   } catch (error) {
     console.error('加载发出的申请失败:', error)
+    sentRequests.value = []
   }
 }
 
@@ -356,6 +391,8 @@ const loadAllRequests = async (force = false) => {
       loadReceivedRequests(force),
       loadSentRequests(force)
     ])
+  } catch (error) {
+    console.error('加载申请数据失败:', error)
   } finally {
     loadingRequests.value = false
   }
@@ -371,6 +408,7 @@ const handleRefresh = async () => {
     if (currentTab.value === 'friends') {
       await loadFriends(true)
     } else {
+      // 刷新申请数据时，同时刷新收到的和发出的
       await loadAllRequests(true)
     }
     notificationService.showNotification('数据已刷新', 'success')
@@ -413,6 +451,9 @@ const handleSendRequest = async () => {
     // 发送成功后，强制重新加载发出的申请
     await loadSentRequests(true)
 
+    // 重置发出申请的加载标志
+    sentLoaded.value = true
+
     // 切换到申请列表标签页
     currentTab.value = 'requests'
     requestsTab.value = 'sent'
@@ -420,6 +461,7 @@ const handleSendRequest = async () => {
     notificationService.showNotification('好友申请已发送', 'success')
   } catch (error) {
     console.error('发送申请失败:', error)
+    notificationService.showNotification(error.message || '发送申请失败', 'error')
   } finally {
     sendingRequest.value = false
   }
@@ -427,6 +469,12 @@ const handleSendRequest = async () => {
 
 // 同意申请
 const acceptRequest = async (requestId) => {
+  if (!requestId) {
+    console.error('申请ID不存在')
+    notificationService.showNotification('申请ID不存在', 'error')
+    return
+  }
+
   try {
     await friendsService.acceptFriendRequest(requestId)
 
@@ -439,11 +487,18 @@ const acceptRequest = async (requestId) => {
     notificationService.showNotification('已同意好友申请', 'success')
   } catch (error) {
     console.error('同意申请失败:', error)
+    notificationService.showNotification(error.message || '同意申请失败', 'error')
   }
 }
 
 // 拒绝申请
 const rejectRequest = async (requestId) => {
+  if (!requestId) {
+    console.error('申请ID不存在')
+    notificationService.showNotification('申请ID不存在', 'error')
+    return
+  }
+
   try {
     await friendsService.rejectFriendRequest(requestId)
 
@@ -453,12 +508,13 @@ const rejectRequest = async (requestId) => {
     notificationService.showNotification('已拒绝好友申请', 'success')
   } catch (error) {
     console.error('拒绝申请失败:', error)
+    notificationService.showNotification(error.message || '拒绝申请失败', 'error')
   }
 }
 
 // 确认删除
 const confirmDelete = (friend) => {
-  if (confirm(`确定要删除好友 ${friend.nickname} 吗？`)) {
+  if (confirm(`确定要删除好友 ${friend.nickname || friend.name} 吗？`)) {
     handleDeleteFriend(friend)
   }
 }
@@ -474,6 +530,7 @@ const handleDeleteFriend = async (friend) => {
     notificationService.showNotification('删除好友成功', 'success')
   } catch (error) {
     console.error('删除好友失败:', error)
+    notificationService.showNotification(error.message || '删除好友失败', 'error')
   }
 }
 
@@ -502,11 +559,18 @@ const getStatusClass = (status) => {
 // 格式化日期
 const formatDate = (date) => {
   if (!date) return ''
-  const d = new Date(date)
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  try {
+    const d = new Date(date)
+    // 检查是否为有效日期
+    if (isNaN(d.getTime())) return date
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  } catch (error) {
+    console.error('日期格式化失败:', date, error)
+    return date
+  }
 }
 
 // 关闭主弹窗
@@ -533,10 +597,14 @@ const closeSubModalOnOverlay = (event) => {
 watch(() => props.visible, (newVal) => {
   console.log('FriendsModal visible changed:', newVal)
   if (newVal) {
-    console.log('首次打开，加载数据')
+    console.log('打开弹窗，加载数据')
     // 首次打开时加载所有数据（只加载未加载过的）
-    if (!friendsLoaded.value) loadFriends()
-    if (!receivedLoaded.value || !sentLoaded.value) loadAllRequests()
+    if (!friendsLoaded.value) {
+      loadFriends()
+    }
+    if (!receivedLoaded.value || !sentLoaded.value) {
+      loadAllRequests()
+    }
   }
 }, { immediate: true })
 
@@ -544,8 +612,12 @@ onMounted(() => {
   if (props.visible) {
     console.log('组件挂载时可见，加载数据')
     // 首次打开时加载所有数据（只加载未加载过的）
-    if (!friendsLoaded.value) loadFriends()
-    if (!receivedLoaded.value || !sentLoaded.value) loadAllRequests()
+    if (!friendsLoaded.value) {
+      loadFriends()
+    }
+    if (!receivedLoaded.value || !sentLoaded.value) {
+      loadAllRequests()
+    }
   }
 })
 </script>
@@ -740,6 +812,15 @@ onMounted(() => {
   font-size: 12px;
   padding: 2px 6px;
   border-radius: 10px;
+}
+
+.badge-small {
+  background-color: #f56c6c;
+  color: white;
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 10px;
+  margin-left: 5px;
 }
 
 /* ===== 好友操作区域 ===== */

@@ -177,33 +177,73 @@ class IndexedDBService {
                 // 14. 创建多人存钱计划缓存表
                 if (!db.objectStoreNames.contains('group_savings_cache')) {
                     const groupCacheStore = db.createObjectStore('group_savings_cache', { keyPath: 'id' })
+
+                    // 用户隔离索引
                     groupCacheStore.createIndex('userId', 'userId', { unique: false })
                     groupCacheStore.createIndex('createdBy', 'createdBy', { unique: false })
+
+                    groupCacheStore.createIndex('planName', 'planName', { unique: false })
+                    groupCacheStore.createIndex('reason', 'reason', {unique: false})
+                    groupCacheStore.createIndex('type', 'type', {unique: false})
+                    groupCacheStore.createIndex('color', 'color', {unique: false})
+                    groupCacheStore.createIndex('icon', 'icon', {unique: false})
+                    groupCacheStore.createIndex('creatorId', 'creatorId', {unique: false})
+                    groupCacheStore.createIndex('deadline', 'deadline', {unique: false})
+                    groupCacheStore.createIndex('creatAt', 'creatAt', {unique: false})
+
+                    // 状态索引
                     groupCacheStore.createIndex('status', 'status', { unique: false })
-                    groupCacheStore.createIndex('updateTime', 'updateTime', { unique: false })
-                    groupCacheStore.createIndex('cacheTime', 'cacheTime', { unique: false })
+
+                    // 时间索引
+                    groupCacheStore.createIndex('updateAt', 'updateAt', { unique: false })
+                    groupCacheStore.createIndex('cacheAt', 'cacheAt', { unique: false })
+
+                    // 金额相关索引
+                    groupCacheStore.createIndex('targetAmount', 'targetAmount', { unique: false }) // 目标金额索引
+                    groupCacheStore.createIndex('currentAmount', 'currentAmount', { unique: false }) // 当前金额索引
+
                     console.log('创建 group_savings_cache 表')
                 }
 
                 // 15. 创建成员缓存表
                 if (!db.objectStoreNames.contains('savings_members_cache')) {
                     const memberCacheStore = db.createObjectStore('savings_members_cache', { keyPath: 'id' })
+
+                    // 关联索引
                     memberCacheStore.createIndex('groupSavingId', 'groupSavingId', { unique: false })
                     memberCacheStore.createIndex('userId', 'userId', { unique: false })
-                    memberCacheStore.createIndex('isOwner', 'isOwner', { unique: false })
+                    memberCacheStore.createIndex('memberId', 'memberId', { unique: false }) //成员id
+
+                    // 成员属性索引
+                    memberCacheStore.createIndex('memberName', 'memberName', {unique: false})
+                    memberCacheStore.createIndex('isCreator', 'isCreator', { unique: false })
+                    memberCacheStore.createIndex('avatar', 'avatar', {unique: false})
+                    memberCacheStore.createIndex('amount', 'amount', {unique: false})
+                    memberCacheStore.createIndex('status', 'status', { unique: false }) // 成员状态（活跃/退出等）
+
+                    // 时间索引
                     memberCacheStore.createIndex('updateTime', 'updateTime', { unique: false })
                     memberCacheStore.createIndex('cacheTime', 'cacheTime', { unique: false })
+
                     console.log('创建 savings_members_cache 表')
                 }
 
                 // 16. 创建存钱记录缓存表
                 if (!db.objectStoreNames.contains('saving_deposit_records_cache')) {
                     const recordCacheStore = db.createObjectStore('saving_deposit_records_cache', { keyPath: 'id' })
+
+                    // 关联索引
                     recordCacheStore.createIndex('groupSavingId', 'groupSavingId', { unique: false })
                     recordCacheStore.createIndex('memberId', 'memberId', { unique: false })
-                    recordCacheStore.createIndex('userId', 'userId', { unique: false })
+                    recordCacheStore.createIndex('userId', 'userId', { unique: false }) // 用户隔离
+
+                    // 金额索引
+                    recordCacheStore.createIndex('amount', 'amount', { unique: false }) // 每次存储金额
+
+                    // 时间索引
                     recordCacheStore.createIndex('depositTime', 'depositTime', { unique: false })
                     recordCacheStore.createIndex('cacheTime', 'cacheTime', { unique: false })
+
                     console.log('创建 saving_deposit_records_cache 表')
                 }
 

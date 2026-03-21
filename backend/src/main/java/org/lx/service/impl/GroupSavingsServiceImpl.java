@@ -16,7 +16,6 @@ import org.lx.pojo.dto.*;
 import org.lx.pojo.vo.*;
 import org.lx.service.IGroupSavingsService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -111,7 +110,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
 
             // 插入并获取自动生成的ID
             groupSavingsMapper.insert(groupSavings);
-            Integer groupId = groupSavings.getId(); // 获取生成的ID
+            Integer groupId = groupSavings.getId();
 
             // 2.2 批量插入成员
             List<SavingsMembers> savingsMembersList = new ArrayList<>();
@@ -123,7 +122,9 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
                         .setIsOwner(member.getIsCreator())
                         .setJoinedAt(LocalDateTime.now())
                         .setUpdateAt(LocalDateTime.now())
-                        .setMemberName(user.getId() == member.getUserId() ? user.getUsername() : member.getName());
+                        .setMemberName(user.getId() == member.getUserId() ? user.getUsername() : member.getName())
+                        .setDeleted(0)  // 新成员默认未删除
+                        .setDeletedAt(null);
                 savingsMembersList.add(savingsMember);
             }
 
@@ -151,19 +152,11 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
             Integer userId = userUtil.getUserFromSecurityContext().getId();
 
             // 2. 查询用户参与的所有存钱组ID（包括已退出的）
-            // 注意：这里需要手动添加条件，因为 @TableLogic 会自动加 deleted=0
-            List<SavingsMembers> userMemberships = savingsMembersMapper.selectList(
-                    new LambdaQueryWrapper<SavingsMembers>()
-                            .eq(SavingsMembers::getUserId, userId)
-                            // 不添加 .eq(SavingsMembers::getDeleted, 0) 条件，但要手动处理
-                            .last("AND 1=1") // 这个技巧可以绕过 @TableLogic 吗？不一定
-                            .select(SavingsMembers::getGroupSavingId,
-                                    SavingsMembers::getDeleted,
-                                    SavingsMembers::getDeletedAt)
-            );
+            List<SavingsMembers> userMemberships = savingsMembersMapper.selectListWithDeletedByUserId(userId);
 
             // 如果用户没有参与任何存钱组，直接返回空列表
             if (userMemberships.isEmpty()) {
+                log.info("用户{}没有参与任何存钱计划", userId);
                 return RespBean.success(RespCode.SUCCESS, "查询成功", Collections.emptyList());
             }
 
@@ -172,23 +165,30 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
                     .map(SavingsMembers::getGroupSavingId)
                     .collect(Collectors.toSet());
 
+            log.info("用户{}参与的存钱计划ID列表: {}", userId, groupIds);
+
             // 4. 批量查询存钱计划详情（包括已删除的）
-            // 使用自定义查询绕过 @TableLogic
             List<GroupSavings> groupSavingsList = groupSavingsMapper.selectListWithDeleted(groupIds);
 
             if (groupSavingsList.isEmpty()) {
+                log.info("用户{}参与的存钱计划没有找到任何计划数据", userId);
                 return RespBean.success(RespCode.SUCCESS, "查询成功", Collections.emptyList());
             }
 
             // 5. 批量查询所有相关组成员信息（包括已删除的）
-            // 使用自定义查询绕过 @TableLogic
             List<SavingsMembers> allMembers = savingsMembersMapper.selectListWithDeleted(groupIds);
+
+            log.info("查询到的所有成员总数（包括已删除）: {}", allMembers.size());
+            for (SavingsMembers sm : allMembers) {
+                log.info("成员: groupId={}, userId={}, memberName={}, deleted={}, deletedAt={}",
+                        sm.getGroupSavingId(), sm.getUserId(), sm.getMemberName(), sm.getDeleted(), sm.getDeletedAt());
+            }
 
             // 6. 将成员信息按groupId分组
             Map<Integer, List<SavingsMembers>> membersByGroup = allMembers.stream()
                     .collect(Collectors.groupingBy(SavingsMembers::getGroupSavingId));
 
-            // 7. 组装返回数据
+            // 7. 组装返回数据（包含所有成员，包括已删除的）
             List<GroupSavingVO> groupSavingVOList = groupSavingsList.stream()
                     .map(group -> buildGroupSavingVOWithDeleteInfo(group, membersByGroup.getOrDefault(group.getId(), Collections.emptyList())))
                     .collect(Collectors.toList());
@@ -211,6 +211,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
     @Transactional(rollbackFor = Exception.class)
     @Override
     public RespBean updateSavingGroup(Integer id, GroupSavingRequestDTO groupSavingRequestDTO) {
+        //1.验证数据
         if (groupSavingRequestDTO == null) {
             return RespBean.error(RespCode.DATA_NOT_FOUND, "数据异常");
         }
@@ -228,134 +229,295 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
             return RespBean.error(RespCode.DATA_NOT_FOUND, "不是创建者不能修改计划");
         }
 
+        //修改数据、删除成员、新增成员、移回成员，修改三个表
         try {
-            // 3.1 查询现有成员（@TableLogic会自动处理deleted=0条件）
-            LambdaQueryWrapper<SavingsMembers> queryWrapper = new LambdaQueryWrapper<>();
-            queryWrapper.eq(SavingsMembers::getGroupSavingId, id);
-            List<SavingsMembers> existingMembers = savingsMembersMapper.selectList(queryWrapper);
+            //2.修改group_savings、savings_members
+            //2.1修改计划数据
+            LambdaUpdateWrapper<GroupSavings> updateWrapperToGroup = new LambdaUpdateWrapper<>();
+            updateWrapperToGroup.eq(GroupSavings::getId, id)
+                    .set(GroupSavings::getCurrentAmount, groupSavingRequestDTO.getCurrentAmount())
+                    .set(GroupSavings::getTargetAmount, groupSavingRequestDTO.getTargetAmount())
+                    .set(GroupSavings::getDeadline, groupSavingRequestDTO.getDeadline())
+                    .set(GroupSavings::getDescription, groupSavingRequestDTO.getDescription())
+                    .set(GroupSavings::getName, groupSavingRequestDTO.getName())
+                    .set(GroupSavings::getReason, groupSavingRequestDTO.getReason())
+                    .set(GroupSavings::getType, groupSavingRequestDTO.getType())
+                    .set(GroupSavings::getUpdatedAt, LocalDateTime.now());
 
-            // 创建现有成员Map方便查找
-            Map<Integer, SavingsMembers> existingMemberMap = existingMembers.stream()
-                    .collect(Collectors.toMap(SavingsMembers::getUserId, m -> m));
+            groupSavingsMapper.update(null, updateWrapperToGroup);
 
-            // 3.2 准备新成员列表
-            List<SavingsMembers> newMembersList = new ArrayList<>();
-            List<Integer> keepUserIds = new ArrayList<>();
-
-            for (GroupSavingMemberRequestDTO updateMember : groupSavingRequestDTO.getMembers()) {
-                if (usersMapper.selectById(updateMember.getUserId()) == null) {
-                    return RespBean.error(RespCode.DATA_NOT_FOUND, updateMember.getName() + "不存在");
-                }
-
-                keepUserIds.add(updateMember.getUserId());
-                SavingsMembers existingMember = existingMemberMap.get(updateMember.getUserId());
-
-                if (existingMember != null) {
-                    // 更新现有成员
-                    existingMember.setMemberName(updateMember.getName())
-                            .setAmount(updateMember.getAmount())
-                            .setIsOwner(updateMember.getIsCreator())
-                            .setUpdateAt(LocalDateTime.now());
-                    newMembersList.add(existingMember);
-                } else {
-                    // 添加新成员
-                    SavingsMembers newMember = new SavingsMembers();
-                    newMember.setGroupSavingId(id)
-                            .setUserId(updateMember.getUserId())
-                            .setMemberName(updateMember.getName())
-                            .setAmount(updateMember.getAmount())
-                            .setIsOwner(updateMember.getIsCreator())
-                            .setJoinedAt(LocalDateTime.now())
-                            .setUpdateAt(LocalDateTime.now());
-                    newMembersList.add(newMember);
-                }
-            }
-
-            // 3.3 软删除不存在的成员
-            List<Integer> existingUserIds = existingMembers.stream()
-                    .map(SavingsMembers::getUserId)
-                    .collect(Collectors.toList());
-
-            List<Integer> toDeleteUserIds = existingUserIds.stream()
-                    .filter(uid -> !keepUserIds.contains(uid))
-                    .collect(Collectors.toList());
-
-            if (!toDeleteUserIds.isEmpty()) {
-                // 3.3.1 软删除成员（使用delete方法，@TableLogic会自动转成update）
-                LambdaUpdateWrapper<SavingsMembers> updateWrapper = new LambdaUpdateWrapper<>();
-                updateWrapper.eq(SavingsMembers::getGroupSavingId, id)
-                        .in(SavingsMembers::getUserId, toDeleteUserIds)
-                        .set(SavingsMembers::getDeletedAt, LocalDateTime.now());
-                savingsMembersMapper.delete(new LambdaQueryWrapper<SavingsMembers>()
-                        .eq(SavingsMembers::getGroupSavingId, id)
-                        .in(SavingsMembers::getUserId, toDeleteUserIds));
-
-                // 3.3.2 软删除该成员的所有存款记录（使用delete方法，@TableLogic会自动转成update）
-                int deletedDepositCount = savingDepositRecordsMapper.delete(
-                        new LambdaQueryWrapper<SavingDepositRecords>()
-                                .eq(SavingDepositRecords::getGroupSavingId, id)
-                                .in(SavingDepositRecords::getUserId, toDeleteUserIds)
-                );
-
-                log.info("软删除了 {} 条存款记录，涉及用户IDs: {}", deletedDepositCount, toDeleteUserIds);
-
-                // 重新计算计划的当前总额（减去被删除用户的存款）
-                if (deletedDepositCount > 0) {
-                    recalculateGroupCurrentAmount(id);
-                }
-            }
-
-            // 3.4 批量插入新成员
-            List<SavingsMembers> insertList = newMembersList.stream()
-                    .filter(m -> m.getId() == null)
-                    .collect(Collectors.toList());
-            if (!insertList.isEmpty()) {
-                savingsMembersMapper.batchInsert(insertList);
-            }
-
-            // 3.5 批量更新现有成员
-            List<SavingsMembers> updateList = newMembersList.stream()
-                    .filter(m -> m.getId() != null)
-                    .collect(Collectors.toList());
-            for (SavingsMembers member : updateList) {
-                savingsMembersMapper.updateById(member);
-            }
-
-            // 4. 更新计划
-            groupSaving.setName(groupSavingRequestDTO.getName())
-                    .setReason(groupSavingRequestDTO.getReason())
-                    .setDescription(groupSavingRequestDTO.getDescription())
-                    .setDeadline(groupSavingRequestDTO.getDeadline())
-                    .setTargetAmount(groupSavingRequestDTO.getTargetAmount())
-                    .setCurrentAmount(groupSavingRequestDTO.getCurrentAmount())
-                    .setType(groupSavingRequestDTO.getType())
-                    .setUpdatedAt(LocalDateTime.now());
-            groupSavingsMapper.updateById(groupSaving);
-
-            // 5. 计算进度
-            int progress = groupSaving.getTargetAmount().compareTo(BigDecimal.ZERO) > 0
-                    ? groupSaving.getCurrentAmount().multiply(new BigDecimal(100))
-                    .divide(groupSaving.getTargetAmount(), 0, BigDecimal.ROUND_HALF_UP)
-                    .intValue()
-                    : 0;
-
-            // 6. 查询最终成员列表（@TableLogic会自动处理deleted=0条件）
-            List<SavingsMembers> finalMembers = savingsMembersMapper.selectList(
-                    new LambdaQueryWrapper<SavingsMembers>()
-                            .eq(SavingsMembers::getGroupSavingId, id)
+            // 重新查询更新后的计划数据
+            groupSaving = groupSavingsMapper.selectOne(
+                    new LambdaQueryWrapper<GroupSavings>()
+                            .eq(GroupSavings::getId, id)
             );
 
-            // 7. 组装响应
-            GroupSavingVO vo = buildGroupSavingVO(groupSaving, finalMembers);
-            vo.setProgress(progress);
+            //2.2修改成员表
+            //2.2.1查询旧的数据（使用自定义SQL，包括已删除的记录）
+            List<SavingsMembers> savingsMembersList = savingsMembersMapper.selectAllMembersByGroupId(id);
+
+            log.info("查询到的成员数量（包括已删除）: {}", savingsMembersList.size());
+            for (SavingsMembers sm : savingsMembersList) {
+                log.info("成员: id={}, userId={}, deleted={}, deletedAt={}",
+                        sm.getId(), sm.getUserId(), sm.getDeleted(), sm.getDeletedAt());
+            }
+
+            //2.2.2构建旧成员映射，key为userId，value为SavingsMembers
+            Map<Integer, SavingsMembers> existingMemberMap = new HashMap<>();
+            for (SavingsMembers sm : savingsMembersList) {
+                existingMemberMap.put(sm.getUserId(), sm);
+            }
+
+            // 记录前端传来的所有用户ID
+            Set<Integer> receivedUserIds = new HashSet<>();
+
+            //2.2.3处理成员数据
+            List<SavingsMembers> newSavingsMembersList = new ArrayList<>();
+            List<GroupSavingMemberVO> newGroupSavingMemberVOList = new ArrayList<>();
+            Set<Integer> deletedMemberIds = new HashSet<>();
+            LocalDateTime now = LocalDateTime.now();
+
+            for (GroupSavingMemberRequestDTO member : groupSavingRequestDTO.getMembers()) {
+                // 记录前端传来的用户ID
+                receivedUserIds.add(member.getUserId());
+
+                SavingsMembers existingMember = existingMemberMap.get(member.getUserId());
+                SavingsMembers newSavingsMember = new SavingsMembers();
+
+                if (existingMember != null) {
+                    // 已存在的成员（包括已删除的），设置ID和原有的加入时间
+                    newSavingsMember.setId(existingMember.getId())
+                            .setJoinedAt(existingMember.getJoinedAt());
+
+                    // 根据删除状态变化处理 deletedAt
+                    if (member.getDeleted() == 1) {
+                        // 新删除：设置当前时间
+                        newSavingsMember.setDeletedAt(now);
+                        newSavingsMember.setDeleted(1);
+                        log.info("成员将被删除: userId={}, deletedAt={}", member.getUserId(), now);
+                    } else if (existingMember.getDeleted() == 1 && member.getDeleted() == 0) {
+                        // 恢复：清空删除时间
+                        newSavingsMember.setDeletedAt(null);
+                        newSavingsMember.setDeleted(0);
+                        log.info("成员将被恢复: userId={}, deletedAt清空", member.getUserId());
+                    } else {
+                        // 其他情况：保持原值
+                        newSavingsMember.setDeletedAt(existingMember.getDeletedAt());
+                        newSavingsMember.setDeleted(member.getDeleted());
+                        log.info("成员状态不变: userId={}, deleted={}, deletedAt={}",
+                                member.getUserId(), member.getDeleted(), existingMember.getDeletedAt());
+                    }
+
+                    log.info("找到已存在的成员: userId={}, 原deleted={}, 新deleted={}, 原deletedAt={}, 新deletedAt={}",
+                            member.getUserId(), existingMember.getDeleted(), newSavingsMember.getDeleted(),
+                            existingMember.getDeletedAt(), newSavingsMember.getDeletedAt());
+                } else {
+                    // 新成员，ID为null，加入时间为当前时间
+                    newSavingsMember.setJoinedAt(now)
+                            .setDeletedAt(null)
+                            .setDeleted(0);  // 新成员默认未删除
+                    log.info("新成员: userId={}, deleted=0, deletedAt=null", member.getUserId());
+                }
+
+                newSavingsMember.setGroupSavingId(id)
+                        .setUserId(member.getUserId())
+                        .setMemberName(member.getName())
+                        .setAmount(member.getAmount())
+                        .setIsOwner(member.getIsCreator())
+                        .setUpdateAt(now);
+
+                newSavingsMembersList.add(newSavingsMember);
+
+                // 记录需要删除存款记录的成员ID（已存在且被软删除的成员）
+                if (existingMember != null && newSavingsMember.getDeleted() == 1) {
+                    deletedMemberIds.add(existingMember.getId());
+                }
+
+                // 构建VO
+                GroupSavingMemberVO vo = new GroupSavingMemberVO();
+                vo.setId(newSavingsMember.getId())
+                        .setUserId(newSavingsMember.getUserId())
+                        .setMemberName(newSavingsMember.getMemberName())
+                        .setAmount(newSavingsMember.getAmount())
+                        .setJoinTime(newSavingsMember.getJoinedAt())
+                        .setIsCreator(newSavingsMember.getIsOwner())
+                        .setDeleted(newSavingsMember.getDeleted())
+                        .setDeletedAt(newSavingsMember.getDeletedAt());
+                newGroupSavingMemberVOList.add(vo);
+            }
+
+            // 处理在前端被移除的成员（不在前端列表中的成员）
+            for (SavingsMembers existingMember : savingsMembersList) {
+                // 跳过创建者（创建者不能被软删除）
+                if (existingMember.getIsOwner()) {
+                    log.info("跳过创建者: userId={}", existingMember.getUserId());
+                    continue;
+                }
+
+                // 如果成员不在前端传来的列表中，且当前未被删除，则标记为软删除
+                if (!receivedUserIds.contains(existingMember.getUserId()) && existingMember.getDeleted() == 0) {
+                    log.info("成员不在前端列表中，将被软删除: userId={}, memberName={}",
+                            existingMember.getUserId(), existingMember.getMemberName());
+
+                    // 标记为已删除
+                    existingMember.setDeleted(1);
+                    existingMember.setDeletedAt(now);
+                    existingMember.setUpdateAt(now);
+
+                    // 添加到更新列表
+                    newSavingsMembersList.add(existingMember);
+
+                    // 记录需要删除存款记录的成员ID
+                    deletedMemberIds.add(existingMember.getId());
+
+                    // 构建VO
+                    GroupSavingMemberVO vo = new GroupSavingMemberVO();
+                    vo.setId(existingMember.getId())
+                            .setUserId(existingMember.getUserId())
+                            .setMemberName(existingMember.getMemberName())
+                            .setAmount(existingMember.getAmount())
+                            .setJoinTime(existingMember.getJoinedAt())
+                            .setIsCreator(existingMember.getIsOwner())
+                            .setDeleted(1)
+                            .setDeletedAt(now);
+                    newGroupSavingMemberVOList.add(vo);
+                }
+            }
+
+            //2.2.4修改或插入成员
+            for (SavingsMembers savingsMembers : newSavingsMembersList) {
+                if (savingsMembers.getId() != null) {
+                    // 有ID，说明是已存在的成员
+                    if (savingsMembers.getDeleted() == 1) {
+                        // ========== 关键修改：使用 UpdateWrapper 直接更新，同时设置 deleted 和 deleted_at ==========
+                        // 确保 deletedAt 有值（如果之前没有设置，现在设置）
+                        if (savingsMembers.getDeletedAt() == null) {
+                            savingsMembers.setDeletedAt(LocalDateTime.now());
+                        }
+
+                        // 使用 UpdateWrapper 直接更新，绕过 @TableLogic 的自动处理
+                        LambdaUpdateWrapper<SavingsMembers> deleteWrapper = new LambdaUpdateWrapper<>();
+                        deleteWrapper.eq(SavingsMembers::getId, savingsMembers.getId())
+                                .set(SavingsMembers::getDeleted, 1)
+                                .set(SavingsMembers::getDeletedAt, savingsMembers.getDeletedAt())
+                                .set(SavingsMembers::getUpdateAt, LocalDateTime.now());
+
+                        int deleteResult = savingsMembersMapper.update(null, deleteWrapper);
+
+                        if (deleteResult > 0) {
+                            log.info("软删除成员成功: id={}, userId={}, deletedAt={}",
+                                    savingsMembers.getId(),
+                                    savingsMembers.getUserId(),
+                                    savingsMembers.getDeletedAt());
+                        } else {
+                            log.warn("软删除成员失败: id={}, userId={}",
+                                    savingsMembers.getId(),
+                                    savingsMembers.getUserId());
+                            // 如果更新失败，抛出异常触发事务回滚
+                            throw new RuntimeException("软删除成员失败: id=" + savingsMembers.getId());
+                        }
+                    } else {
+                        // 更新成员信息（包括将已删除的成员恢复）
+                        LambdaUpdateWrapper<SavingsMembers> updateWrapper = new LambdaUpdateWrapper<>();
+                        updateWrapper.eq(SavingsMembers::getId, savingsMembers.getId())
+                                .set(SavingsMembers::getMemberName, savingsMembers.getMemberName())
+                                .set(SavingsMembers::getAmount, savingsMembers.getAmount())
+                                .set(SavingsMembers::getIsOwner, savingsMembers.getIsOwner())
+                                .set(SavingsMembers::getUpdateAt, LocalDateTime.now())
+                                .set(SavingsMembers::getDeleted, savingsMembers.getDeleted())
+                                .set(SavingsMembers::getDeletedAt, savingsMembers.getDeletedAt());
+
+                        int updateResult = savingsMembersMapper.update(null, updateWrapper);
+
+                        if (updateResult > 0) {
+                            log.info("更新成员成功: id={}, userId={}, deleted={}, deletedAt={}",
+                                    savingsMembers.getId(),
+                                    savingsMembers.getUserId(),
+                                    savingsMembers.getDeleted(),
+                                    savingsMembers.getDeletedAt());
+                        } else {
+                            log.warn("更新成员失败: id={}, userId={}",
+                                    savingsMembers.getId(),
+                                    savingsMembers.getUserId());
+                            // 如果更新失败，尝试强制更新（作为备选方案）
+                            int forceResult = savingsMembersMapper.forceUpdate(savingsMembers);
+                            if (forceResult > 0) {
+                                log.info("强制更新成员成功: id={}, userId={}, deleted={}, deletedAt={}",
+                                        savingsMembers.getId(),
+                                        savingsMembers.getUserId(),
+                                        savingsMembers.getDeleted(),
+                                        savingsMembers.getDeletedAt());
+                            } else {
+                                throw new RuntimeException("更新成员失败: id=" + savingsMembers.getId());
+                            }
+                        }
+                    }
+                } else {
+                    // 没有ID，说明是新成员
+                    savingsMembersMapper.insert(savingsMembers);
+                    log.info("插入新成员: userId={}, name={}, deletedAt={}",
+                            savingsMembers.getUserId(),
+                            savingsMembers.getMemberName(),
+                            savingsMembers.getDeletedAt());
+
+                    // 插入后，MyBatis-Plus会自动回填ID，需要更新VO中的ID
+                    for (GroupSavingMemberVO vo : newGroupSavingMemberVOList) {
+                        if (vo.getUserId().equals(savingsMembers.getUserId())) {
+                            vo.setId(savingsMembers.getId());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            //2.3修改存款记录：只标记被软删除的成员的存款记录
+            if (!deletedMemberIds.isEmpty()) {
+                LambdaUpdateWrapper<SavingDepositRecords> updateWrapperToSavingDepositRecords = new LambdaUpdateWrapper<>();
+                updateWrapperToSavingDepositRecords.eq(SavingDepositRecords::getGroupSavingId, id)
+                        .in(SavingDepositRecords::getMemberId, deletedMemberIds)
+                        .set(SavingDepositRecords::getDeleted, 1)
+                        .set(SavingDepositRecords::getDeletedAt, LocalDateTime.now());
+
+                savingDepositRecordsMapper.update(null, updateWrapperToSavingDepositRecords);
+                log.info("标记存款记录为删除: 计划ID={}, 成员ID列表={}", id, deletedMemberIds);
+            }
+
+            //3计算进度
+            int progress = 0;
+            if (groupSaving.getTargetAmount() != null &&
+                    groupSaving.getTargetAmount().compareTo(BigDecimal.ZERO) > 0) {
+                progress = groupSaving.getCurrentAmount()
+                        .multiply(new BigDecimal(100))
+                        .divide(groupSaving.getTargetAmount(), 0, BigDecimal.ROUND_HALF_UP)
+                        .intValue();
+            }
+
+            // 4. 组装响应
+            GroupSavingVO vo = new GroupSavingVO();
+            vo.setId(id)
+                    .setName(groupSaving.getName())
+                    .setDescription(groupSaving.getDescription())
+                    .setReason(groupSaving.getReason())
+                    .setTargetAmount(groupSaving.getTargetAmount())
+                    .setCurrentAmount(groupSaving.getCurrentAmount())
+                    .setDeadline(groupSaving.getDeadline())
+                    .setType(groupSaving.getType())
+                    .setProgress(progress)
+                    .setStatus(groupSaving.getStatus())
+                    .setCreatorId(groupSaving.getCreatedBy())
+                    .setCreateTime(groupSaving.getCreatedAt())
+                    .setUpdateTime(groupSaving.getUpdatedAt())
+                    .setMembers(newGroupSavingMemberVOList)
+                    .setDeleted(groupSaving.getDeleted())
+                    .setDeletedAt(groupSaving.getDeletedAt());
 
             return RespBean.success(RespCode.SUCCESS, "修改成功", vo);
+
         } catch (Exception e) {
-            log.error("修改多人存钱计划失败", e);
+            log.error("修改多人存钱计划失败 - 计划ID: {}, 错误信息: {}", id, e.getMessage(), e);
             return RespBean.error(RespCode.DATA_NOT_FOUND, "修改失败: " + e.getMessage());
         }
     }
-
 
     /**
      * 存钱
@@ -366,7 +528,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
     @Transactional(rollbackFor = Exception.class)
     @Override
     public RespBean deposit(Integer id, DepositDTO depositDTO) {
-        //1.查询计划是否存在且未删除（@TableLogic会自动处理deleted=0条件）
+        //1.查询计划是否存在且未删除
         GroupSavings groupSavings = groupSavingsMapper.selectOne(
                 new LambdaQueryWrapper<GroupSavings>()
                         .eq(GroupSavings::getId, id)
@@ -375,7 +537,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
             return RespBean.error(RespCode.DATA_NOT_FOUND, "计划不存在或已删除");
         }
 
-        //2.查询成员是否存在且未删除（@TableLogic会自动处理deleted=0条件）
+        //2.查询成员是否存在且未删除
         SavingsMembers savingsMember = savingsMembersMapper.selectOne(
                 new LambdaQueryWrapper<SavingsMembers>()
                         .eq(SavingsMembers::getGroupSavingId, id)
@@ -459,7 +621,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
         //1.判断用户是否是计划的创建者
         Integer userId = userUtil.getUserFromSecurityContext().getId();
 
-        //根据用户id和计划id查询对应的存钱成员信息（@TableLogic会自动处理deleted=0条件）
+        //根据用户id和计划id查询对应的存钱成员信息
         LambdaQueryWrapper<SavingsMembers> quWrapper = new LambdaQueryWrapper<>();
         quWrapper.eq(SavingsMembers::getGroupSavingId, id)
                 .eq(SavingsMembers::getUserId, userId);
@@ -472,7 +634,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
             return RespBean.error(RespCode.DATA_NOT_FOUND, "不是创建者不能删除计划");
         }
 
-        //2.软删除对应计划（使用delete方法，@TableLogic会自动转成update）
+        //2.软删除对应计划
         try {
             // 删除所有成员（会自动逻辑删除）
             savingsMembersMapper.delete(new LambdaQueryWrapper<SavingsMembers>()
@@ -513,7 +675,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
                 return RespBean.error(RespCode.DATA_NOT_FOUND, "新的创建者不存在");
             }
 
-            //2.2查询新的创建者是否是存钱计划的一员（@TableLogic会自动处理deleted=0条件）
+            //2.2查询新的创建者是否是存钱计划的一员
             LambdaQueryWrapper<SavingsMembers> queryWrapperToFindMember = new LambdaQueryWrapper<>();
             queryWrapperToFindMember.eq(SavingsMembers::getGroupSavingId, id)
                     .eq(SavingsMembers::getUserId, savingGroupLeaveDTO.getNewCreatorId());
@@ -572,7 +734,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
         if (groupSaving == null) {
             return RespBean.error(RespCode.DATA_NOT_FOUND, "没有该计划");
         }
-        //2.根据计划id获取成员（@TableLogic会自动处理deleted=0条件）
+        //2.根据计划id获取成员
         LambdaQueryWrapper<SavingsMembers> queryWrapperToGetMember = new LambdaQueryWrapper<>();
         queryWrapperToGetMember.eq(SavingsMembers::getGroupSavingId, id);
         List<SavingsMembers> savingsMembersList = savingsMembersMapper.selectList(queryWrapperToGetMember);
@@ -606,7 +768,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
         // 2. 成员筛选 - 获取成员记录ID（包含已退出的成员）
         Integer memberRecordId = null;
         if (groupRecordsQueryDTO.getMemberId() != null) {
-            // 🔴 使用自定义方法查询成员，包含已退出的
+            // 使用自定义方法查询成员，包含已退出的
             SavingsMembers savingsMember = savingsMembersMapper.selectMemberIncludeDeleted(
                     groupSaving.getId(),
                     groupRecordsQueryDTO.getMemberId()
@@ -707,7 +869,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
      */
     @Override
     public RespBean getGroupRecordsForMember(Integer planId, Integer memberId) {
-        //1.查询计划是否存在且未删除（@TableLogic会自动处理deleted=0条件）
+        //1.查询计划是否存在且未删除
         GroupSavings groupSaving = groupSavingsMapper.selectOne(
                 new LambdaQueryWrapper<GroupSavings>()
                         .eq(GroupSavings::getId, planId)
@@ -789,40 +951,6 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
     }
 
     /**
-     * 应用时间范围筛选
-     */
-    private void applyTimeRangeFilter(LambdaQueryWrapper<SavingDepositRecords> wrapper, GroupRecordsQueryDTO dto) {
-        boolean hasStartTime = dto.getStartTime() != null && !dto.getStartTime().isEmpty();
-        boolean hasEndTime = dto.getEndTime() != null && !dto.getEndTime().isEmpty();
-
-        log.info("时间筛选条件: hasStartTime={}, hasEndTime={}, startTime={}, endTime={}",
-                hasStartTime, hasEndTime, dto.getStartTime(), dto.getEndTime());
-
-        try {
-            if (hasStartTime && hasEndTime) {
-                LocalDateTime start = LocalDate.parse(dto.getStartTime()).atStartOfDay();
-                LocalDateTime end = LocalDate.parse(dto.getEndTime()).atTime(LocalTime.MAX);
-
-                log.info("时间范围查询: {} 到 {}", start, end);
-
-                wrapper.between(SavingDepositRecords::getDepositTime, start, end);
-            } else if (hasStartTime) {
-                LocalDateTime start = LocalDate.parse(dto.getStartTime()).atStartOfDay();
-                log.info("开始时间之后: {}", start);
-                wrapper.ge(SavingDepositRecords::getDepositTime, start);
-            } else if (hasEndTime) {
-                LocalDateTime end = LocalDate.parse(dto.getEndTime()).atTime(LocalTime.MAX);
-                log.info("结束时间之前: {}", end);
-                wrapper.le(SavingDepositRecords::getDepositTime, end);
-            } else {
-                log.info("没有时间筛选条件");
-            }
-        } catch (Exception e) {
-            log.error("时间参数解析失败: startTime={}, endTime={}", dto.getStartTime(), dto.getEndTime(), e);
-        }
-    }
-
-    /**
      * 将 SavingDepositRecords 实体转换为 SavingRecordVO
      */
     private SavingRecordVO convertToVO(SavingDepositRecords record) {
@@ -870,27 +998,6 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
     }
 
     /**
-     * 重新计算计划的当前总额
-     */
-    private void recalculateGroupCurrentAmount(Integer groupId) {
-        // 查询所有未被删除的存款记录的总和（@TableLogic会自动处理deleted=0条件）
-        BigDecimal totalAmount = savingDepositRecordsMapper.selectObjs(
-                        new LambdaQueryWrapper<SavingDepositRecords>()
-                                .eq(SavingDepositRecords::getGroupSavingId, groupId)
-                                .select(SavingDepositRecords::getAmount)
-                ).stream()
-                .map(amount -> (BigDecimal) amount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        // 更新计划的当前金额
-        GroupSavings groupSaving = new GroupSavings();
-        groupSaving.setId(groupId)
-                .setCurrentAmount(totalAmount)
-                .setUpdatedAt(LocalDateTime.now());
-        groupSavingsMapper.updateById(groupSaving);
-    }
-
-    /**
      * 将 SavingDepositRecords 实体转换为 GroupRecordsVO（包含删除信息）
      */
     private GroupRecordsVO convertToGroupRecordsVOWithDeleteInfo(SavingDepositRecords record) {
@@ -904,8 +1011,8 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
                 .setMemberName(record.getMemberName())
                 .setAmount(record.getAmount())
                 .setNote(record.getNote())
-                .setDeleted(record.getDeleted())      // 设置删除状态
-                .setDeletedAt(record.getDeletedAt()); // 设置删除时间
+                .setDeleted(record.getDeleted())
+                .setDeletedAt(record.getDeletedAt());
 
         if (record.getDepositTime() != null) {
             vo.setCreateTime(record.getDepositTime());
@@ -933,8 +1040,8 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
                 .setCreatorId(group.getCreatedBy())
                 .setCreateTime(group.getCreatedAt())
                 .setUpdateTime(group.getUpdatedAt())
-                .setDeleted(group.getDeleted())      // 新增：计划删除状态
-                .setDeletedAt(group.getDeletedAt()); // 新增：计划删除时间
+                .setDeleted(group.getDeleted())
+                .setDeletedAt(group.getDeletedAt());
 
         // 设置成员列表（包含删除信息）
         List<GroupSavingMemberVO> memberVOs = members.stream()
@@ -970,8 +1077,8 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
                 .setJoinTime(member.getJoinedAt())
                 .setMemberName(member.getMemberName())
                 .setIsCreator(member.getIsOwner())
-                .setDeleted(member.getDeleted())      // 新增：成员删除状态
-                .setDeletedAt(member.getDeletedAt()); // 新增：成员删除时间
+                .setDeleted(member.getDeleted())
+                .setDeletedAt(member.getDeletedAt());
     }
 
     /**
@@ -992,7 +1099,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
         vo.setNote(record.getNote());
         vo.setDepositTime(record.getDepositTime());
 
-        // 🔴 关键：手动设置软删除字段
+        // 关键：手动设置软删除字段
         vo.setDeleted(record.getDeleted());
         vo.setDeletedAt(record.getDeletedAt());
 

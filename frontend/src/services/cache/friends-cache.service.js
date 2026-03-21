@@ -1,6 +1,6 @@
 // services/friends-cache.service.js
-import indexedDBService from './db/indexed-db.service.js'
-import userDataService from './user-data.service.js'
+import indexedDBService from '../db/indexed-db.service.js'
+import userDataService from '../user-data.service.js'
 
 /**
  * 好友缓存服务

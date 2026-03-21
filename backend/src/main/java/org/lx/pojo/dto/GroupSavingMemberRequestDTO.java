@@ -29,8 +29,8 @@ public class GroupSavingMemberRequestDTO {
     private BigDecimal amount;
     @ApiModelProperty(value = "用户id")
     private Integer userId;
-    @ApiModelProperty(value = "好友id")
-    private Integer friendId;
     @ApiModelProperty(value = "是否为创建者")
     private Boolean isCreator;
+    @ApiModelProperty(value = "是否被删除")
+    private Integer deleted;
 }

@@ -567,7 +567,6 @@ import {
   authService,
   authHelperService,
   notificationService,
-
 } from '@/services'
 
 import validationService from "@/services/utils/validation.service.js";
@@ -852,6 +851,22 @@ export default {
 
           // 同时保存一份到旧的键名，兼容现有代码
           localStorage.setItem('token', token)
+
+          // ✅ 关键修复：设置 savingService 的当前用户ID
+          const userId = user?.id || responseData.userId
+          if (userId) {
+            // 动态导入 savingService 避免循环依赖
+            import('@/services/api/saving.service').then(module => {
+              const savingService = module.default
+              savingService.setCurrentUser(userId)
+              console.log('【登录】设置 savingService 用户ID:', userId)
+            }).catch(err => {
+              console.error('【登录】导入 savingService 失败:', err)
+            })
+
+            // 也保存到 localStorage 备用
+            localStorage.setItem('userId', userId)
+          }
 
           // 记住我功能
           if (rememberMe) {

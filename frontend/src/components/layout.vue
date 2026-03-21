@@ -148,7 +148,7 @@ import { useRouter } from 'vue-router'
 import { authHelperService } from '@/services/index.js'
 import businessDataService from '@/services/business-data.service.js'
 import notificationService from "@/services/utils/notification.service.js";
-import friendsCacheService from '@/services/friends-cache.service.js'
+import friendsCacheService from '@/services/cache/friends-cache.service.js'
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import SavingRecordsModal from '@/components/sidebar/SavingRecordsModal.vue'
 

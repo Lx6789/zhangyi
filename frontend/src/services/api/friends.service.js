@@ -1,7 +1,7 @@
 // services/friends.service.js
 import notificationService from '@/services/utils/notification.service.js'
 import * as friendsApi from '@/api/friends'
-import friendsCacheService from '@/services/friends-cache.service.js'
+import friendsCacheService from '@/services/cache/friends-cache.service.js'
 
 class FriendsService {
     /**
@@ -19,15 +19,24 @@ class FriendsService {
             }
 
             console.log('从 API 获取好友列表')
+            // 注意：http-interceptor 已经返回了 res.data，所以这里 response 直接就是数据
             const response = await friendsApi.getFriendsList()
 
-            // 处理不同的响应格式
+            // 处理数据（http-interceptor 已经处理了 code=200 的情况，所以这里 data 就是好友列表）
             let friendsList = []
-            if (response && response.code === 200) {
-                friendsList = response.data || []
-            } else if (Array.isArray(response)) {
+
+            // 兼容多种返回格式
+            if (Array.isArray(response)) {
                 friendsList = response
+            } else if (response && Array.isArray(response.data)) {
+                friendsList = response.data
+            } else if (response && response.list && Array.isArray(response.list)) {
+                friendsList = response.list
+            } else if (response && response.data && response.data.list) {
+                friendsList = response.data.list
             }
+
+            console.log('好友列表原始数据:', friendsList)
 
             // 根据后端 FriendsVO 映射字段
             const processedList = friendsList.map(friend => ({
@@ -49,8 +58,8 @@ class FriendsService {
 
             console.log('处理后的好友列表:', processedList.map(f => ({
                 id: f.id,
-                userId: f.userId,        // 用户ID（来自friendId）
-                friendId: f.friendId,     // 好友关系ID
+                userId: f.userId,
+                friendId: f.friendId,
                 nickname: f.nickname,
                 phone: f.phone
             })))
@@ -65,10 +74,14 @@ class FriendsService {
             console.error('获取好友列表失败:', error)
 
             // 尝试从缓存获取
-            const cachedFriends = await friendsCacheService.getFriendsList()
-            if (cachedFriends && cachedFriends.length > 0) {
-                console.log('使用缓存的好友列表（API失败）')
-                return cachedFriends
+            try {
+                const cachedFriends = await friendsCacheService.getFriendsList()
+                if (cachedFriends && cachedFriends.length > 0) {
+                    console.log('使用缓存的好友列表（API失败）')
+                    return cachedFriends
+                }
+            } catch (cacheError) {
+                console.error('读取缓存失败:', cacheError)
             }
 
             return []
@@ -105,10 +118,24 @@ class FriendsService {
     async getReceivedRequests() {
         try {
             const response = await friendsApi.getReceivedRequests()
-            if (response && response.code === 200) {
-                return response.data || []
+            console.log('getReceivedRequests API返回:', response)
+
+            // 处理不同的数据格式
+            let requests = []
+
+            // 兼容多种返回格式
+            if (Array.isArray(response)) {
+                requests = response
+            } else if (response && Array.isArray(response.data)) {
+                requests = response.data
+            } else if (response && response.list && Array.isArray(response.list)) {
+                requests = response.list
+            } else if (response && response.data && response.data.list) {
+                requests = response.data.list
             }
-            return []
+
+            console.log('处理后的收到申请列表:', requests)
+            return requests
         } catch (error) {
             console.error('获取收到的申请失败:', error)
             notificationService.showNotification(error.message || '获取好友申请失败', 'error')
@@ -122,10 +149,24 @@ class FriendsService {
     async getSentRequests() {
         try {
             const response = await friendsApi.getSentRequests()
-            if (response && response.code === 200) {
-                return response.data || []
+            console.log('getSentRequests API返回:', response)
+
+            // 处理不同的数据格式
+            let requests = []
+
+            // 兼容多种返回格式
+            if (Array.isArray(response)) {
+                requests = response
+            } else if (response && Array.isArray(response.data)) {
+                requests = response.data
+            } else if (response && response.list && Array.isArray(response.list)) {
+                requests = response.list
+            } else if (response && response.data && response.data.list) {
+                requests = response.data.list
             }
-            return []
+
+            console.log('处理后的发出申请列表:', requests)
+            return requests
         } catch (error) {
             console.error('获取发送的申请失败:', error)
             notificationService.showNotification(error.message || '获取好友申请失败', 'error')
@@ -140,6 +181,7 @@ class FriendsService {
     async acceptFriendRequest(requestId) {
         try {
             const data = await friendsApi.acceptFriendRequest(requestId)
+            console.log('同意好友申请成功:', data)
 
             // 同意成功后，刷新好友列表缓存
             await this.refreshFriendsList()
@@ -160,6 +202,7 @@ class FriendsService {
     async rejectFriendRequest(requestId) {
         try {
             const data = await friendsApi.rejectFriendRequest(requestId)
+            console.log('拒绝好友申请成功:', data)
             notificationService.showNotification('已拒绝好友申请', 'success')
             return data
         } catch (error) {
@@ -176,6 +219,7 @@ class FriendsService {
     async deleteFriend(friendId) {
         try {
             const data = await friendsApi.deleteFriend(friendId)
+            console.log('删除好友成功:', data)
 
             // 删除成功后，从缓存中移除
             await friendsCacheService.removeFriend(friendId)
@@ -186,6 +230,18 @@ class FriendsService {
             console.error('删除好友失败:', error)
             notificationService.showNotification(error.message || '删除好友失败', 'error')
             throw error
+        }
+    }
+
+    /**
+     * 清除所有缓存
+     */
+    async clearCache() {
+        try {
+            await friendsCacheService.clearUserCache()
+            console.log('好友缓存已清除')
+        } catch (error) {
+            console.error('清除缓存失败:', error)
         }
     }
 }
