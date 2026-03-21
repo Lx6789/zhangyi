@@ -7,38 +7,66 @@ import { notificationService } from '@/services'
  * 多人存钱计划缓存服务
  */
 class GroupSavingCacheService {
+
     /**
      * 检查多人存钱计划缓存表是否有数据
-     * 可以指定用户ID来检查特定用户的数据
-     * @param {string} [userId] - 可选的用户ID，用于检查特定用户的数据
+     * 正确逻辑：检查当前用户是否有参与任何计划（成员表中存在且未删除的记录）
+     * @param {string} userId - 用户ID
      * @returns {Promise<boolean>} 有数据返回 true，否则返回 false
      */
     async checkGroupSavingsExist(userId = null) {
         try {
-            await indexedDBService.ensureInitialized()
-
-            // 检查表是否存在
-            if (!indexedDBService.db.objectStoreNames.contains('group_savings_cache')) {
-                console.warn('group_savings_cache 表不存在')
-                return false
-            }
+            await indexedDBService.ensureInitialized();
 
             // 如果没有指定userId，返回false
             if (!userId) {
-                return false
+                return false;
             }
 
-            // 根据userId查询是否有相应的数据（排除已删除的）
-            const userData = await indexedDBService.query('group_savings_cache', 'userId', userId)
-            // 过滤掉已删除的计划
-            const activeData = userData.filter(item => item.deleted !== 1)
-            const hasData = activeData && activeData.length > 0
-            console.log(`用户 ${userId} 在 group_savings_cache 表 ${hasData ? '有' : '无'} 活跃数据`)
-            return hasData
+            // 检查成员表是否存在
+            if (!indexedDBService.db.objectStoreNames.contains('savings_members_cache')) {
+                console.warn('savings_members_cache 表不存在');
+                return false;
+            }
+
+            // 查询成员表时使用 'memberId' 索引
+            const userMembers = await indexedDBService.query('savings_members_cache', 'memberId', parseInt(userId));
+
+            console.log(`【checkExist】用户 ${userId} 的成员记录数: ${userMembers.length}`);
+
+            // 只统计未删除的成员记录（deleted !== 1）
+            const activeMembers = userMembers.filter(member => member.deleted !== 1);
+
+            console.log(`【checkExist】用户 ${userId} 的活跃成员记录: ${activeMembers.length}`);
+            console.log(`【checkExist】已退出的成员: ${userMembers.filter(m => m.deleted === 1).length}`);
+
+            if (activeMembers.length === 0) {
+                console.log(`用户 ${userId} 没有参与任何活跃计划（已退出）`);
+                return false;
+            }
+
+            // 获取用户参与的计划ID列表
+            const userPlanIds = [...new Set(activeMembers.map(member => member.groupSavingId))];
+
+            // 检查计划表是否存在
+            if (!indexedDBService.db.objectStoreNames.contains('group_savings_cache')) {
+                console.warn('group_savings_cache 表不存在');
+                return false;
+            }
+
+            // 查询计划表，确认这些计划存在且未删除
+            const allPlans = await indexedDBService.query('group_savings_cache', 'userId', userId);
+            const activePlans = allPlans.filter(plan =>
+                userPlanIds.includes(plan.id) && plan.deleted !== 1
+            );
+
+            const hasData = activePlans.length > 0;
+            console.log(`用户 ${userId} 在 group_savings_cache 表 ${hasData ? '有' : '无'} 活跃数据，参与计划数: ${activePlans.length}`);
+            return hasData;
 
         } catch (error) {
-            console.error('检查数据异常:', error)
-            return false
+            console.error('检查数据异常:', error);
+            return false;
         }
     }
 
@@ -60,12 +88,23 @@ class GroupSavingCacheService {
             }
 
             console.log(`根据 ${idName} 查询 ${tableName}:`, id);
-            const results = await indexedDBService.query(tableName, idName, id);
 
-            // 如果不包含已删除的，则过滤掉 deleted=1 的数据
-            if (!includeDeleted) {
-                return results.filter(item => item.deleted !== 1);
+            // 特殊处理：如果是查询 savings_members_cache 且 idName 是 'memberId'，需要确保 id 是整数
+            let queryId = id;
+            if (tableName === 'savings_members_cache' && idName === 'memberId') {
+                queryId = parseInt(id);
             }
+
+            const results = await indexedDBService.query(tableName, idName, queryId);
+
+            // 🔥 如果不包含已删除的，则过滤掉 deleted=1 的数据
+            if (!includeDeleted) {
+                const filtered = results.filter(item => item.deleted !== 1);
+                console.log(`查询 ${tableName} 返回 ${filtered.length}/${results.length} 条（已过滤删除）`);
+                return filtered;
+            }
+
+            console.log(`查询 ${tableName} 返回 ${results.length} 条（包含删除）`);
             return results;
 
         } catch (error) {
@@ -102,6 +141,9 @@ class GroupSavingCacheService {
                     console.log(`已清除用户 ${userId} 在表 ${tableName} 中的 ${userData.length} 条数据`);
                 }
             }
+
+            // 等待一小段时间确保删除完成
+            await new Promise(resolve => setTimeout(resolve, 50));
 
             return true;
         } catch (error) {
@@ -170,7 +212,7 @@ class GroupSavingCacheService {
 
             const now = new Date().toISOString();
 
-            plansData.forEach(plan => {
+            for (const plan of plansData) {
                 // 添加计划缓存（包含deleted字段）
                 groupSavingsCache.push({
                     id: plan.id,
@@ -195,42 +237,40 @@ class GroupSavingCacheService {
 
                 // 添加成员缓存 - 只添加当前计划的最新成员（包含deleted字段）
                 const members = plan.members || [];
-                if (members && members.length > 0) {
-                    members.forEach(member => {
-                        const memberUserId = member.userId;
-                        if (!memberUserId) {
-                            console.warn('成员数据缺少userId:', member);
-                            return;
-                        }
+                for (const member of members) {
+                    const memberUserId = member.userId;
+                    if (!memberUserId) {
+                        console.warn('成员数据缺少userId:', member);
+                        continue;
+                    }
 
-                        savingsMembersCache.push({
-                            id: `${plan.id}_${memberUserId}`,
-                            userId: userId,
-                            groupSavingId: plan.id,
-                            memberId: memberUserId,
-                            memberName: member.memberName || member.name || `用户${memberUserId}`,
-                            avatar: member.avatar || '',
-                            amount: member.amount || 0,
-                            isCreator: member.isCreator || memberUserId === plan.creatorId,
-                            status: member.status || 'active',
-                            joinTime: member.joinTime || member.joinTime || now,
-                            deleted: member.deleted || 0,
-                            deletedAt: member.deleted === 1 ? (member.deletedAt || now) : null,
-                            updateTime: now,
-                            cacheTime: now
-                        });
+                    savingsMembersCache.push({
+                        id: `${plan.id}_${memberUserId}`,
+                        userId: userId,
+                        groupSavingId: plan.id,
+                        memberId: memberUserId,
+                        memberName: member.memberName || member.name || `用户${memberUserId}`,
+                        avatar: member.avatar || '',
+                        amount: member.amount || 0,
+                        isCreator: member.isCreator || memberUserId === plan.creatorId,
+                        status: member.status || 'active',
+                        joinTime: member.joinTime || member.joinTime || now,
+                        deleted: member.deleted || 0,
+                        deletedAt: member.deleted === 1 ? (member.deletedAt || now) : null,
+                        updateTime: now,
+                        cacheTime: now
                     });
                 }
-            });
+            }
 
-            // 批量保存到IndexedDB
+            // 批量保存到IndexedDB - 使用 bulkPut 避免主键冲突
             if (groupSavingsCache.length > 0) {
-                await indexedDBService.bulkAdd('group_savings_cache', groupSavingsCache);
+                await indexedDBService.bulkPut('group_savings_cache', groupSavingsCache);
                 console.log(`已缓存 ${groupSavingsCache.length} 条计划数据`);
             }
 
             if (savingsMembersCache.length > 0) {
-                await indexedDBService.bulkAdd('savings_members_cache', savingsMembersCache);
+                await indexedDBService.bulkPut('savings_members_cache', savingsMembersCache);
                 console.log(`已缓存 ${savingsMembersCache.length} 条成员数据`);
             }
 
@@ -580,6 +620,91 @@ class GroupSavingCacheService {
 
         } catch (error) {
             console.error('更新存钱后缓存失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 退出多人存钱计划（更新缓存）
+     * @param {string} userId - 用户ID
+     * @param {number|string} planId - 计划ID
+     * @param {Object} leaveData - 退出数据 { isCreator, newCreatorId }
+     * @returns {Promise<boolean>} 更新成功返回true
+     */
+    async leaveGroupSaving(userId, planId, leaveData) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            const now = new Date().toISOString();
+
+            console.log('【缓存】开始处理退出计划:', { userId, planId, leaveData });
+
+            // 1. 获取计划数据（通过 userId 查询，因为计划表用 userId 做用户隔离）
+            const plans = await indexedDBService.query('group_savings_cache', 'userId', userId);
+            const planToUpdate = plans.find(p => p.id === planId);
+
+            if (!planToUpdate) {
+                console.warn('【缓存】未找到计划缓存数据，ID:', planId);
+                return false;
+            }
+
+            console.log('【缓存】找到计划:', planToUpdate.planName, '创建者:', planToUpdate.creatorId);
+
+            // 2. 获取当前退出成员的信息 - 注意：用 memberId 查询
+            const members = await indexedDBService.query('savings_members_cache', 'memberId', parseInt(userId));
+            const member = members.find(m => m.groupSavingId === planId);
+
+            if (!member) {
+                console.warn('【缓存】未找到成员缓存数据，userId:', userId, 'planId:', planId);
+                return false;
+            }
+
+            console.log('【缓存】找到成员:', member.memberName, '当前金额:', member.amount);
+
+            // 3. 如果是创建者退出且指定了新创建者，需要更新创建者信息
+            if (leaveData.isCreator && leaveData.newCreatorId) {
+                // 3.1 更新新创建者的 isCreator 状态
+                const newCreatorMembers = await indexedDBService.query('savings_members_cache', 'memberId', parseInt(leaveData.newCreatorId));
+                const newCreatorMember = newCreatorMembers.find(m => m.groupSavingId === planId);
+
+                if (newCreatorMember) {
+                    newCreatorMember.isCreator = true;
+                    newCreatorMember.updateTime = now;
+                    await indexedDBService.update('savings_members_cache', newCreatorMember);
+                    console.log(`【缓存】已更新新创建者 ${leaveData.newCreatorId} 的权限`);
+
+                    // 3.2 更新计划表中的创建者ID
+                    planToUpdate.creatorId = leaveData.newCreatorId;
+                    planToUpdate.updatedAt = now;
+                    await indexedDBService.update('group_savings_cache', planToUpdate);
+                    console.log(`【缓存】已更新计划 ${planId} 的创建者为 ${leaveData.newCreatorId}`);
+                }
+            }
+
+            // 4. 软删除当前成员（只修改 deleted 和 deletedAt，不修改 amount）
+            member.deleted = 1;
+            member.deletedAt = now;
+            member.updateTime = now;
+            await indexedDBService.update('savings_members_cache', member);
+            console.log(`【缓存】已软删除成员 ${userId} 从计划 ${planId}，金额保持不变: ${member.amount}`);
+
+            // 5. 软删除该成员的所有存钱记录
+            await this.softDeleteMemberDepositRecords(planId, parseInt(userId), now);
+
+            // 6. 如果是创建者退出且没有新创建者，计划也应该被软删除
+            if (leaveData.isCreator && !leaveData.newCreatorId) {
+                planToUpdate.deleted = 1;
+                planToUpdate.deletedAt = now;
+                planToUpdate.updatedAt = now;
+                await indexedDBService.update('group_savings_cache', planToUpdate);
+                console.log(`【缓存】创建者退出且无新创建者，计划 ${planId} 已软删除`);
+            }
+
+            console.log('【缓存】退出计划缓存更新完成');
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】退出计划缓存更新失败:', error);
             return false;
         }
     }

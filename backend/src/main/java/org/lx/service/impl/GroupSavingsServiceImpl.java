@@ -573,7 +573,7 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
             SavingDepositRecords savingDepositRecords = new SavingDepositRecords();
             savingDepositRecords.setGroupSavingId(id)
                     .setMemberId(savingsMember.getId())
-                    .setUserId(userUtil.getUserFromSecurityContext().getId())
+                    .setUserId(depositDTO.getMemberId())
                     .setMemberName(savingsMember.getMemberName())
                     .setAmount(depositDTO.getAmount())
                     .setBeforeAmount(savingsMember.getAmount())
@@ -692,22 +692,21 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
     @Override
     public RespBean leaveGroupSaving(Integer id, SavingGroupLeaveDTO savingGroupLeaveDTO) {
         //1.查询计划是否存在
-        if (groupSavingsMapper.selectById(id) == null) {
+        GroupSavings groupSaving = groupSavingsMapper.selectById(id);
+        if (groupSaving == null) {
             return RespBean.error(RespCode.DATA_NOT_FOUND, "没有该计划");
         }
 
-        //2.查询新的创建者是否存在
+        //2.查询新的创建者是否存在(当前用户是创建者的情况下)
         if (savingGroupLeaveDTO.getNewCreatorId() != null) {
             //2.1查询新的创建者是否存在
             if (usersMapper.selectById(savingGroupLeaveDTO.getNewCreatorId()) == null) {
                 return RespBean.error(RespCode.DATA_NOT_FOUND, "新的创建者不存在");
             }
 
-            //2.2查询新的创建者是否是存钱计划的一员
-            LambdaQueryWrapper<SavingsMembers> queryWrapperToFindMember = new LambdaQueryWrapper<>();
-            queryWrapperToFindMember.eq(SavingsMembers::getGroupSavingId, id)
-                    .eq(SavingsMembers::getUserId, savingGroupLeaveDTO.getNewCreatorId());
-            SavingsMembers savingsMembers = savingsMembersMapper.selectOne(queryWrapperToFindMember);
+            //2.2查询新的创建者是否是存钱计划的一员（包括已退出的）
+            SavingsMembers savingsMembers = savingsMembersMapper.selectMemberIncludeDeleted(
+                    id, savingGroupLeaveDTO.getNewCreatorId());
 
             if (savingsMembers == null) {
                 return RespBean.error(RespCode.DATA_NOT_FOUND, "新选的创建者不在本计划内");
@@ -718,8 +717,9 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
             updateWrapperToUpdateCreator.eq(SavingsMembers::getGroupSavingId, id)
                     .eq(SavingsMembers::getUserId, savingGroupLeaveDTO.getNewCreatorId())
                     .set(SavingsMembers::getIsOwner, true)
-                    .set(SavingsMembers::getUpdateAt, LocalDateTime.now());
-
+                    .set(SavingsMembers::getUpdateAt, LocalDateTime.now())
+                    .set(SavingsMembers::getDeleted, 0)  // 如果之前是退出的，恢复成员状态
+                    .set(SavingsMembers::getDeletedAt, null);  // 清空删除时间
             savingsMembersMapper.update(null, updateWrapperToUpdateCreator);
 
             //2.4修改计划表中的creator信息
@@ -732,20 +732,43 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
 
         try {
             Integer userId = userUtil.getUserFromSecurityContext().getId();
+            LocalDateTime now = LocalDateTime.now();
 
-            //3.删除成员记录（会自动逻辑删除）
-            savingsMembersMapper.delete(new LambdaQueryWrapper<SavingsMembers>()
-                    .eq(SavingsMembers::getGroupSavingId, id)
-                    .eq(SavingsMembers::getUserId, userId));
+            // 查询当前用户的成员记录ID（用于软删除存款记录）
+            SavingsMembers currentMember = savingsMembersMapper.selectMemberIncludeDeleted(id, userId);
+            if (currentMember == null) {
+                return RespBean.error(RespCode.DATA_NOT_FOUND, "用户并不在计划中");
+            }
 
-            //4.删除存款记录（会自动逻辑删除）
-            savingDepositRecordsMapper.delete(new LambdaQueryWrapper<SavingDepositRecords>()
-                    .eq(SavingDepositRecords::getGroupSavingId, id)
-                    .eq(SavingDepositRecords::getUserId, userId));
+            // 如果是创建者且没有指定新创建者，不允许退出
+            if (currentMember.getIsOwner() && savingGroupLeaveDTO.getNewCreatorId() == null) {
+                return RespBean.error(RespCode.DATA_NOT_FOUND, "创建者退出计划需要指定新的创建者");
+            }
+
+            //3.软删除成员记录（手动设置 deleted_at）
+            LambdaUpdateWrapper<SavingsMembers> memberUpdateWrapper = new LambdaUpdateWrapper<>();
+            memberUpdateWrapper.eq(SavingsMembers::getGroupSavingId, id)
+                    .eq(SavingsMembers::getUserId, userId)
+                    .set(SavingsMembers::getDeleted, 1)
+                    .set(SavingsMembers::getDeletedAt, now)
+                    .set(SavingsMembers::getUpdateAt, now);
+            int memberResult = savingsMembersMapper.update(null, memberUpdateWrapper);
+            log.info("软删除成员: userId={}, groupId={}, deletedAt={}, result={}", userId, id, now, memberResult);
+
+            //4.软删除存款记录（手动设置 deleted_at）
+            LambdaUpdateWrapper<SavingDepositRecords> recordUpdateWrapper = new LambdaUpdateWrapper<>();
+            recordUpdateWrapper.eq(SavingDepositRecords::getGroupSavingId, id)
+                    .eq(SavingDepositRecords::getUserId, userId)
+                    .set(SavingDepositRecords::getDeleted, 1)
+                    .set(SavingDepositRecords::getDeletedAt, now);
+            int recordResult = savingDepositRecordsMapper.update(null, recordUpdateWrapper);
+            log.info("软删除存款记录: userId={}, groupId={}, deletedAt={}, result={}", userId, id, now, recordResult);
+
+            //5.注意：计划表（group_savings）本身不修改，因为计划可能还有其他成员继续使用
 
             return RespBean.success(RespCode.SUCCESS, "退出计划成功");
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("退出计划失败", e);
             return RespBean.error(RespCode.DATA_NOT_FOUND, "退出失败: " + e.getMessage());
         }
     }

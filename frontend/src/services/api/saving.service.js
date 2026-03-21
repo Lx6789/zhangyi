@@ -108,29 +108,152 @@ class SavingService {
 
     /**
      * 获取多人存钱计划列表
+     * 策略：优先从后端获取最新数据并更新前端数据库
+     *       只有在网络不可用或后端接口失败时才使用前端缓存数据
      */
-    async getGroupSavingsList(params = {}, forceRefresh = false){
-        const userId = authHelperService.getCurrentUser().id;
-        try {
-            // 1. 查看前端数据库是否有数据（如果不强制刷新）
-            if (!forceRefresh && await groupSavingCacheService.checkGroupSavingsExist(userId)) {
-                console.log('【Service】从缓存获取数据, userId:', userId);
+    async getGroupSavingsList(params = {}, forceRefresh = false) {
+        const userId = authHelperService.getCurrentUser()?.id;
+        if (!userId) {
+            console.error('【Service】无法获取用户ID');
+            return {
+                code: 401,
+                message: '用户未登录',
+                data: []
+            };
+        }
 
-                // 2. 若有数据则直接从缓存获取
-                // 2.1 根据用户ID查询相关的groupSaving信息（包含deleted字段）
-                const groupSavingsCache = await groupSavingCacheService.getTableDataById('userId', userId, 'group_savings_cache', true);
+        // 标记是否使用缓存（仅在网络不可用或后端失败时使用）
+        let useCache = false;
 
-                // 过滤掉已删除的计划
-                const activeGroups = groupSavingsCache.filter(group => group.deleted !== 1);
+        // 1. 如果不是强制刷新，先检查网络状态
+        if (!forceRefresh && !navigator.onLine) {
+            console.log('【Service】网络不可用，尝试使用缓存数据');
+            useCache = true;
+        }
 
-                // 2.2 根据用户ID查询所有的成员信息（包含deleted字段）
-                const allMembersCache = await groupSavingCacheService.getTableDataById('userId', userId, 'savings_members_cache', true);
+        // 2. 优先从后端获取数据
+        if (!useCache) {
+            try {
+                console.log('【Service】从后端获取数据, userId:', userId);
+                const responseData = await savingApi.getGroupSavingList();
+                console.log('【Service】后端返回数据:', responseData);
 
-                // 2.3 将成员按计划ID分组，并过滤掉已删除的成员
+                if (responseData && Array.isArray(responseData)) {
+                    // 后端返回成功，更新前端数据库
+                    console.log('【Service】后端数据获取成功，开始更新前端数据库');
+
+                    // 🔥 关键修改：在后端返回的数据中过滤掉已删除的计划和成员
+                    const filteredData = this.filterDeletedPlansAndMembers(responseData);
+                    console.log('【Service】过滤后活跃计划数:', filteredData.length);
+
+                    // 清除旧缓存
+                    await groupSavingCacheService.clearUserCache(userId);
+
+                    // 保存新数据到缓存（保存过滤后的数据）
+                    const saveSuccess = await groupSavingCacheService.saveData(userId, filteredData, true);
+
+                    if (saveSuccess) {
+                        console.log('【Service】前端数据库更新成功');
+                    } else {
+                        console.warn('【Service】前端数据库更新失败，但后端数据获取成功');
+                    }
+
+                    // 返回过滤后的数据
+                    return {
+                        code: 200,
+                        message: '获取成功',
+                        data: filteredData
+                    };
+                }
+                // 如果后端返回的是包含 code 和 data 的对象（兼容处理）
+                else if (responseData && responseData.code === 200 && responseData.data) {
+                    console.log('【Service】后端数据获取成功（包装格式），开始更新前端数据库');
+
+                    // 🔥 关键修改：在后端返回的数据中过滤掉已删除的计划和成员
+                    const filteredData = this.filterDeletedPlansAndMembers(responseData.data);
+                    console.log('【Service】过滤后活跃计划数:', filteredData.length);
+
+                    await groupSavingCacheService.clearUserCache(userId);
+                    await groupSavingCacheService.saveData(userId, filteredData, true);
+
+                    return {
+                        code: 200,
+                        message: responseData.message || '获取成功',
+                        data: filteredData
+                    };
+                }
+                // 后端返回格式异常
+                else {
+                    console.warn('【Service】后端返回格式异常，尝试使用缓存数据:', responseData);
+                    useCache = true;
+                }
+            } catch (error) {
+                console.error('【Service】从后端获取数据失败:', error);
+                // 网络错误或后端异常，使用缓存数据
+                useCache = true;
+
+                // 如果是网络错误，显示提示但不弹出错误通知（静默降级）
+                if (this.isNetworkError(error)) {
+                    console.log('【Service】网络错误，降级使用缓存数据');
+                }
+            }
+        }
+
+        // 3. 使用缓存数据（网络不可用或后端失败时）
+        if (useCache) {
+            console.log('【Service】从缓存获取数据, userId:', userId);
+
+            try {
+                // 查询成员表，获取当前用户参与的所有计划（包含已删除的）
+                const allMembersCache = await indexedDBService.query('savings_members_cache', 'memberId', parseInt(userId));
+
+                console.log('【Service】缓存中查询到的所有成员记录数:', allMembersCache.length);
+
+                // 🔥 关键修改：只保留当前用户未删除的成员记录（deleted !== 1）
+                const userActiveMembers = allMembersCache.filter(member => member.deleted !== 1);
+
+                console.log('【Service】缓存中用户参与的活跃成员记录:', userActiveMembers.length);
+                console.log('【Service】缓存中已退出的成员记录:', allMembersCache.filter(m => m.deleted === 1).length);
+
+                if (userActiveMembers.length === 0) {
+                    console.log('【Service】缓存中用户没有参与任何活跃计划');
+                    return {
+                        code: 200,
+                        message: '获取成功（缓存无数据）',
+                        data: []
+                    };
+                }
+
+                // 获取用户参与的所有计划ID（去重）
+                const userPlanIds = [...new Set(userActiveMembers.map(member => member.groupSavingId))];
+                console.log('【Service】缓存中用户参与的计划ID:', userPlanIds);
+
+                // 查询计划表，获取所有计划详情（包含deleted字段）
+                const allGroupSavings = await groupSavingCacheService.getTableDataById('userId', userId, 'group_savings_cache', true);
+
+                // 🔥 关键修改：过滤出用户参与的计划，且计划未被删除（plan.deleted !== 1）
+                const activeGroups = allGroupSavings.filter(group =>
+                    userPlanIds.includes(group.id) && group.deleted !== 1
+                );
+
+                console.log('【Service】缓存中找到活跃计划:', activeGroups.length);
+
+                if (activeGroups.length === 0) {
+                    return {
+                        code: 200,
+                        message: '获取成功（缓存无活跃计划）',
+                        data: []
+                    };
+                }
+
+                // 🔥 关键修改：获取所有成员缓存，用于组装数据
+                const allMembers = await indexedDBService.query('savings_members_cache', 'userId', userId);
+
+                // 将成员信息按计划ID分组，🔥 只包含未删除的成员（member.deleted !== 1）
                 const membersByPlanId = {};
-                allMembersCache.forEach(member => {
-                    // 只添加未删除的成员 (deleted !== 1)
-                    if (member.deleted !== 1) {
+                allMembers.forEach(member => {
+                    // 只添加未删除的成员 (deleted !== 1) 且 成员属于活跃计划
+                    if (member.deleted !== 1 && userPlanIds.includes(member.groupSavingId)) {
                         if (!membersByPlanId[member.groupSavingId]) {
                             membersByPlanId[member.groupSavingId] = [];
                         }
@@ -146,28 +269,27 @@ class SavingService {
                     }
                 });
 
-                // 2.4 组装每个计划的数据
+                // 组装每个计划的数据
                 const assembledData = activeGroups.map(group => {
-                    // 获取该计划的成员列表（已过滤删除的）
                     const members = membersByPlanId[group.id] || [];
 
-                    // 计算总金额（只计算未删除成员的金额）
-                    const totalAmount = members.reduce((sum, member) => sum + (member.amount || 0), 0);
+                    // 🔥 重要：如果计划没有任何活跃成员，则跳过该计划（不显示）
+                    if (members.length === 0) {
+                        console.log('【Service】计划', group.id, '没有活跃成员，跳过');
+                        return null;
+                    }
 
-                    // 计算进度百分比
+                    const totalAmount = members.reduce((sum, member) => sum + (member.amount || 0), 0);
                     const targetAmount = group.targetAmount || 0;
                     const progress = targetAmount > 0
                         ? Math.min(Math.round((totalAmount / targetAmount) * 100), 100)
                         : 0;
 
-                    // 判断是否完成
-                    const completed = totalAmount >= targetAmount;
-
-                    // 返回组装好的计划数据
                     return {
                         id: group.id,
                         name: group.planName,
                         reason: group.reason || '',
+                        description: group.description || '',
                         targetAmount: targetAmount,
                         currentAmount: totalAmount,
                         deadline: group.deadline || '',
@@ -179,85 +301,99 @@ class SavingService {
                         icon: group.icon || groupSavingCacheService.getIconByType(group.type),
                         color: group.color || groupSavingCacheService.getColorByType(group.type),
                         progress: progress,
-                        completed: completed,
+                        completed: totalAmount >= targetAmount,
                         members: members,
                         memberCount: members.length,
                         deleted: group.deleted || 0,
                         deletedAt: group.deletedAt || null
                     };
-                });
+                }).filter(plan => plan !== null); // 🔥 过滤掉没有活跃成员的计划
 
-                // 2.5 按更新时间排序（最新的在前）
+                // 按更新时间排序（最新的在前）
                 assembledData.sort((a, b) => {
                     const timeA = new Date(a.updatedAt || 0).getTime();
                     const timeB = new Date(b.updatedAt || 0).getTime();
                     return timeB - timeA;
                 });
 
-                // 2.6 返回数据
+                console.log('【Service】从缓存返回组装后的计划数:', assembledData.length);
+
                 return {
                     code: 200,
                     message: '获取成功（缓存）',
                     data: assembledData
                 };
-            }
 
-            // 3. 若没数据或强制刷新则向后端获取
-            console.log('【Service】从后端获取数据, userId:', userId, 'forceRefresh:', forceRefresh);
-            const responseData = await savingApi.getGroupSavingList();
-            console.log('【Service】后端返回数据:', responseData);
-
-            // 4. 处理后端返回的数据
-            if (responseData && Array.isArray(responseData)) {
-                // 5. 重要：先清除所有旧缓存，再保存新数据
-                await groupSavingCacheService.clearUserCache(userId);
-                await groupSavingCacheService.saveData(userId, responseData, true); // true表示跳过清除（已经清除了）
-
-                // 6. 过滤掉已删除的计划后返回给调用处
-                const activeData = responseData.filter(plan => plan.deleted !== 1);
-
+            } catch (cacheError) {
+                console.error('【Service】读取缓存失败:', cacheError);
                 return {
-                    code: 200,
-                    message: '获取成功',
-                    data: activeData
-                };
-            }
-            // 如果后端返回的是包含 code 和 data 的对象（兼容处理）
-            else if (responseData && responseData.code === 200 && responseData.data) {
-                // 缓存数据
-                await groupSavingCacheService.clearUserCache(userId);
-                await groupSavingCacheService.saveData(userId, responseData.data, true);
-
-                // 过滤掉已删除的计划
-                const activeData = responseData.data.filter(plan => plan.deleted !== 1);
-
-                return {
-                    code: 200,
-                    message: responseData.message || '获取成功',
-                    data: activeData
-                };
-            }
-            // 处理错误情况
-            else {
-                console.warn('【Service】获取数据失败，返回格式异常:', responseData);
-                notificationService.showNotification('获取多人存钱计划列表失败', 'error');
-                return {
-                    code: responseData?.code || 500,
-                    message: responseData?.message || '获取失败',
+                    code: 500,
+                    message: '数据加载失败',
                     data: []
                 };
             }
-        } catch (error) {
-            console.error('【Service】获取多人存钱计划列表异常:', error);
-            notificationService.showNotification(error.message || '获取多人存钱计划列表失败', 'error');
-
-            // 发生错误时返回空数据，避免页面崩溃
-            return {
-                code: 500,
-                message: error.message || '获取失败',
-                data: []
-            };
         }
+
+        // 4. 不应该走到这里，但作为兜底
+        return {
+            code: 500,
+            message: '未知错误',
+            data: []
+        };
+    }
+
+    /**
+     * 过滤已删除的计划和成员
+     * @param {Array} plansData - 计划数据数组
+     * @returns {Array} 过滤后的计划数据
+     */
+    filterDeletedPlansAndMembers(plansData) {
+        if (!plansData || !Array.isArray(plansData)) {
+            return [];
+        }
+
+        return plansData
+            .filter(plan => {
+                // 1. 过滤掉已删除的计划
+                if (plan.deleted === 1) {
+                    console.log(`【Service】过滤掉已删除的计划: ${plan.name} (ID: ${plan.id})`);
+                    return false;
+                }
+
+                // 2. 过滤掉没有活跃成员的计划
+                if (!plan.members || plan.members.length === 0) {
+                    console.log(`【Service】过滤掉无成员的计划: ${plan.name} (ID: ${plan.id})`);
+                    return false;
+                }
+
+                // 3. 检查是否有活跃成员（deleted !== 1）
+                const hasActiveMembers = plan.members.some(member => member.deleted !== 1);
+                if (!hasActiveMembers) {
+                    console.log(`【Service】过滤掉无活跃成员的计划: ${plan.name} (ID: ${plan.id})`);
+                    return false;
+                }
+
+                return true;
+            })
+            .map(plan => {
+                // 4. 过滤掉成员中的已删除成员
+                const activeMembers = plan.members.filter(member => member.deleted !== 1);
+
+                // 5. 重新计算计划的总金额和进度
+                const totalAmount = activeMembers.reduce((sum, member) => sum + (member.amount || 0), 0);
+                const progress = plan.targetAmount > 0
+                    ? Math.min(Math.round((totalAmount / plan.targetAmount) * 100), 100)
+                    : 0;
+
+                return {
+                    ...plan,
+                    currentAmount: totalAmount,
+                    progress: progress,
+                    members: activeMembers,
+                    memberCount: activeMembers.length,
+                    completed: totalAmount >= plan.targetAmount
+                };
+            });
     }
 
     /**
@@ -880,9 +1016,121 @@ class SavingService {
 
     /**
      * 退出多人存钱计划
+     * @param {number} planId - 计划ID
+     * @param {Object} data - 退出数据 { isCreator, newCreatorId }
+     * @returns {Promise<Object>} 退出结果
      */
     async leaveGroupSavings(planId, data) {
-        // TODO 退出多人存钱计划
+        // 1. 先检查网络状态
+        if (!navigator.onLine) {
+            console.warn('离线状态无法退出多人存钱计划');
+            notificationService.showNotification('当前处于离线状态，无法退出计划，请连接网络后重试', 'warning');
+            return {
+                success: false,
+                message: '当前处于离线状态，无法退出计划，请连接网络后重试'
+            };
+        }
+
+        // 2. 获取当前用户ID
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id;
+        if (!userId) {
+            console.error('无法获取用户ID');
+            notificationService.showNotification('用户未登录，请重新登录', 'error');
+            return {
+                success: false,
+                message: '用户未登录，请重新登录'
+            };
+        }
+
+        // 3. 验证数据
+        if (!planId) {
+            console.error('计划ID不能为空');
+            notificationService.showNotification('计划信息不存在', 'error');
+            return {
+                success: false,
+                message: '计划信息不存在'
+            };
+        }
+
+        try {
+            console.log('【Service】开始退出多人存钱计划，计划ID:', planId, '数据:', data);
+
+            // 4. 调用后端接口
+            const response = await savingApi.leaveGroupSaving(planId, {
+                isCreator: data.isCreator || false,
+                newCreatorId: data.newCreatorId || null
+            });
+
+            console.log('【Service】退出计划响应:', response);
+
+            // 5. 处理响应 - 后端返回 { code: 200, message: "退出计划成功", data: null }
+            // http-interceptor 会拦截，如果 code === 200 返回 response.data（即 null），不会抛出异常
+            console.log('【Service】退出计划成功，响应数据:', response);
+
+            // 6. 更新前端缓存
+            try {
+                const cacheUpdateSuccess = await groupSavingCacheService.leaveGroupSaving(
+                    userId,
+                    planId,
+                    {
+                        isCreator: data.isCreator || false,
+                        newCreatorId: data.newCreatorId || null
+                    }
+                );
+
+                if (cacheUpdateSuccess) {
+                    console.log('【Service】前端缓存更新成功');
+                } else {
+                    console.warn('【Service】前端缓存更新失败，但后端已退出成功');
+                    // 缓存更新失败时，尝试清除该用户的所有缓存，强制下次从服务器获取
+                    await groupSavingCacheService.clearUserCache(userId);
+                    console.log('【Service】已清除用户缓存，下次将从服务器获取最新数据');
+                }
+            } catch (cacheError) {
+                console.error('【Service】更新缓存时出错:', cacheError);
+                // 出错时清除缓存
+                await groupSavingCacheService.clearUserCache(userId);
+            }
+
+            // 7. 显示成功通知
+            notificationService.showNotification('退出计划成功', 'success');
+
+            // 8. 返回成功结果
+            return {
+                success: true,
+                code: 200,
+                message: '退出计划成功',
+                data: null
+            };
+
+        } catch (error) {
+            console.error('【Service】退出多人存钱计划异常:', error);
+
+            // 处理网络错误
+            if (this.isNetworkError(error)) {
+                notificationService.showNotification('网络连接失败，请检查网络后重试', 'error');
+                return {
+                    success: false,
+                    message: '网络连接失败，请检查网络后重试'
+                };
+            }
+
+            // 处理业务错误
+            const errorMsg = error.response?.data?.message || error.message || '退出失败';
+
+            // 检查是否是特定错误
+            if (errorMsg.includes('创建者') && errorMsg.includes('新创建者')) {
+                notificationService.showNotification(errorMsg, 'warning');
+            } else {
+                notificationService.showNotification(errorMsg, 'error');
+            }
+
+            return {
+                success: false,
+                code: error.response?.status || 500,
+                message: errorMsg
+            };
+        }
     }
 
     /**

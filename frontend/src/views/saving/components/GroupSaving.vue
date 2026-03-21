@@ -5,9 +5,9 @@
       <i class="fas fa-user-friends"></i>
     </div>
 
-    <div class="savings-list" v-if="groupSavings.length > 0">
+    <div class="savings-list" v-if="filteredGroupSavings.length > 0">
       <div
-          v-for="plan in groupSavings"
+          v-for="plan in filteredGroupSavings"
           :key="plan.id"
           class="savings-item"
           :class="getPlanClass(plan)"
@@ -286,6 +286,46 @@ const leaving = ref(false)
 // 提交状态
 const submitting = ref(false)
 
+// ========== 计算属性：过滤掉已删除的计划 ==========
+/**
+ * 过滤后的多人存钱计划列表
+ * 过滤条件：
+ * 1. 计划本身未被删除（plan.deleted !== 1）
+ * 2. 计划至少有一个活跃成员（成员 deleted !== 1）
+ */
+const filteredGroupSavings = computed(() => {
+  if (!props.groupSavings || props.groupSavings.length === 0) {
+    return []
+  }
+
+  return props.groupSavings.filter(plan => {
+    // 1. 检查计划本身是否被删除
+    if (plan.deleted === 1) {
+      console.log(`计划 ${plan.name} (ID: ${plan.id}) 已删除，过滤掉`)
+      return false
+    }
+
+    // 2. 检查计划是否有活跃成员
+    const activeMembers = getActiveMembers(plan)
+    if (activeMembers.length === 0) {
+      console.log(`计划 ${plan.name} (ID: ${plan.id}) 没有活跃成员，过滤掉`)
+      return false
+    }
+
+    // 3. 检查当前用户是否是该计划的活跃成员（防止显示用户已退出的计划）
+    const currentUserIsActive = activeMembers.some(
+        member => member.userId === props.currentUser?.id
+    )
+
+    if (!currentUserIsActive) {
+      console.log(`计划 ${plan.name} (ID: ${plan.id}) 当前用户不是活跃成员，过滤掉`)
+      return false
+    }
+
+    return true
+  })
+})
+
 // ========== 工具函数 ==========
 // 使用缓存服务的方法获取图标和颜色
 const getPlanIcon = (plan) => {
@@ -302,7 +342,7 @@ const formatNumber = (num) => num !== undefined && num !== null ? num.toLocaleSt
 
 const getMemberName = (userId) => {
   if (!planToLeave.value || !planToLeave.value.members) return ''
-  const member = planToLeave.value.members.find(m => m.userId === userId)
+  const member = getActiveMembers(planToLeave.value).find(m => m.userId === userId)
   return member?.name || member?.memberName || ''
 }
 
@@ -323,7 +363,7 @@ const getPlanClass = (plan) => {
 const getActiveMembers = (plan) => {
   if (!plan || !plan.members) return []
   return plan.members
-      .filter(member => member.deleted !== 1)
+      .filter(member => member.deleted !== 1)  // 过滤掉 deleted=1 的成员
       .map(member => ({
         ...member,
         // 确保 name 字段存在（兼容 memberName 字段）
@@ -343,6 +383,7 @@ const getActiveMemberCount = (plan) => {
 // ========== 计算属性 ==========
 /**
  * 其他活跃成员（用于创建者退出时选择）
+ * 过滤掉已删除的成员和当前用户
  */
 const otherActiveMembers = computed(() => {
   if (!planToLeave.value || !planToLeave.value.members) return []
@@ -546,15 +587,18 @@ const handleLeavePlan = async (newCreatorId) => {
       newCreatorId: newCreatorId
     })
 
-    if (response.code === 200) {
-      // 从列表中移除
+    console.log('退出计划响应:', response)
+
+    // 检查 response.success 而不是 response.code
+    if (response.success) {
+      // 从列表中移除该计划
       const index = props.groupSavings.findIndex(g => g.id === planToLeave.value.id)
       if (index !== -1) {
         const newGroupSavings = [...props.groupSavings]
         newGroupSavings.splice(index, 1)
         emit('update:groupSavings', newGroupSavings)
       }
-      notificationService.showNotification('退出成功', 'success')
+      notificationService.showNotification(response.message || '退出成功', 'success')
     } else {
       notificationService.showNotification(response.message || '退出失败', 'error')
     }
@@ -564,7 +608,7 @@ const handleLeavePlan = async (newCreatorId) => {
 
   } catch (error) {
     console.error('退出失败:', error)
-    notificationService.showNotification('退出失败: ' + error.message, 'error')
+    notificationService.showNotification('退出失败: ' + (error.message || '未知错误'), 'error')
   } finally {
     leaving.value = false
   }

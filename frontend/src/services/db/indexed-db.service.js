@@ -650,6 +650,63 @@ class IndexedDBService {
             }
         })
     }
+
+    /**
+     * 批量更新或添加数据（如果存在则更新，不存在则添加）
+     */
+    async bulkPut(storeName, dataArray) {
+        await this.ensureInitialized();
+        return new Promise((resolve, reject) => {
+            try {
+                if (!dataArray || dataArray.length === 0) {
+                    resolve();
+                    return;
+                }
+
+                console.log(`开始批量更新数据到 ${storeName}，共 ${dataArray.length} 条`);
+
+                const transaction = this.db.transaction([storeName], 'readwrite');
+                const store = transaction.objectStore(storeName);
+                let completed = 0;
+                let hasError = false;
+
+                dataArray.forEach(data => {
+                    const request = store.put(data);
+
+                    request.onsuccess = () => {
+                        completed++;
+                        if (completed === dataArray.length && !hasError) {
+                            console.log(`批量更新数据到 ${storeName} 成功，共 ${completed} 条`);
+                            resolve();
+                        }
+                    };
+
+                    request.onerror = (event) => {
+                        if (!hasError) {
+                            hasError = true;
+                            console.error(`批量更新数据到 ${storeName} 失败:`, event.target.error);
+                            reject(event.target.error);
+                        }
+                    };
+                });
+
+                transaction.oncomplete = () => {
+                    console.log(`批量更新事务完成: ${storeName}`);
+                };
+
+                transaction.onerror = (event) => {
+                    if (!hasError) {
+                        hasError = true;
+                        console.error(`批量更新事务错误: ${storeName}`, event.target.error);
+                        reject(event.target.error);
+                    }
+                };
+            } catch (error) {
+                console.error(`批量更新数据异常:`, error);
+                reject(error);
+            }
+        });
+    }
 }
 
 export default new IndexedDBService()
