@@ -636,16 +636,33 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
 
         //2.软删除对应计划
         try {
-            // 删除所有成员（会自动逻辑删除）
-            savingsMembersMapper.delete(new LambdaQueryWrapper<SavingsMembers>()
-                    .eq(SavingsMembers::getGroupSavingId, id));
+            LocalDateTime now = LocalDateTime.now();
 
-            // 删除计划本身（会自动逻辑删除）
-            groupSavingsMapper.deleteById(id);
+            // 软删除所有成员（手动设置 deleted_at）
+            LambdaUpdateWrapper<SavingsMembers> memberUpdateWrapper = new LambdaUpdateWrapper<>();
+            memberUpdateWrapper.eq(SavingsMembers::getGroupSavingId, id)
+                    .set(SavingsMembers::getDeleted, 1)
+                    .set(SavingsMembers::getDeletedAt, now)
+                    .set(SavingsMembers::getUpdateAt, now);
+            savingsMembersMapper.update(null, memberUpdateWrapper);
+            log.info("软删除计划 {} 的所有成员，deletedAt={}", id, now);
 
-            // 删除所有存款记录（会自动逻辑删除）
-            savingDepositRecordsMapper.delete(new LambdaQueryWrapper<SavingDepositRecords>()
-                    .eq(SavingDepositRecords::getGroupSavingId, id));
+            // 软删除计划本身（手动设置 deleted_at）
+            LambdaUpdateWrapper<GroupSavings> planUpdateWrapper = new LambdaUpdateWrapper<>();
+            planUpdateWrapper.eq(GroupSavings::getId, id)
+                    .set(GroupSavings::getDeleted, 1)
+                    .set(GroupSavings::getDeletedAt, now)
+                    .set(GroupSavings::getUpdatedAt, now);
+            groupSavingsMapper.update(null, planUpdateWrapper);
+            log.info("软删除计划 {}，deletedAt={}", id, now);
+
+            // 软删除所有存款记录（手动设置 deleted_at）
+            LambdaUpdateWrapper<SavingDepositRecords> recordUpdateWrapper = new LambdaUpdateWrapper<>();
+            recordUpdateWrapper.eq(SavingDepositRecords::getGroupSavingId, id)
+                    .set(SavingDepositRecords::getDeleted, 1)
+                    .set(SavingDepositRecords::getDeletedAt, now);
+            savingDepositRecordsMapper.update(null, recordUpdateWrapper);
+            log.info("软删除计划 {} 的所有存款记录，deletedAt={}", id, now);
 
             return RespBean.success(RespCode.SUCCESS, "删除计划成功");
 

@@ -6,7 +6,7 @@ import {authHelperService, notificationService} from '@/services'
 import businessDataService from '@/services/business-data.service'
 import groupSavingCache from '@/services/cache/group-saving-cache.service'
 import groupSavingCacheService from "@/services/cache/group-saving-cache.service";
-import {warn} from "vue";
+import indexedDBService from '@/services/db/indexed-db.service.js'
 
 class SavingService {
     constructor() {
@@ -176,8 +176,8 @@ class SavingService {
                         creatorId: group.creatorId,
                         createdAt: group.createdAt || group.cacheTime,
                         updatedAt: group.updatedAt || group.cacheTime,
-                        icon: group.icon || this.getIconByType(group.type),
-                        color: group.color || this.getColorByType(group.type),
+                        icon: group.icon || groupSavingCacheService.getIconByType(group.type),
+                        color: group.color || groupSavingCacheService.getColorByType(group.type),
                         progress: progress,
                         completed: completed,
                         members: members,
@@ -295,7 +295,6 @@ class SavingService {
         // 3. 构造传给后端的数据
         const creator = data.members?.find(m => m.isCreator) || { userId };
 
-        // ===== 关键修改：构造成员数据时包含 deleted 字段 =====
         const newData = {
             name: data.name,
             description: data.description || '',
@@ -350,8 +349,8 @@ class SavingService {
                     updatedAt: now,
                     deleted: 0,
                     deletedAt: null,
-                    color: data.color || this.getColorByType(data.type || '日常储蓄'),
-                    icon: data.icon || this.getIconByType(data.type || '日常储蓄'),
+                    color: data.color || groupSavingCacheService.getColorByType(data.type || '日常储蓄'),
+                    icon: data.icon || groupSavingCacheService.getIconByType(data.type || '日常储蓄'),
                     members: data.members && data.members.length > 0
                         ? data.members.map(member => ({
                             userId: member.userId,
@@ -362,7 +361,7 @@ class SavingService {
                             avatar: member.avatar || this.getDefaultAvatar(member.name),
                             status: 'active',
                             joinTime: now,
-                            deleted: 0,      // 新增成员默认未删除
+                            deleted: 0,
                             deletedAt: null
                         }))
                         : []
@@ -424,42 +423,6 @@ class SavingService {
                 message: errorMsg
             };
         }
-    }
-
-    /**
-     * 根据类型获取图标
-     * @param {string} type - 计划类型
-     * @returns {string} 图标类名
-     */
-    getIconByType(type) {
-        const icons = {
-            '日常储蓄': 'fas fa-coins',
-            '旅行基金': 'fas fa-plane',
-            '教育基金': 'fas fa-graduation-cap',
-            '购房基金': 'fas fa-home',
-            '购车基金': 'fas fa-car',
-            '应急资金': 'fas fa-first-aid',
-            '其他': 'fas fa-star'
-        };
-        return icons[type] || 'fas fa-piggy-bank';
-    }
-
-    /**
-     * 根据类型获取颜色
-     * @param {string} type - 计划类型
-     * @returns {string} 颜色代码
-     */
-    getColorByType(type) {
-        const colors = {
-            '日常储蓄': '#2ecc71',
-            '旅行基金': '#3498DB',
-            '教育基金': '#9B59B6',
-            '购房基金': '#E74C3C',
-            '购车基金': '#F39C12',
-            '应急资金': '#E67E22',
-            '其他': '#80A492'
-        };
-        return colors[type] || '#80A492';
     }
 
     /**
@@ -535,7 +498,6 @@ class SavingService {
         // 4. 构造传给后端的数据（根据后端 DTO 格式）
         const creator = data.members?.find(m => m.isCreator) || { userId };
 
-        // ===== 关键修改：构造成员数据时保留 deleted 字段 =====
         const updateData = {
             name: data.name,
             description: data.description || '',
@@ -590,10 +552,10 @@ class SavingService {
                         status: response.status || 'active',
                         createdAt: response.createTime || data.createdAt || now,
                         updatedAt: response.updateTime || now,
-                        deleted: response.deleted || 0,           // 软删除字段
-                        deletedAt: response.deletedAt || null,    // 删除时间字段
-                        color: data.color || this.getColorByType(response.type || data.type || '日常储蓄'),
-                        icon: data.icon || this.getIconByType(response.type || data.type || '日常储蓄'),
+                        deleted: response.deleted || 0,
+                        deletedAt: response.deletedAt || null,
+                        color: data.color || groupSavingCacheService.getColorByType(response.type || data.type || '日常储蓄'),
+                        icon: data.icon || groupSavingCacheService.getIconByType(response.type || data.type || '日常储蓄'),
                         // 使用后端返回的最新成员数据（包含deleted字段）
                         members: latestMembers.map(member => ({
                             userId: member.userId,
@@ -604,8 +566,8 @@ class SavingService {
                             avatar: member.avatar || this.getDefaultAvatar(member.memberName || member.name),
                             status: member.status || 'active',
                             joinTime: member.joinTime || now,
-                            deleted: member.deleted || 0,          // 软删除字段
-                            deletedAt: member.deletedAt || null    // 删除时间字段
+                            deleted: member.deleted || 0,
+                            deletedAt: member.deletedAt || null
                         }))
                     };
 
@@ -634,7 +596,6 @@ class SavingService {
                     // 使用前端数据构造缓存（包含deleted字段）
                     const now = new Date().toISOString();
 
-                    // ===== 关键修改：构造缓存数据时保留 deleted 字段 =====
                     const planToCache = {
                         id: id,
                         name: data.name,
@@ -648,10 +609,10 @@ class SavingService {
                         status: data.status || 'active',
                         createdAt: data.createdAt || now,
                         updatedAt: now,
-                        deleted: 0,  // 默认未删除
+                        deleted: 0,
                         deletedAt: null,
-                        color: data.color || this.getColorByType(data.type || '日常储蓄'),
-                        icon: data.icon || this.getIconByType(data.type || '日常储蓄'),
+                        color: data.color || groupSavingCacheService.getColorByType(data.type || '日常储蓄'),
+                        icon: data.icon || groupSavingCacheService.getIconByType(data.type || '日常储蓄'),
                         // 构造成员数据时保留 deleted 字段
                         members: data.members && data.members.length > 0
                             ? data.members.map(member => ({
@@ -663,7 +624,6 @@ class SavingService {
                                 avatar: member.avatar || this.getDefaultAvatar(member.name),
                                 status: 'active',
                                 joinTime: now,
-                                // 关键修改：保留 deleted 字段
                                 deleted: member.deleted === 1 ? 1 : 0,
                                 deletedAt: member.deleted === 1 ? (member.deletedAt || now) : null
                             }))
@@ -705,50 +665,82 @@ class SavingService {
                 };
             }
 
-            // 处理HTTP错误状态码
-            if (error.response) {
-                const status = error.response.status;
-                const errorMsg = error.response.data?.message || error.response.data?.msg || `请求失败 (${status})`;
-
-                switch (status) {
-                    case 400:
-                        notificationService.showNotification('请求参数错误，请检查输入', 'error');
-                        break;
-                    case 401:
-                        notificationService.showNotification('登录已过期，请重新登录', 'error');
-                        break;
-                    case 403:
-                        notificationService.showNotification('没有权限更新此计划', 'error');
-                        break;
-                    case 404:
-                        notificationService.showNotification('计划不存在', 'error');
-                        break;
-                    default:
-                        notificationService.showNotification(errorMsg, 'error');
-                }
-
-                return {
-                    success: false,
-                    message: errorMsg
-                };
-            }
-
-            const errorMsg = error.message || '更新失败';
-            notificationService.showNotification(errorMsg, 'error');
+            // 其他错误 http-interceptor 已经处理并显示了通知
             return {
                 success: false,
-                message: errorMsg
+                message: error.message || '更新失败'
             };
         }
     }
 
     /**
      * 删除多人存钱计划
+     * @param {number} id - 计划ID
+     * @returns {Promise<Object>} 删除结果
      */
     async deleteGroupSavings(id) {
-        // TODO 删除多人存钱计划
-        //调用接口进行软删除
-        //修改前端数据库
+        // 1. 先检查网络状态
+        if (!navigator.onLine) {
+            console.warn('离线状态无法删除多人存钱计划');
+            notificationService.showNotification('当前处于离线状态，无法删除多人存钱计划，请连接网络后重试', 'warning');
+            return {
+                success: false,
+                message: '当前处于离线状态，无法删除多人存钱计划，请连接网络后重试'
+            };
+        }
+
+        // 2. 获取当前用户ID
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id;
+        if (!userId) {
+            console.error('无法获取用户ID');
+            notificationService.showNotification('用户未登录，请重新登录', 'error');
+            return {
+                success: false,
+                message: '用户未登录，请重新登录'
+            };
+        }
+
+        try {
+            console.log('【Service】开始删除多人存钱计划，ID:', id);
+
+            // 3. 调用后端接口（http-interceptor 会统一处理错误和通知）
+            await savingApi.deleteGroupSaving(id);
+            console.log('【Service】后端删除成功');
+
+            // 4. 更新前端缓存：软删除计划数据
+            const cacheUpdateSuccess = await groupSavingCacheService.softDeletePlan(userId, id);
+
+            if (cacheUpdateSuccess) {
+                console.log('【Service】前端缓存更新成功');
+            } else {
+                console.warn('【Service】前端缓存更新失败，但后端已删除成功');
+            }
+
+            // 5. 返回成功结果
+            return {
+                success: true,
+                code: 200,
+                message: '删除成功'
+            };
+
+        } catch (error) {
+            console.error('【Service】删除多人存钱计划异常:', error);
+
+            // 处理网络错误（http-interceptor 可能没有处理这种）
+            if (this.isNetworkError(error)) {
+                notificationService.showNotification('网络连接失败，请检查网络后重试', 'error');
+                return {
+                    success: false,
+                    message: '网络连接失败，请检查网络后重试'
+                };
+            }
+
+            // 其他错误 http-interceptor 已经处理并显示了通知
+            return {
+                success: false,
+                message: error.message || '删除失败'
+            };
+        }
     }
 
     /**

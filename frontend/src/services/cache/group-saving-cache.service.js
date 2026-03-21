@@ -59,7 +59,7 @@ class GroupSavingCacheService {
                 return [];
             }
 
-            console.log(`根据 `, idName, `查询`, tableName, `:`, id);
+            console.log(`根据 ${idName} 查询 ${tableName}:`, id);
             const results = await indexedDBService.query(tableName, idName, id);
 
             // 如果不包含已删除的，则过滤掉 deleted=1 的数据
@@ -187,8 +187,8 @@ class GroupSavingCacheService {
                     deadline: plan.deadline || '',
                     createdAt: plan.createdAt || plan.createTime || now,
                     updatedAt: plan.updatedAt || plan.updateTime || now,
-                    deleted: plan.deleted || 0,           // 添加软删除字段
-                    deletedAt: plan.deletedAt || null,    // 添加删除时间字段
+                    deleted: plan.deleted || 0,
+                    deletedAt: plan.deletedAt || null,
                     cacheTime: now
                 });
 
@@ -268,6 +268,53 @@ class GroupSavingCacheService {
             return true;
         } catch (error) {
             console.error('软删除成员失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 软删除指定计划（标记为已删除）
+     * @param {string} userId - 用户ID
+     * @param {number|string} planId - 计划ID
+     * @returns {Promise<boolean>} 删除成功返回true
+     */
+    async softDeletePlan(userId, planId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            const now = new Date().toISOString();
+
+            // 1. 获取当前计划数据
+            const plans = await this.getTableDataById('userId', userId, 'group_savings_cache', true);
+            const planToUpdate = plans.find(p => p.id === planId);
+
+            if (!planToUpdate) {
+                console.warn('未找到要删除的计划数据，ID:', planId);
+                return false;
+            }
+
+            // 2. 更新计划数据（软删除）
+            planToUpdate.deleted = 1;
+            planToUpdate.deletedAt = now;
+            planToUpdate.updatedAt = now;
+
+            await indexedDBService.update('group_savings_cache', planToUpdate);
+            console.log('已软删除计划缓存，ID:', planId, 'deletedAt:', now);
+
+            // 3. 也软删除该计划下的所有成员（保持缓存一致）
+            const members = await this.getTableDataById('groupSavingId', planId, 'savings_members_cache', true);
+            for (const member of members) {
+                member.deleted = 1;
+                member.deletedAt = now;
+                member.updateTime = now;
+                await indexedDBService.update('savings_members_cache', member);
+            }
+            console.log(`已软删除计划 ${planId} 的成员缓存，共 ${members.length} 条记录`);
+
+            return true;
+
+        } catch (error) {
+            console.error('软删除计划缓存失败:', error);
             return false;
         }
     }
