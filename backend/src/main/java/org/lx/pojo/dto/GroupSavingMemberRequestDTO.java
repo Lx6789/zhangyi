@@ -24,7 +24,7 @@ import java.math.BigDecimal;
 public class GroupSavingMemberRequestDTO {
 
     @ApiModelProperty(value = "成员姓名")
-    private String name;
+    private String memberName;
     @ApiModelProperty(value = "已存金额")
     private BigDecimal amount;
     @ApiModelProperty(value = "用户id")

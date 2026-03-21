@@ -87,6 +87,7 @@ class GroupSavingCacheService {
             const tables = [
                 'group_savings_cache',
                 'savings_members_cache',
+                'saving_deposit_records_cache'
             ];
 
             for (const tableName of tables) {
@@ -241,7 +242,125 @@ class GroupSavingCacheService {
     }
 
     /**
-     * 软删除指定计划的成员（标记为已删除）
+     * 获取成员的总金额（从存钱记录表计算）
+     * @param {number|string} planId - 计划ID
+     * @param {number} memberUserId - 成员用户ID
+     * @returns {Promise<number>} 成员总金额
+     */
+    async getMemberTotalAmount(planId, memberUserId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            // 检查存钱记录表是否存在
+            if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                console.warn('saving_deposit_records_cache 表不存在');
+                return 0;
+            }
+
+            // 查询该成员的所有存钱记录（包括已删除的）
+            const depositRecords = await indexedDBService.query(
+                'saving_deposit_records_cache',
+                'memberId',
+                memberUserId
+            );
+
+            // 过滤出属于该计划的记录
+            const planRecords = depositRecords.filter(record => record.groupSavingId === planId);
+
+            // 计算总金额
+            const totalAmount = planRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
+
+            console.log(`成员 ${memberUserId} 在计划 ${planId} 中的总金额: ${totalAmount}`);
+            return totalAmount;
+        } catch (error) {
+            console.error('获取成员总金额失败:', error);
+            return 0;
+        }
+    }
+
+    /**
+     * 恢复成员的存钱记录（将 deleted=1 的记录恢复为 deleted=0）
+     * @param {number|string} planId - 计划ID
+     * @param {number} memberUserId - 成员用户ID
+     * @returns {Promise<boolean>}
+     */
+    async restoreMemberDepositRecords(planId, memberUserId) {
+        try {
+            // 检查存钱记录表是否存在
+            if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                console.warn('saving_deposit_records_cache 表不存在');
+                return false;
+            }
+
+            // 查询该成员的所有存钱记录
+            const depositRecords = await indexedDBService.query(
+                'saving_deposit_records_cache',
+                'memberId',
+                memberUserId
+            );
+
+            // 过滤出属于该计划的已删除记录
+            const recordsToRestore = depositRecords.filter(record =>
+                record.groupSavingId === planId && record.deleted === 1
+            );
+
+            for (const record of recordsToRestore) {
+                record.deleted = 0;
+                record.deletedAt = null;
+                await indexedDBService.update('saving_deposit_records_cache', record);
+            }
+
+            console.log(`已恢复成员 ${memberUserId} 的 ${recordsToRestore.length} 条存钱记录`);
+            return true;
+        } catch (error) {
+            console.error('恢复成员存钱记录失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 软删除成员的存钱记录
+     * @param {number|string} planId - 计划ID
+     * @param {number} memberUserId - 成员用户ID
+     * @param {string} deletedAt - 删除时间
+     * @returns {Promise<boolean>}
+     */
+    async softDeleteMemberDepositRecords(planId, memberUserId, deletedAt) {
+        try {
+            // 检查存钱记录表是否存在
+            if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                console.warn('saving_deposit_records_cache 表不存在');
+                return false;
+            }
+
+            // 查询该成员的所有存钱记录
+            const depositRecords = await indexedDBService.query(
+                'saving_deposit_records_cache',
+                'memberId',
+                memberUserId
+            );
+
+            // 过滤出属于该计划的未删除记录
+            const recordsToDelete = depositRecords.filter(record =>
+                record.groupSavingId === planId && record.deleted !== 1
+            );
+
+            for (const record of recordsToDelete) {
+                record.deleted = 1;
+                record.deletedAt = deletedAt;
+                await indexedDBService.update('saving_deposit_records_cache', record);
+            }
+
+            console.log(`已软删除成员 ${memberUserId} 的 ${recordsToDelete.length} 条存钱记录`);
+            return true;
+        } catch (error) {
+            console.error('软删除成员存钱记录失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 软删除指定计划的成员（只修改 deleted 和 deletedAt，不修改 amount）
      * @param {string} userId - 用户ID
      * @param {number|string} planId - 计划ID
      * @param {number} memberUserId - 成员用户ID
@@ -251,24 +370,91 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 查询该成员
+            const now = new Date().toISOString();
+
+            // 1. 查询该成员
             const memberId = `${planId}_${memberUserId}`;
             const member = await indexedDBService.get('savings_members_cache', memberId);
 
             if (member) {
-                // 更新为已删除状态
+                // 2. 更新成员为已删除状态（只修改 deleted 和 deletedAt，不修改 amount）
                 member.deleted = 1;
-                member.deletedAt = new Date().toISOString();
-                member.updateTime = new Date().toISOString();
+                member.deletedAt = now;
+                member.updateTime = now;
 
                 await indexedDBService.update('savings_members_cache', member);
-                console.log(`已软删除成员 ${memberUserId} 从计划 ${planId}`);
+                console.log(`已软删除成员 ${memberUserId} 从计划 ${planId}，金额保持不变: ${member.amount}`);
+
+                // 3. 更新该成员的所有存钱记录为已删除
+                await this.softDeleteMemberDepositRecords(planId, memberUserId, now);
             }
 
             return true;
         } catch (error) {
             console.error('软删除成员失败:', error);
             return false;
+        }
+    }
+
+    /**
+     * 恢复指定计划的成员（只修改 deleted 和 deletedAt，amount 保持不变）
+     * @param {string} userId - 用户ID
+     * @param {number|string} planId - 计划ID
+     * @param {number} memberUserId - 成员用户ID
+     * @returns {Promise<boolean>}
+     */
+    async restoreMember(userId, planId, memberUserId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            const now = new Date().toISOString();
+
+            // 1. 查询该成员
+            const memberId = `${planId}_${memberUserId}`;
+            const member = await indexedDBService.get('savings_members_cache', memberId);
+
+            if (member && member.deleted === 1) {
+                // 2. 更新成员为未删除状态（只修改 deleted 和 deletedAt，amount 保持不变）
+                member.deleted = 0;
+                member.deletedAt = null;
+                // amount 保持不变，不重新计算
+                member.updateTime = now;
+
+                await indexedDBService.update('savings_members_cache', member);
+                console.log(`已恢复成员 ${memberUserId} 到计划 ${planId}，金额保持不变: ${member.amount}`);
+
+                // 3. 恢复该成员的所有存钱记录
+                await this.restoreMemberDepositRecords(planId, memberUserId);
+            }
+
+            return true;
+        } catch (error) {
+            console.error('恢复成员失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 获取成员金额（直接从 saving_members_cache 获取）
+     * @param {string} userId - 用户ID
+     * @param {number|string} planId - 计划ID
+     * @param {number} memberUserId - 成员用户ID
+     * @returns {Promise<number>}
+     */
+    async getMemberAmount(userId, planId, memberUserId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            const memberId = `${planId}_${memberUserId}`;
+            const member = await indexedDBService.get('savings_members_cache', memberId);
+
+            if (member) {
+                return member.amount || 0;
+            }
+            return 0;
+        } catch (error) {
+            console.error('获取成员金额失败:', error);
+            return 0;
         }
     }
 
@@ -308,13 +494,92 @@ class GroupSavingCacheService {
                 member.deletedAt = now;
                 member.updateTime = now;
                 await indexedDBService.update('savings_members_cache', member);
+
+                // 4. 软删除该成员的所有存钱记录
+                await this.softDeleteMemberDepositRecords(planId, member.memberId, now);
             }
-            console.log(`已软删除计划 ${planId} 的成员缓存，共 ${members.length} 条记录`);
+            console.log(`已软删除计划 ${planId} 的 ${members.length} 条成员缓存和对应的存钱记录`);
 
             return true;
 
         } catch (error) {
             console.error('软删除计划缓存失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 存钱后更新缓存
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @param {Object} depositData - 存钱返回的数据 { memberId, amount, memberTotal, planTotal, progress }
+     * @param {string} note - 备注
+     * @returns {Promise<boolean>} 更新成功返回true
+     */
+    async updateCacheAfterDeposit(userId, planId, depositData, note = '') {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            const now = new Date().toISOString();
+
+            // 1. 获取当前计划数据
+            const plans = await this.getTableDataById('userId', userId, 'group_savings_cache', true);
+            const planToUpdate = plans.find(p => p.id === planId);
+
+            if (!planToUpdate) {
+                console.warn('未找到计划缓存数据，ID:', planId);
+                return false;
+            }
+
+            // 2. 更新计划的总金额和进度
+            planToUpdate.currentAmount = depositData.planTotal;
+            planToUpdate.updatedAt = now;
+
+            await indexedDBService.update('group_savings_cache', planToUpdate);
+            console.log('已更新计划缓存，新总金额:', depositData.planTotal, '进度:', depositData.progress);
+
+            // 3. 获取并更新成员金额
+            const members = await this.getTableDataById('groupSavingId', planId, 'savings_members_cache', true);
+            const memberToUpdate = members.find(m => m.memberId === depositData.memberId);
+
+            let oldAmount = 0;
+            if (memberToUpdate) {
+                oldAmount = memberToUpdate.amount;
+                memberToUpdate.amount = depositData.memberTotal;
+                memberToUpdate.updateTime = now;
+                await indexedDBService.update('savings_members_cache', memberToUpdate);
+                console.log('已更新成员缓存，成员ID:', depositData.memberId, '旧金额:', oldAmount, '新金额:', depositData.memberTotal);
+            } else {
+                console.warn('未找到成员缓存数据，memberId:', depositData.memberId);
+            }
+
+            // 4. 添加存钱记录到缓存（用于存钱记录列表）
+            if (indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                const depositRecord = {
+                    id: `${planId}_${depositData.memberId}_${Date.now()}`,
+                    userId: userId,
+                    groupSavingId: planId,
+                    memberId: depositData.memberId,
+                    memberName: memberToUpdate?.memberName || '',
+                    amount: depositData.amount,
+                    note: note,
+                    depositTime: now,
+                    beforeAmount: oldAmount,
+                    afterAmount: depositData.memberTotal,
+                    planBeforeAmount: depositData.planTotal - depositData.amount,
+                    planAfterAmount: depositData.planTotal,
+                    deleted: 0,
+                    deletedAt: null
+                };
+
+                await indexedDBService.add('saving_deposit_records_cache', depositRecord);
+                console.log('已添加存钱记录到缓存');
+            }
+
+            return true;
+
+        } catch (error) {
+            console.error('更新存钱后缓存失败:', error);
             return false;
         }
     }

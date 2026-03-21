@@ -224,6 +224,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import FriendSelector from './FriendSelector.vue'
 import { savingService } from '@/services'
 import { notificationService } from '@/services'
+import groupSavingCacheService from '@/services/cache/group-saving-cache.service'
 
 const props = defineProps({
   formTitle: {
@@ -413,10 +414,10 @@ watch(() => props.initialForm, (newVal) => {
     if (props.currentSavingsType === 'group') {
       form.currentAmount = ''
       if (newVal.members) {
-        // 保留所有成员（包括已删除的）
+        // 保留所有成员（包括已删除的），确保金额正确加载
         form.members = newVal.members.map(m => ({
           ...m,
-          amount: m.amount || 0,
+          amount: m.amount !== undefined && m.amount !== null ? m.amount : 0,
           deleted: m.deleted || 0,
           deletedAt: m.deletedAt || null
         }))
@@ -548,64 +549,87 @@ const openFriendSelector = () => {
 /**
  * 处理好友确认选择
  */
-const handleFriendConfirm = (selected) => {
+const handleFriendConfirm = async (selected) => {
   console.log('从 FriendSelector 接收选中的好友:', selected)
 
-  // 保存原有的创建者
+  // 保存原有的创建者（从所有成员中找，包括已删除的）
   const existingCreator = form.members.find(m => m.isCreator)
 
   // 清空现有非创建者成员（只保留创建者）
   if (existingCreator) {
     form.members = [existingCreator]
-    console.log('【SavingForm】保留创建者:', existingCreator.name)
+    console.log('【SavingForm】保留创建者:', existingCreator.name, '金额:', existingCreator.amount)
   } else {
     form.members = []
   }
 
   // 添加选中的好友
-  selected.forEach(friend => {
+  for (const friend of selected) {
     if (!friend.userId || !friend.friendId) {
       console.error('好友数据不完整:', friend)
-      notificationService.showNotification(`好友 ${friend.name || friend.nickname} 信息不完整`, 'error')
-      return
+      notificationService.showNotification(`好友 ${friend.nickname || friend.name} 信息不完整`, 'error')
+      continue
     }
 
     const userId = parseInt(friend.userId)
     if (isNaN(userId) || userId <= 0 || userId > 2147483647) {
       console.error('userId 无效:', friend.userId)
-      notificationService.showNotification(`好友 ${friend.name || friend.nickname} 的ID格式错误`, 'error')
-      return
+      notificationService.showNotification(`好友 ${friend.nickname || friend.name} 的ID格式错误`, 'error')
+      continue
     }
 
     const friendId = parseInt(friend.friendId)
     if (isNaN(friendId) || friendId <= 0) {
       console.error('friendId 无效:', friend.friendId)
-      notificationService.showNotification(`好友 ${friend.name || friend.nickname} 的关系ID无效`, 'error')
-      return
+      notificationService.showNotification(`好友 ${friend.nickname || friend.name} 的关系ID无效`, 'error')
+      continue
     }
 
-    const existingMember = form.members.find(m => m.userId === userId)
+    // 关键：从 props.initialForm 中查找该成员是否存在（包括已删除的）
+    // 因为 props.initialForm 是编辑时传入的原始数据，包含所有成员
+    const existingMember = props.initialForm.members?.find(m => m.userId === userId)
 
     if (existingMember) {
+      // 如果存在且是已删除的，恢复它
       if (existingMember.deleted === 1) {
-        existingMember.deleted = 0
-        existingMember.deletedAt = null
-        existingMember.name = friend.name || friend.nickname || `用户${userId}`
-        existingMember.avatar = friend.avatar
-        existingMember.phone = friend.phone
-        existingMember.friendId = friendId
-        console.log('已恢复之前删除的成员:', {
+        // 关键：恢复成员时，使用 existingMember.amount 中的值
+        const realAmount = existingMember.amount !== undefined && existingMember.amount !== null ? existingMember.amount : 0
+
+        console.log('【SavingForm】恢复已删除成员:', {
           userId,
-          name: existingMember.name,
-          deleted: existingMember.deleted,
-          deletedAt: existingMember.deletedAt
+          name: existingMember.name || existingMember.memberName,
+          amount: realAmount,
+          deleted: existingMember.deleted
         })
+
+        form.members.push({
+          userId: userId,
+          friendId: friendId,
+          name: existingMember.name || existingMember.memberName || friend.nickname || `用户${userId}`,
+          avatar: existingMember.avatar || friend.avatar,
+          phone: existingMember.phone || friend.phone,
+          amount: realAmount,  // 使用原有的金额
+          isCreator: existingMember.isCreator || false,
+          deleted: 0,
+          deletedAt: null
+        })
+      } else if (existingMember.deleted === 0) {
+        // 如果成员已经存在且未删除，检查是否已在 form.members 中
+        const alreadyInForm = form.members.some(m => m.userId === userId)
+        if (!alreadyInForm) {
+          form.members.push({
+            ...existingMember,
+            deleted: 0,
+            deletedAt: null
+          })
+        }
       }
     } else {
+      // 否则添加新成员，金额为0
       form.members.push({
         userId: userId,
         friendId: friendId,
-        name: friend.name || friend.nickname || `用户${userId}`,
+        name: friend.nickname || friend.name || `用户${userId}`,
         avatar: friend.avatar,
         phone: friend.phone,
         amount: 0,
@@ -613,24 +637,30 @@ const handleFriendConfirm = (selected) => {
         deleted: 0,
         deletedAt: null
       })
-      console.log('【SavingForm】添加新成员:', friend.name || friend.nickname)
+      console.log('【SavingForm】添加新成员:', friend.nickname || friend.name, '金额: 0')
     }
-  })
+  }
 
-  // 确保创建者存在且状态正确
+  // 确保创建者仍然存在且状态正确
   if (existingCreator) {
     const currentCreator = form.members.find(m => m.isCreator)
     if (!currentCreator) {
+      // 如果创建者被意外移除了，重新添加
       form.members.unshift(existingCreator)
       console.log('【SavingForm】创建者被意外移除，已重新添加')
     } else if (currentCreator.deleted === 1) {
+      // 如果创建者被标记为删除，恢复它
       currentCreator.deleted = 0
       currentCreator.deletedAt = null
       console.log('【SavingForm】恢复被标记删除的创建者')
     }
   } else {
+    // 如果没有创建者，确保有一个
     ensureCreatorInMembers()
   }
+
+  // 重新验证金额
+  validateAmounts()
 
   showFriendSelector.value = false
 }
@@ -797,7 +827,7 @@ const submitForm = async () => {
     const creator = form.members.find(m => m.isCreator)
     const now = new Date().toISOString()
 
-    // 关键：发送所有成员（包括已删除的）给后端
+    // 关键：发送所有成员（包括已删除的）给后端，确保金额正确传递
     submitData = {
       name: form.name.trim(),
       reason: form.reason?.trim() || '',
@@ -814,7 +844,7 @@ const submitForm = async () => {
       members: form.members.map(m => ({
         userId: m.userId,
         name: m.name,
-        amount: Number(m.amount) || 0,
+        amount: m.amount !== undefined && m.amount !== null ? Number(m.amount) : 0,
         isCreator: m.isCreator || false,
         deleted: m.deleted === 1 ? 1 : 0,
         deletedAt: m.deleted === 1 ? (m.deletedAt || now) : null
@@ -829,6 +859,7 @@ const submitForm = async () => {
       members: submitData.members.map(m => ({
         name: m.name,
         isCreator: m.isCreator,
+        amount: m.amount,
         deleted: m.deleted,
         deletedAt: m.deletedAt
       }))

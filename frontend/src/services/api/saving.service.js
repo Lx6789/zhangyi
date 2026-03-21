@@ -509,7 +509,7 @@ class SavingService {
             // 构造成员信息 - 多个成员，保留 deleted 字段
             members: data.members && data.members.length > 0
                 ? data.members.map(member => ({
-                    name: member.name || member.memberName,
+                    memberName: member.name || member.memberName,
                     amount: member.amount || 0,
                     userId: member.userId,
                     isCreator: member.isCreator || member.userId === creator.userId,
@@ -745,9 +745,137 @@ class SavingService {
 
     /**
      * 向多人存钱计划存钱
+     * @param {number} planId - 计划ID
+     * @param {Object} data - 存钱数据 { memberId, amount, note }
+     * @returns {Promise<Object>} 存钱结果
      */
     async depositToGroupSaving(planId, data) {
-        // TODO 向多人存钱计划存钱
+        // 1. 先检查网络状态
+        if (!navigator.onLine) {
+            console.warn('离线状态无法存钱');
+            notificationService.showNotification('当前处于离线状态，无法存钱，请连接网络后重试', 'warning');
+            return {
+                code: 500,
+                message: '当前处于离线状态，无法存钱，请连接网络后重试'
+            };
+        }
+
+        // 2. 获取当前用户ID
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id;
+        if (!userId) {
+            console.error('无法获取用户ID');
+            notificationService.showNotification('用户未登录，请重新登录', 'error');
+            return {
+                code: 401,
+                message: '用户未登录，请重新登录'
+            };
+        }
+
+        // 3. 验证数据
+        if (!planId) {
+            console.error('计划ID不能为空');
+            notificationService.showNotification('计划信息不存在', 'error');
+            return {
+                code: 400,
+                message: '计划信息不存在'
+            };
+        }
+
+        if (!data.memberId) {
+            console.error('成员ID不能为空');
+            notificationService.showNotification('请选择要存入的成员', 'warning');
+            return {
+                code: 400,
+                message: '请选择要存入的成员'
+            };
+        }
+
+        const amount = parseFloat(data.amount);
+        if (isNaN(amount) || amount <= 0) {
+            console.error('金额无效:', data.amount);
+            notificationService.showNotification('请输入有效的存入金额', 'warning');
+            return {
+                code: 400,
+                message: '请输入有效的存入金额'
+            };
+        }
+
+        try {
+            console.log('【Service】开始存钱，计划ID:', planId, '数据:', data);
+
+            // 4. 调用后端接口
+            const response = await savingApi.depositToGroupSaving(planId, {
+                memberId: data.memberId,
+                amount: amount,
+                note: data.note || ''
+            });
+
+            console.log('【Service】存钱响应:', response);
+
+            // 5. 处理响应
+            if (response) {
+                // 6. 更新前端缓存（调用缓存服务的方法）
+                const cacheUpdateSuccess = await groupSavingCacheService.updateCacheAfterDeposit(
+                    userId,
+                    planId,
+                    response,
+                    data.note || ''
+                );
+
+                if (cacheUpdateSuccess) {
+                    console.log('【Service】前端缓存更新成功');
+                } else {
+                    console.warn('【Service】前端缓存更新失败，但后端已存钱成功');
+                }
+
+                // 7. 显示成功通知
+                const successMessage = response.memberTotal
+                    ? `成功存入 ¥${amount.toFixed(2)}，该成员累计已存 ¥${response.memberTotal.toFixed(2)}`
+                    : `成功存入 ¥${amount.toFixed(2)}`;
+                notificationService.showNotification(successMessage, 'success');
+
+                // 8. 返回成功结果
+                return {
+                    code: 200,
+                    message: '存钱成功',
+                    data: response
+                };
+            } else {
+                console.error('【Service】存钱失败: 响应数据为空');
+                notificationService.showNotification('存钱失败，请重试', 'error');
+                return {
+                    code: 500,
+                    message: '存钱失败，请重试'
+                };
+            }
+
+        } catch (error) {
+            console.error('【Service】存钱异常:', error);
+
+            // 处理网络错误
+            if (this.isNetworkError(error)) {
+                notificationService.showNotification('网络连接失败，请检查网络后重试', 'error');
+                return {
+                    code: 500,
+                    message: '网络连接失败，请检查网络后重试'
+                };
+            }
+
+            // 处理业务错误
+            const errorMsg = error.response?.data?.message || error.message || '存钱失败';
+
+            // 检查是否是超出目标金额的错误
+            if (errorMsg.includes('超出目标金额') || errorMsg.includes('最多可存')) {
+                notificationService.showNotification(errorMsg, 'warning');
+            } else {
+                notificationService.showNotification(errorMsg, 'error');
+            }
+
+            return {
+                code: error.response?.status || 500,
+                message: errorMsg
+            };
+        }
     }
 
     /**

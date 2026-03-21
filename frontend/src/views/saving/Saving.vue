@@ -453,6 +453,9 @@ const editPersonalPlan = (plan) => {
 }
 
 const editGroupPlan = (plan) => {
+  console.log('【editGroupPlan】开始编辑计划:', plan.id, plan.name)
+  console.log('【editGroupPlan】原始成员数据:', plan.members)
+
   Object.assign(form, {
     name: plan.name,
     reason: plan.reason,
@@ -460,14 +463,27 @@ const editGroupPlan = (plan) => {
     currentAmount: plan.currentAmount,
     deadline: plan.deadline,
     type: plan.type,
-    members: plan.members ? plan.members.map(m => ({
-      ...m,
-      isCreator: m.userId === plan.creatorId,
-      name: m.name || m.memberName,
-      deleted: m.deleted || 0,
-      deletedAt: m.deletedAt || null
-    })) : []
+    // 关键：加载所有成员，包括 deleted=1 的成员
+    members: plan.members ? plan.members.map(m => {
+      console.log('【editGroupPlan】处理成员:', m.userId, 'amount:', m.amount, 'deleted:', m.deleted)
+      return {
+        ...m,
+        isCreator: m.userId === plan.creatorId,
+        name: m.memberName || `用户${m.userId}`,
+        amount: m.amount !== undefined && m.amount !== null ? m.amount : 0,
+        deleted: m.deleted !== undefined ? m.deleted : 0,
+        deletedAt: m.deletedAt || null
+      }
+    }) : []
   })
+
+  console.log('【editGroupPlan】处理后 form.members 数量:', form.members.length)
+  console.log('【editGroupPlan】form.members 详情:', form.members.map(m => ({
+    userId: m.userId,
+    name: m.name,
+    amount: m.amount,
+    deleted: m.deleted
+  })))
 
   isEditing.value = true
   isEditingOwnPlan.value = isCreator(plan)
@@ -475,7 +491,6 @@ const editGroupPlan = (plan) => {
   editingType.value = 'group'
   currentSavingsType.value = 'group'
 
-  // 滚动到表单
   scrollToForm()
 }
 

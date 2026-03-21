@@ -32,7 +32,9 @@
               <span class="member-count">({{ getActiveMemberCount(plan) }}人)</span>
             </h3>
             <p>{{ plan.reason }}</p>
-            <div class="savings-amount">已存 ¥{{ formatNumber(getActiveTotalAmount(plan)) }} / 目标 ¥{{ formatNumber(plan.targetAmount) }}</div>
+            <div class="savings-amount">
+              已存 ¥{{ formatNumber(plan.currentAmount) }} / 目标 ¥{{ formatNumber(plan.targetAmount) }}
+            </div>
             <div class="savings-progress">
               <div class="progress-bar">
                 <div class="progress-fill" :style="{ width: plan.progress + '%' }"></div>
@@ -108,8 +110,8 @@
               <h4>{{ currentPlan?.name }}</h4>
               <p class="plan-reason">{{ currentPlan?.reason }}</p>
               <div class="plan-progress">
-                <span>当前进度: {{ calculateProgress(getActiveTotalAmount(currentPlan), currentPlan?.targetAmount) }}%</span>
-                <span>已存: ¥{{ formatNumber(getActiveTotalAmount(currentPlan)) }} / ¥{{ formatNumber(currentPlan?.targetAmount) }}</span>
+                <span>当前进度: {{ currentPlan?.progress || 0 }}%</span>
+                <span>已存: ¥{{ formatNumber(currentPlan?.currentAmount) }} / ¥{{ formatNumber(currentPlan?.targetAmount) }}</span>
               </div>
             </div>
           </div>
@@ -245,6 +247,7 @@
 <script setup>
 import { ref, reactive, computed, defineProps, defineEmits } from 'vue'
 import { savingService, notificationService } from '@/services'
+import groupSavingCacheService from '@/services/cache/group-saving-cache.service'
 
 const props = defineProps({
   groupSavings: {
@@ -284,40 +287,15 @@ const leaving = ref(false)
 const submitting = ref(false)
 
 // ========== 工具函数 ==========
-const getIconByType = (type) => {
-  const icons = {
-    '日常储蓄': 'fas fa-coins',
-    '旅行基金': 'fas fa-plane',
-    '教育基金': 'fas fa-graduation-cap',
-    '购房基金': 'fas fa-home',
-    '购车基金': 'fas fa-car',
-    '应急资金': 'fas fa-first-aid',
-    '其他': 'fas fa-star'
-  }
-  return icons[type] || 'fas fa-piggy-bank'
-}
-
-const getColorByType = (type) => {
-  const colors = {
-    '日常储蓄': '#2ecc71',
-    '旅行基金': '#3498DB',
-    '教育基金': '#9B59B6',
-    '购房基金': '#E74C3C',
-    '购车基金': '#F39C12',
-    '应急资金': '#E67E22',
-    '其他': '#80A492'
-  }
-  return colors[type] || '#80A492'
-}
-
+// 使用缓存服务的方法获取图标和颜色
 const getPlanIcon = (plan) => {
   if (!plan) return 'fas fa-piggy-bank'
-  return plan.icon || getIconByType(plan.type)
+  return plan.icon || groupSavingCacheService.getIconByType(plan.type)
 }
 
 const getPlanColor = (plan) => {
   if (!plan) return '#80A492'
-  return plan.color || getColorByType(plan.type)
+  return plan.color || groupSavingCacheService.getColorByType(plan.type)
 }
 
 const formatNumber = (num) => num !== undefined && num !== null ? num.toLocaleString('zh-CN') : '0'
@@ -325,17 +303,10 @@ const formatNumber = (num) => num !== undefined && num !== null ? num.toLocaleSt
 const getMemberName = (userId) => {
   if (!planToLeave.value || !planToLeave.value.members) return ''
   const member = planToLeave.value.members.find(m => m.userId === userId)
-  return member?.name || ''
+  return member?.name || member?.memberName || ''
 }
 
 const isCreator = (plan) => plan?.creatorId === props.currentUser?.id
-
-const calculateProgress = (current, target) => {
-  if (!target || target <= 0) return 0
-  if (!current || current <= 0) return 0
-  const progress = (current / target) * 100
-  return Math.min(Math.round(progress), 100)
-}
 
 const getPlanClass = (plan) => {
   if (plan.completed || plan.progress >= 100) return 'completed'
@@ -351,7 +322,13 @@ const getPlanClass = (plan) => {
  */
 const getActiveMembers = (plan) => {
   if (!plan || !plan.members) return []
-  return plan.members.filter(member => member.deleted !== 1)
+  return plan.members
+      .filter(member => member.deleted !== 1)
+      .map(member => ({
+        ...member,
+        // 确保 name 字段存在（兼容 memberName 字段）
+        name: member.name || member.memberName || '未知成员'
+      }))
 }
 
 /**
@@ -363,26 +340,19 @@ const getActiveMemberCount = (plan) => {
   return getActiveMembers(plan).length
 }
 
-/**
- * 计算活跃成员的总金额
- * @param {Object} plan - 计划对象
- * @returns {number} 活跃成员总金额
- */
-const getActiveTotalAmount = (plan) => {
-  const activeMembers = getActiveMembers(plan)
-  return activeMembers.reduce((sum, member) => sum + (member.amount || 0), 0)
-}
-
 // ========== 计算属性 ==========
 /**
  * 其他活跃成员（用于创建者退出时选择）
  */
 const otherActiveMembers = computed(() => {
   if (!planToLeave.value || !planToLeave.value.members) return []
-  // 过滤掉已删除的成员和当前用户
-  return planToLeave.value.members.filter(m =>
-      m.userId !== props.currentUser?.id && m.deleted !== 1
-  )
+  // 过滤掉已删除的成员和当前用户，并确保 name 字段存在
+  return planToLeave.value.members
+      .filter(m => m.userId !== props.currentUser?.id && m.deleted !== 1)
+      .map(member => ({
+        ...member,
+        name: member.name || member.memberName || '未知成员'
+      }))
 })
 
 // ========== 计划详情 ==========
@@ -433,8 +403,8 @@ const handleAddMoney = async () => {
     return
   }
 
-  // 验证是否超过目标金额（使用活跃成员总金额）
-  const currentTotal = getActiveTotalAmount(currentPlan.value)
+  // 验证是否超过目标金额（使用计划表中的 currentAmount）
+  const currentTotal = currentPlan.value.currentAmount || 0
   const targetAmount = currentPlan.value.targetAmount || 0
 
   if (currentTotal + amount > targetAmount) {
@@ -527,17 +497,17 @@ const updateLocalPlanAfterDeposit = (depositData) => {
   // 创建更新后的计划对象
   const updatedPlan = {...props.groupSavings[planIndex]}
 
-  // 更新计划总金额
+  // 更新计划总金额（使用后端返回的数据）
   if (depositData.planTotal !== undefined) {
     updatedPlan.currentAmount = depositData.planTotal
   }
 
-  // 更新进度
+  // 更新进度（使用后端返回的数据）
   if (depositData.progress !== undefined) {
     updatedPlan.progress = depositData.progress
   }
 
-  // 更新成员金额
+  // 更新成员金额（使用后端返回的数据）
   if (depositData.memberId && depositData.memberTotal !== undefined) {
     const memberIndex = updatedPlan.members?.findIndex(m => m.userId === depositData.memberId)
     if (memberIndex !== -1 && updatedPlan.members) {
@@ -549,7 +519,7 @@ const updateLocalPlanAfterDeposit = (depositData) => {
   }
 
   // 更新 completed 状态
-  updatedPlan.completed = getActiveTotalAmount(updatedPlan) >= updatedPlan.targetAmount
+  updatedPlan.completed = updatedPlan.progress >= 100 || updatedPlan.currentAmount >= updatedPlan.targetAmount
 
   // 创建新的数组并触发更新
   const newGroupSavings = [...props.groupSavings]
@@ -602,6 +572,7 @@ const handleLeavePlan = async (newCreatorId) => {
 </script>
 
 <style scoped>
+/* 样式保持不变，与之前相同 */
 .savings-section {
   background-color: var(--white);
   border-radius: 20px;
