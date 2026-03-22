@@ -709,6 +709,517 @@ class GroupSavingCacheService {
         }
     }
 
+    // services/cache/group-saving-cache.service.js
+
+// 在 GroupSavingCacheService 类中添加以下方法
+
+    /**
+     * 保存计划详情到缓存
+     * @param {string} userId - 用户ID
+     * @param {Object} planDetail - 计划详情
+     * @returns {Promise<boolean>}
+     */
+    async savePlanDetail(userId, planDetail) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            if (!planDetail) {
+                return false;
+            }
+
+            const now = new Date().toISOString();
+
+            // 保存计划详情
+            const planCache = {
+                id: planDetail.id,
+                userId: userId,
+                planName: planDetail.name,
+                reason: planDetail.reason || '',
+                description: planDetail.description || '',
+                targetAmount: planDetail.targetAmount || 0,
+                currentAmount: planDetail.currentAmount || 0,
+                type: planDetail.type || '日常储蓄',
+                color: planDetail.color || this.getColorByType(planDetail.type),
+                icon: planDetail.icon || this.getIconByType(planDetail.type),
+                creatorId: planDetail.creatorId,
+                status: planDetail.status || 'active',
+                deadline: planDetail.deadline || '',
+                createdAt: planDetail.createdAt || now,
+                updatedAt: planDetail.updatedAt || now,
+                deleted: planDetail.deleted || 0,
+                deletedAt: planDetail.deletedAt || null,
+                progress: planDetail.progress || 0,
+                completed: planDetail.completed || false,
+                memberCount: planDetail.memberCount || 0,
+                cacheTime: now,
+                isDetail: true  // 标记为详情数据
+            };
+
+            await indexedDBService.bulkPut('group_savings_cache', [planCache]);
+
+            // 保存成员数据
+            if (planDetail.members && planDetail.members.length > 0) {
+                const membersCache = planDetail.members.map(member => ({
+                    id: `${planDetail.id}_${member.userId}`,
+                    userId: userId,
+                    groupSavingId: planDetail.id,
+                    memberId: member.userId,
+                    memberName: member.memberName || member.name || `用户${member.userId}`,
+                    avatar: member.avatar || '',
+                    amount: member.amount || 0,
+                    isCreator: member.isCreator || member.userId === planDetail.creatorId,
+                    status: member.status || 'active',
+                    joinTime: member.joinTime || now,
+                    deleted: member.deleted || 0,
+                    deletedAt: member.deletedAt || null,
+                    updateTime: now,
+                    cacheTime: now
+                }));
+
+                await indexedDBService.bulkPut('savings_members_cache', membersCache);
+            }
+
+            console.log('【缓存】计划详情保存成功:', planDetail.name);
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】保存计划详情失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 获取计划详情
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @returns {Promise<Object|null>}
+     */
+    async getPlanDetail(userId, planId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            // 查询计划详情
+            const plans = await indexedDBService.query('group_savings_cache', 'userId', userId);
+            const plan = plans.find(p => p.id === planId);
+
+            if (!plan) {
+                console.log('【缓存】未找到计划详情:', planId);
+                return null;
+            }
+
+            // 查询成员数据
+            const members = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
+            const userMembers = members.filter(m => m.userId === userId);
+
+            // 构建返回数据
+            return {
+                id: plan.id,
+                name: plan.planName,
+                reason: plan.reason,
+                description: plan.description,
+                targetAmount: plan.targetAmount,
+                currentAmount: plan.currentAmount,
+                type: plan.type,
+                deadline: plan.deadline,
+                creatorId: plan.creatorId,
+                status: plan.status,
+                createdAt: plan.createdAt,
+                updatedAt: plan.updatedAt,
+                deleted: plan.deleted,
+                deletedAt: plan.deletedAt,
+                progress: plan.progress || (plan.targetAmount > 0
+                    ? Math.min(Math.round((plan.currentAmount / plan.targetAmount) * 100), 100)
+                    : 0),
+                completed: plan.currentAmount >= plan.targetAmount,
+                color: plan.color,
+                icon: plan.icon,
+                members: members.map(m => ({
+                    id: m.id,
+                    userId: m.memberId,
+                    memberName: m.memberName,
+                    name: m.memberName,
+                    amount: m.amount,
+                    isCreator: m.isCreator || m.memberId === plan.creatorId,
+                    joinTime: m.joinTime,
+                    deleted: m.deleted,
+                    deletedAt: m.deletedAt,
+                    avatar: m.avatar
+                })),
+                memberCount: members.filter(m => m.deleted !== 1).length,
+                // 标记当前用户是否在计划中
+                isMember: userMembers.length > 0,
+                userMember: userMembers[0] || null
+            };
+
+        } catch (error) {
+            console.error('【缓存】获取计划详情失败:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 清除指定计划的缓存
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @returns {Promise<boolean>}
+     */
+    async clearPlanCache(userId, planId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            // 删除计划缓存
+            const plans = await indexedDBService.query('group_savings_cache', 'userId', userId);
+            const planToDelete = plans.find(p => p.id === planId);
+            if (planToDelete) {
+                await indexedDBService.delete('group_savings_cache', planToDelete.id);
+            }
+
+            // 删除成员缓存
+            const members = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
+            for (const member of members) {
+                await indexedDBService.delete('savings_members_cache', member.id);
+            }
+
+            // 删除存钱记录缓存
+            const records = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
+            for (const record of records) {
+                await indexedDBService.delete('saving_deposit_records_cache', record.id);
+            }
+
+            console.log('【缓存】已清除计划缓存:', planId);
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】清除计划缓存失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 保存存钱记录到缓存
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @param {Array} records - 存钱记录列表
+     * @param {Object} queryParams - 查询参数
+     * @returns {Promise<boolean>}
+     */
+    async saveDepositRecords(userId, planId, records, queryParams = {}) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            const now = new Date().toISOString();
+
+            // 保存每条记录
+            for (const record of records) {
+                const recordId = record.id || `${planId}_${record.memberId}_${Date.now()}`;
+                const recordCache = {
+                    id: recordId,
+                    userId: userId,
+                    groupSavingId: planId,
+                    memberId: record.memberId,
+                    memberName: record.memberName,
+                    amount: record.amount,
+                    note: record.note || '',
+                    depositTime: record.depositTime || record.createTime || now,
+                    beforeAmount: record.beforeAmount || 0,
+                    afterAmount: record.afterAmount || 0,
+                    planBeforeAmount: record.planBeforeAmount || 0,
+                    planAfterAmount: record.planAfterAmount || 0,
+                    deleted: record.deleted || 0,
+                    deletedAt: record.deletedAt || null,
+                    cacheTime: now
+                };
+
+                await indexedDBService.bulkPut('saving_deposit_records_cache', [recordCache]);
+            }
+
+            // 保存分页信息到元数据
+            const metaKey = `records_meta_${planId}`;
+            const metaData = {
+                id: metaKey,
+                userId: userId,
+                planId: planId,
+                total: records.length,
+                queryParams: queryParams,
+                updateTime: now
+            };
+
+            // 使用单独的表或存储元数据
+            if (indexedDBService.db.objectStoreNames.contains('records_meta_cache')) {
+                await indexedDBService.bulkPut('records_meta_cache', [metaData]);
+            }
+
+            console.log('【缓存】存钱记录保存成功:', records.length);
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】保存存钱记录失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 获取存钱记录（分页）
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @param {Object} queryParams - 查询参数 { page, size, memberId, startTime, endTime }
+     * @returns {Promise<Object|null>}
+     */
+    async getDepositRecords(userId, planId, queryParams = {}) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            const page = queryParams.page || 1;
+            const size = queryParams.size || 10;
+
+            // 查询所有存钱记录
+            const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
+
+            // 过滤用户相关记录
+            let filtered = allRecords.filter(r => r.userId === userId);
+
+            // 按成员过滤
+            if (queryParams.memberId) {
+                filtered = filtered.filter(r => r.memberId === queryParams.memberId);
+            }
+
+            // 按时间范围过滤
+            if (queryParams.startTime) {
+                filtered = filtered.filter(r => new Date(r.depositTime) >= new Date(queryParams.startTime));
+            }
+            if (queryParams.endTime) {
+                filtered = filtered.filter(r => new Date(r.depositTime) <= new Date(queryParams.endTime + ' 23:59:59'));
+            }
+
+            // 按时间倒序排序
+            filtered.sort((a, b) => new Date(b.depositTime) - new Date(a.depositTime));
+
+            // 统计
+            const normalCount = filtered.filter(r => r.deleted !== 1).length;
+            const deletedCount = filtered.filter(r => r.deleted === 1).length;
+
+            // 分页
+            const start = (page - 1) * size;
+            const end = start + size;
+            const pagedRecords = filtered.slice(start, end);
+
+            // 转换为前端需要的格式
+            const records = pagedRecords.map(r => ({
+                id: r.id,
+                memberId: r.memberId,
+                memberName: r.memberName,
+                amount: r.amount,
+                note: r.note,
+                createTime: r.depositTime,
+                depositTime: r.depositTime,
+                deleted: r.deleted,
+                deletedAt: r.deletedAt
+            }));
+
+            return {
+                records: records,
+                total: filtered.length,
+                page: page,
+                size: size,
+                pages: Math.ceil(filtered.length / size),
+                stats: { normalCount, deletedCount }
+            };
+
+        } catch (error) {
+            console.error('【缓存】获取存钱记录失败:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 保存成员存钱记录
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @param {number} memberId - 成员用户ID
+     * @param {Array} records - 存钱记录
+     * @returns {Promise<boolean>}
+     */
+    async saveMemberDepositRecords(userId, planId, memberId, records) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            if (!records || records.length === 0) {
+                console.log('【缓存】没有成员记录需要保存');
+                return true;
+            }
+
+            const now = new Date().toISOString();
+
+            // 先清除该成员旧的记录缓存
+            await this.clearMemberDepositRecords(userId, planId, memberId);
+
+            // 保存每条新记录
+            for (const record of records) {
+                // 生成唯一ID，使用后端返回的 id 如果存在
+                const recordId = record.id ? `record_${record.id}` : `member_${planId}_${memberId}_${Date.now()}_${Math.random()}`;
+
+                const recordCache = {
+                    id: recordId,
+                    userId: userId,
+                    groupSavingId: planId,
+                    memberId: memberId,
+                    memberName: record.memberName || '',
+                    amount: record.amount || 0,
+                    note: record.note || '',
+                    depositTime: record.depositTime || record.createTime || now,
+                    createTime: record.createTime || now,
+                    beforeAmount: record.beforeAmount || 0,
+                    afterAmount: record.afterAmount || 0,
+                    planBeforeAmount: record.planBeforeAmount || 0,
+                    planAfterAmount: record.planAfterAmount || 0,
+                    deleted: record.deleted || 0,
+                    deletedAt: record.deletedAt || null,
+                    isMemberRecord: true,
+                    cacheTime: now,
+                    // 保留原始记录ID
+                    originalId: record.id
+                };
+
+                await indexedDBService.bulkPut('saving_deposit_records_cache', [recordCache]);
+            }
+
+            console.log('【缓存】成员存钱记录保存成功:', memberId, records.length);
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】保存成员存钱记录失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 清除成员存钱记录缓存
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @param {number} memberId - 成员用户ID
+     * @returns {Promise<boolean>}
+     */
+    async clearMemberDepositRecords(userId, planId, memberId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            // 检查表是否存在
+            if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                console.log('【缓存】saving_deposit_records_cache 表不存在');
+                return true;
+            }
+
+            // 查询该成员的所有存钱记录
+            const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
+
+            const memberRecords = allRecords.filter(r =>
+                r.userId === userId &&
+                r.memberId === memberId
+            );
+
+            // 删除这些记录
+            for (const record of memberRecords) {
+                await indexedDBService.delete('saving_deposit_records_cache', record.id);
+            }
+
+            console.log('【缓存】已清除成员', memberId, '的', memberRecords.length, '条记录');
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】清除成员存钱记录失败:', error);
+            return false;
+        }
+    }
+
+
+    /**
+     * 获取成员存钱记录
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @param {number} memberId - 成员用户ID
+     * @returns {Promise<Array>}
+     */
+    async getMemberDepositRecords(userId, planId, memberId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            // 检查表是否存在
+            if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                console.warn('【缓存】saving_deposit_records_cache 表不存在');
+                return [];
+            }
+
+            // 查询所有记录
+            const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
+
+            // 过滤出该成员的记录
+            const memberRecords = allRecords.filter(r =>
+                r.userId === userId &&
+                r.memberId === memberId
+            );
+
+            // 按时间倒序排序
+            memberRecords.sort((a, b) => {
+                const timeA = new Date(a.depositTime || a.createTime || 0).getTime();
+                const timeB = new Date(b.depositTime || b.createTime || 0).getTime();
+                return timeB - timeA;
+            });
+
+            // 转换为前端需要的格式
+            const formattedRecords = memberRecords.map(r => ({
+                id: r.originalId || r.id,
+                amount: r.amount,
+                note: r.note,
+                createTime: r.depositTime || r.createTime,
+                depositTime: r.depositTime || r.createTime,
+                deleted: r.deleted,
+                deletedAt: r.deletedAt,
+                memberName: r.memberName
+            }));
+
+            console.log('【缓存】获取成员存钱记录成功:', memberId, formattedRecords.length);
+            return formattedRecords;
+
+        } catch (error) {
+            console.error('【缓存】获取成员存钱记录失败:', error);
+            return [];
+        }
+    }
+
+    /**
+     * 保存存钱记录统计信息
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @param {Object} stats - 统计信息
+     * @returns {Promise<boolean>}
+     */
+    async saveRecordsStats(userId, planId, stats) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            const statsKey = `stats_${planId}`;
+            const statsCache = {
+                id: statsKey,
+                userId: userId,
+                planId: planId,
+                total: stats.total,
+                normalCount: stats.normalCount,
+                deletedCount: stats.deletedCount,
+                updateTime: new Date().toISOString()
+            };
+
+            if (indexedDBService.db.objectStoreNames.contains('records_stats_cache')) {
+                await indexedDBService.bulkPut('records_stats_cache', [statsCache]);
+            }
+
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】保存统计信息失败:', error);
+            return false;
+        }
+    }
+
     /**
      * 根据类型获取图标
      * @param {string} type - 计划类型

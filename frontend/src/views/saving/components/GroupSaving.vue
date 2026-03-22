@@ -22,8 +22,8 @@
           </button>
         </div>
 
-        <!-- 卡片主体内容 -->
-        <div class="savings-content" @click="viewPlanDetails(plan)">
+        <!-- 卡片主体内容 - 点击时打开详情弹框 -->
+        <div class="savings-content" @click="openPlanDetail(plan)">
           <div class="savings-icon" :style="{ backgroundColor: plan.color }">
             <i :class="plan.icon"></i>
           </div>
@@ -241,6 +241,35 @@
         </div>
       </div>
     </div>
+
+    <!-- 计划详情弹框 -->
+    <PlanDetailModal
+        v-if="showPlanDetailModal && selectedPlan"
+        :selected-plan="selectedPlan"
+        :is-online="isOnline"
+        :current-user="currentUser"
+        :active-records-tab="activeRecordsTab"
+        :selected-member-for-records="selectedMemberForRecords"
+        :date-range="dateRange"
+        :loading-all-records="loadingAllRecords"
+        :filtered-records="filteredRecords"
+        :total-records="totalRecords"
+        :current-page="currentPage"
+        :page-size="pageSize"
+        :total-pages="totalPages"
+        :expanded-member-id="expandedMemberId"
+        :member-records="memberRecords"
+        :loading-member-records="loadingMemberRecords"
+        @update:active-records-tab="activeRecordsTab = $event"
+        @update:selected-member-for-records="selectedMemberForRecords = $event"
+        @update:date-range="updateDateRange"
+        @search-records="searchRecords"
+        @reset-date-filter="resetDateFilter"
+        @change-page="changePage"
+        @toggle-member-records="toggleMemberRecords"
+        @add-money="openAddMoneyModalFromDetail"
+        @close="closePlanDetail"
+    />
   </section>
 </template>
 
@@ -248,6 +277,7 @@
 import { ref, reactive, computed, defineProps, defineEmits } from 'vue'
 import { savingService, notificationService } from '@/services'
 import groupSavingCacheService from '@/services/cache/group-saving-cache.service'
+import PlanDetailModal from './PlanDetailModal.vue'
 
 const props = defineProps({
   groupSavings: {
@@ -285,6 +315,27 @@ const leaving = ref(false)
 
 // 提交状态
 const submitting = ref(false)
+
+// 计划详情相关
+const showPlanDetailModal = ref(false)
+const selectedPlan = ref(null)
+
+// 详情弹框内部状态
+const activeRecordsTab = ref('members')
+const selectedMemberForRecords = ref('')
+const dateRange = reactive({
+  startTime: '',
+  endTime: ''
+})
+const loadingAllRecords = ref(false)
+const filteredRecords = ref([])
+const totalRecords = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalPages = ref(1)
+const expandedMemberId = ref(null)
+const memberRecords = ref([])
+const loadingMemberRecords = ref(false)
 
 // ========== 计算属性：过滤掉已删除的计划 ==========
 /**
@@ -326,6 +377,22 @@ const filteredGroupSavings = computed(() => {
   })
 })
 
+// ========== 计算属性：其他活跃成员 ==========
+/**
+ * 其他活跃成员（用于创建者退出时选择）
+ * 过滤掉已删除的成员和当前用户
+ */
+const otherActiveMembers = computed(() => {
+  if (!planToLeave.value || !planToLeave.value.members) return []
+  // 过滤掉已删除的成员和当前用户，并确保 name 字段存在
+  return planToLeave.value.members
+      .filter(m => m.userId !== props.currentUser?.id && m.deleted !== 1)
+      .map(member => ({
+        ...member,
+        name: member.name || member.memberName || '未知成员'
+      }))
+})
+
 // ========== 工具函数 ==========
 // 使用缓存服务的方法获取图标和颜色
 const getPlanIcon = (plan) => {
@@ -354,54 +421,266 @@ const getPlanClass = (plan) => {
   return ''
 }
 
-// ========== 软删除相关工具函数 ==========
 /**
  * 获取计划的活跃成员（过滤掉已删除的）
- * @param {Object} plan - 计划对象
- * @returns {Array} 活跃成员列表
  */
 const getActiveMembers = (plan) => {
   if (!plan || !plan.members) return []
   return plan.members
-      .filter(member => member.deleted !== 1)  // 过滤掉 deleted=1 的成员
+      .filter(member => member.deleted !== 1)
       .map(member => ({
         ...member,
-        // 确保 name 字段存在（兼容 memberName 字段）
         name: member.name || member.memberName || '未知成员'
       }))
 }
 
 /**
  * 计算活跃成员数量
- * @param {Object} plan - 计划对象
- * @returns {number} 活跃成员数量
  */
 const getActiveMemberCount = (plan) => {
   return getActiveMembers(plan).length
 }
 
-// ========== 计算属性 ==========
 /**
- * 其他活跃成员（用于创建者退出时选择）
- * 过滤掉已删除的成员和当前用户
+ * 格式化时间
  */
-const otherActiveMembers = computed(() => {
-  if (!planToLeave.value || !planToLeave.value.members) return []
-  // 过滤掉已删除的成员和当前用户，并确保 name 字段存在
-  return planToLeave.value.members
-      .filter(m => m.userId !== props.currentUser?.id && m.deleted !== 1)
-      .map(member => ({
-        ...member,
-        name: member.name || member.memberName || '未知成员'
-      }))
-})
+const formatTime = (time) => {
+  if (!time) return ''
+  const date = new Date(time)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
-// ========== 计划详情 ==========
-const viewPlanDetails = (plan) => {
-  emit('view-details', plan)
+// ========== 计划详情相关 ==========
+/**
+ * 打开计划详情
+ */
+const openPlanDetail = async (plan) => {
+  selectedPlan.value = plan
+  showPlanDetailModal.value = true
+
+  // 重置详情弹框状态
+  activeRecordsTab.value = 'members'
+  selectedMemberForRecords.value = ''
+  dateRange.startTime = ''
+  dateRange.endTime = ''
+  currentPage.value = 1
+  expandedMemberId.value = null
+  memberRecords.value = []
+
+  // 从服务器获取最新详情
+  await loadPlanDetail()
+
+  // 加载存钱记录
+  await loadAllRecords()
+}
+
+/**
+ * 加载计划详情
+ */
+const loadPlanDetail = async () => {
+  if (!selectedPlan.value) return
+
+  try {
+    console.log('【详情】加载计划详情, planId:', selectedPlan.value.id)
+
+    const response = await savingService.getGroupSavingsDetail(
+        selectedPlan.value.id,
+        !props.isOnline  // 离线时不强制刷新
+    )
+
+    if (response.code === 200 && response.data) {
+      // 更新选中的计划数据
+      selectedPlan.value = response.data
+
+      // 同时更新 groupSavings 列表中的数据
+      const index = props.groupSavings.findIndex(p => p.id === selectedPlan.value.id)
+      if (index !== -1) {
+        const updatedList = [...props.groupSavings]
+        updatedList[index] = selectedPlan.value
+        emit('update:groupSavings', updatedList)
+      }
+
+      console.log('【详情】计划详情加载成功:', selectedPlan.value.name)
+    } else if (response.code === 404) {
+      console.warn('【详情】计划不存在或已删除')
+      notificationService.showNotification('计划不存在或已删除', 'warning')
+      // 关闭详情弹框
+      closePlanDetail()
+      // 从列表中移除该计划
+      const index = props.groupSavings.findIndex(p => p.id === selectedPlan.value.id)
+      if (index !== -1) {
+        const updatedList = [...props.groupSavings]
+        updatedList.splice(index, 1)
+        emit('update:groupSavings', updatedList)
+      }
+    } else {
+      console.error('【详情】加载计划详情失败:', response.message)
+      notificationService.showNotification(response.message || '加载失败', 'error')
+    }
+
+  } catch (error) {
+    console.error('【详情】加载计划详情异常:', error)
+    notificationService.showNotification('加载计划详情失败', 'error')
+  }
+}
+
+/**
+ * 关闭计划详情
+ */
+const closePlanDetail = () => {
+  showPlanDetailModal.value = false
+  selectedPlan.value = null
+}
+
+// ========== 存钱记录相关方法 ==========
+/**
+ * 更新日期范围
+ */
+const updateDateRange = (newRange) => {
+  dateRange.startTime = newRange.startTime
+  dateRange.endTime = newRange.endTime
+}
+
+/**
+ * 搜索记录
+ */
+const searchRecords = () => {
+  currentPage.value = 1
+  loadAllRecords()
+}
+
+/**
+ * 重置日期筛选
+ */
+const resetDateFilter = () => {
+  dateRange.startTime = ''
+  dateRange.endTime = ''
+  currentPage.value = 1
+  loadAllRecords()
+}
+
+/**
+ * 切换页码
+ */
+const changePage = (page) => {
+  currentPage.value = page
+  loadAllRecords()
+}
+
+/**
+ * 加载所有存钱记录（分页）
+ */
+const loadAllRecords = async () => {
+  if (!selectedPlan.value) return
+
+  loadingAllRecords.value = true
+
+  try {
+    const params = {
+      page: currentPage.value,
+      size: pageSize.value,
+      memberId: selectedMemberForRecords.value || null,
+      startTime: dateRange.startTime || null,
+      endTime: dateRange.endTime || null
+    }
+
+    console.log('【记录】加载存钱记录, planId:', selectedPlan.value.id, 'params:', params)
+
+    const response = await savingService.getPlanSavingRecordsByPost(
+        selectedPlan.value.id,
+        params,
+        !props.isOnline  // 离线时不强制刷新
+    )
+
+    if (response.code === 200 && response.data) {
+      filteredRecords.value = response.data.records || []
+      totalRecords.value = response.data.total || 0
+      totalPages.value = response.data.pages || 1
+
+      console.log('【记录】存钱记录加载成功:', filteredRecords.value.length, '条，总计:', totalRecords.value)
+    } else {
+      console.error('【记录】加载存钱记录失败:', response.message)
+      filteredRecords.value = []
+      totalRecords.value = 0
+      totalPages.value = 1
+    }
+
+  } catch (error) {
+    console.error('【记录】加载存钱记录失败:', error)
+    notificationService.showNotification('加载存钱记录失败', 'error')
+    filteredRecords.value = []
+    totalRecords.value = 0
+    totalPages.value = 1
+  } finally {
+    loadingAllRecords.value = false
+  }
+}
+
+/**
+ * 切换查看成员记录
+ */
+const toggleMemberRecords = async (member) => {
+  if (expandedMemberId.value === member.userId) {
+    expandedMemberId.value = null
+    memberRecords.value = []
+    return
+  }
+
+  expandedMemberId.value = member.userId
+  loadingMemberRecords.value = true
+
+  try {
+    console.log('【成员记录】加载成员存钱记录, planId:', selectedPlan.value.id, 'memberId:', member.userId)
+
+    const response = await savingService.getMemberSavingRecords(
+        selectedPlan.value.id,
+        member.userId,
+        !props.isOnline  // 离线时不强制刷新
+    )
+
+    console.log('【成员记录】API响应:', response)
+
+    // 检查响应格式
+    if (response && response.code === 200) {
+      memberRecords.value = response.data || []
+      console.log('【成员记录】成员记录加载成功:', memberRecords.value.length, '条')
+
+      // 打印每条记录详情以便调试
+      if (memberRecords.value.length > 0) {
+        console.log('【成员记录】第一条记录示例:', memberRecords.value[0])
+      }
+    } else {
+      console.error('【成员记录】加载成员记录失败:', response?.message)
+      memberRecords.value = []
+    }
+
+  } catch (error) {
+    console.error('【成员记录】加载成员存钱记录失败:', error)
+    notificationService.showNotification('加载成员记录失败', 'error')
+    memberRecords.value = []
+  } finally {
+    loadingMemberRecords.value = false
+  }
+}
+
+/**
+ * 从详情弹框打开存钱弹窗
+ */
+const openAddMoneyModalFromDetail = (plan) => {
+  closePlanDetail()
+  openAddMoneyModal(plan)
 }
 
 // ========== 多人存钱操作 ==========
+/**
+ * 打开存钱弹窗
+ */
 const openAddMoneyModal = (plan) => {
   currentPlan.value = plan
   addMoneyForm.memberId = ''
@@ -410,6 +689,9 @@ const openAddMoneyModal = (plan) => {
   showAddMoneyModal.value = true
 }
 
+/**
+ * 处理存钱
+ */
 const handleAddMoney = async () => {
   // 验证输入
   if (!addMoneyForm.memberId) {
@@ -444,7 +726,7 @@ const handleAddMoney = async () => {
     return
   }
 
-  // 验证是否超过目标金额（使用计划表中的 currentAmount）
+  // 验证是否超过目标金额
   const currentTotal = currentPlan.value.currentAmount || 0
   const targetAmount = currentPlan.value.targetAmount || 0
 
@@ -460,7 +742,7 @@ const handleAddMoney = async () => {
   submitting.value = true
 
   try {
-    console.log('开始存钱操作:', {
+    console.log('【存钱】开始存钱操作:', {
       planId: currentPlan.value.id,
       planName: currentPlan.value.name,
       memberId: addMoneyForm.memberId,
@@ -480,7 +762,7 @@ const handleAddMoney = async () => {
         }
     )
 
-    console.log('存钱响应:', response)
+    console.log('【存钱】存钱响应:', response)
 
     if (response.code === 200) {
       // 存钱成功
@@ -508,7 +790,7 @@ const handleAddMoney = async () => {
       )
     }
   } catch (error) {
-    console.error('存钱操作异常:', error)
+    console.error('【存钱】存钱操作异常:', error)
 
     // 处理网络错误
     if (error.message?.includes('Network Error') || !navigator.onLine) {
@@ -527,7 +809,9 @@ const handleAddMoney = async () => {
   }
 }
 
-// 存钱后更新本地计划数据
+/**
+ * 存钱后更新本地计划数据
+ */
 const updateLocalPlanAfterDeposit = (depositData) => {
   if (!depositData) return
 
@@ -569,6 +853,9 @@ const updateLocalPlanAfterDeposit = (depositData) => {
 }
 
 // ========== 退出计划 ==========
+/**
+ * 打开退出确认弹窗
+ */
 const openLeaveModal = (plan) => {
   planToLeave.value = plan
   isLeavingCreator.value = isCreator(plan)
@@ -576,6 +863,9 @@ const openLeaveModal = (plan) => {
   showLeaveConfirmModal.value = true
 }
 
+/**
+ * 处理退出计划
+ */
 const handleLeavePlan = async (newCreatorId) => {
   if (!planToLeave.value) return
 
@@ -587,9 +877,9 @@ const handleLeavePlan = async (newCreatorId) => {
       newCreatorId: newCreatorId
     })
 
-    console.log('退出计划响应:', response)
+    console.log('【退出】退出计划响应:', response)
 
-    // 检查 response.success 而不是 response.code
+    // 检查 response.success
     if (response.success) {
       // 从列表中移除该计划
       const index = props.groupSavings.findIndex(g => g.id === planToLeave.value.id)
@@ -607,7 +897,7 @@ const handleLeavePlan = async (newCreatorId) => {
     planToLeave.value = null
 
   } catch (error) {
-    console.error('退出失败:', error)
+    console.error('【退出】退出失败:', error)
     notificationService.showNotification('退出失败: ' + (error.message || '未知错误'), 'error')
   } finally {
     leaving.value = false
@@ -616,7 +906,6 @@ const handleLeavePlan = async (newCreatorId) => {
 </script>
 
 <style scoped>
-/* 样式保持不变，与之前相同 */
 .savings-section {
   background-color: var(--white);
   border-radius: 20px;

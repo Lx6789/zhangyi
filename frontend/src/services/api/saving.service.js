@@ -1133,18 +1133,447 @@ class SavingService {
         }
     }
 
+    // src/services/api/saving.service.js
+
+// 在 SavingService 类中添加以下方法
+
     /**
-     * 获取计划的存钱记录
+     * 获取多人存钱计划详情
+     * @param {number} id - 计划ID
+     * @param {boolean} forceRefresh - 是否强制从服务器刷新
+     * @returns {Promise<Object>} 计划详情
+     */
+    async getGroupSavingsDetail(id, forceRefresh = false) {
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id;
+        if (!userId) {
+            console.error('【Service】无法获取用户ID');
+            return {
+                code: 401,
+                message: '用户未登录',
+                data: null
+            };
+        }
+
+        // 标记是否使用缓存
+        let useCache = false;
+
+        // 1. 如果不是强制刷新，先检查网络状态
+        if (!forceRefresh && !navigator.onLine) {
+            console.log('【Service】网络不可用，尝试从缓存获取详情');
+            useCache = true;
+        }
+
+        // 2. 优先从后端获取数据
+        if (!useCache) {
+            try {
+                console.log('【Service】从后端获取计划详情, planId:', id);
+                const responseData = await savingApi.getGroupSavingDetail(id);
+                console.log('【Service】后端返回详情:', responseData);
+
+                if (responseData && responseData.code === 200 && responseData.data) {
+                    const planDetail = responseData.data;
+
+                    // 后端返回成功，更新前端数据库
+                    console.log('【Service】后端数据获取成功，开始更新前端数据库');
+
+                    // 转换为缓存格式
+                    const planToCache = this.convertPlanDetailToCacheFormat(planDetail, userId);
+
+                    // 保存到缓存
+                    await groupSavingCacheService.savePlanDetail(userId, planToCache);
+
+                    // 保存存钱记录
+                    if (planDetail.records && planDetail.records.length > 0) {
+                        await groupSavingCacheService.saveDepositRecords(userId, id, planDetail.records);
+                    }
+
+                    return {
+                        code: 200,
+                        message: responseData.message || '获取成功',
+                        data: planToCache
+                    };
+                } else if (responseData && responseData.code === 200 && !responseData.data) {
+                    // 计划不存在或已删除
+                    console.log('【Service】计划不存在或已删除');
+                    // 清除缓存中该计划的数据
+                    await groupSavingCacheService.clearPlanCache(userId, id);
+                    return {
+                        code: 404,
+                        message: '计划不存在或已删除',
+                        data: null
+                    };
+                } else {
+                    console.warn('【Service】后端返回格式异常:', responseData);
+                    useCache = true;
+                }
+            } catch (error) {
+                console.error('【Service】从后端获取详情失败:', error);
+                useCache = true;
+
+                if (this.isNetworkError(error)) {
+                    console.log('【Service】网络错误，降级使用缓存数据');
+                }
+            }
+        }
+
+        // 3. 使用缓存数据
+        if (useCache) {
+            console.log('【Service】从缓存获取计划详情, planId:', id);
+
+            try {
+                const cachedPlan = await groupSavingCacheService.getPlanDetail(userId, id);
+
+                if (cachedPlan) {
+                    console.log('【Service】从缓存获取到计划详情:', cachedPlan.name);
+                    return {
+                        code: 200,
+                        message: '获取成功（缓存）',
+                        data: cachedPlan
+                    };
+                } else {
+                    console.log('【Service】缓存中没有该计划详情');
+                    return {
+                        code: 404,
+                        message: '计划不存在',
+                        data: null
+                    };
+                }
+            } catch (cacheError) {
+                console.error('【Service】读取缓存失败:', cacheError);
+                return {
+                    code: 500,
+                    message: '数据加载失败',
+                    data: null
+                };
+            }
+        }
+
+        return {
+            code: 500,
+            message: '未知错误',
+            data: null
+        };
+    }
+
+    /**
+     * 将后端返回的计划详情转换为缓存格式
+     * @param {Object} planDetail - 后端返回的计划详情
+     * @param {number} userId - 用户ID
+     * @returns {Object} 缓存格式的计划详情
+     */
+    convertPlanDetailToCacheFormat(planDetail, userId) {
+        const now = new Date().toISOString();
+
+        // 计算进度
+        const targetAmount = planDetail.targetAmount || 0;
+        const currentAmount = planDetail.currentAmount || 0;
+        const progress = targetAmount > 0
+            ? Math.min(Math.round((currentAmount / targetAmount) * 100), 100)
+            : 0;
+
+        return {
+            id: planDetail.id,
+            name: planDetail.name,
+            reason: planDetail.reason || '',
+            description: planDetail.description || '',
+            targetAmount: targetAmount,
+            currentAmount: currentAmount,
+            type: planDetail.type || '日常储蓄',
+            deadline: planDetail.deadline,
+            creatorId: planDetail.creatorId,
+            status: planDetail.status || 'active',
+            createdAt: planDetail.createTime || now,
+            updatedAt: planDetail.updateTime || now,
+            deleted: planDetail.deleted || 0,
+            deletedAt: planDetail.deletedAt || null,
+            progress: progress,
+            completed: currentAmount >= targetAmount,
+            color: planDetail.color || groupSavingCacheService.getColorByType(planDetail.type),
+            icon: planDetail.icon || groupSavingCacheService.getIconByType(planDetail.type),
+            members: (planDetail.members || []).map(m => ({
+                id: m.id,
+                userId: m.userId,
+                memberName: m.memberName,
+                name: m.memberName || `用户${m.userId}`,
+                amount: m.amount || 0,
+                isCreator: m.isCreator || m.userId === planDetail.creatorId,
+                joinTime: m.joinTime || now,
+                deleted: m.deleted || 0,
+                deletedAt: m.deletedAt || null,
+                avatar: m.avatar || this.getDefaultAvatar(m.memberName)
+            })),
+            memberCount: (planDetail.members || []).filter(m => m.deleted !== 1).length
+        };
+    }
+
+    /**
+     * 获取计划的存钱记录（分页）
+     * @param {number} planId - 计划ID
+     * @param {Object} params - 查询参数 { page, size, memberId, startTime, endTime }
+     * @param {boolean} forceRefresh - 是否强制从服务器刷新
+     * @returns {Promise<Object>} 分页记录
      */
     async getPlanSavingRecordsByPost(planId, params = {}, forceRefresh = false) {
-        // TODO 获取计划的存钱记录
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id;
+        if (!userId) {
+            console.error('【Service】无法获取用户ID');
+            return {
+                code: 401,
+                message: '用户未登录',
+                data: { records: [], total: 0, page: 1, size: 10, pages: 0 }
+            };
+        }
+
+        // 构建查询参数
+        const queryParams = {
+            page: params.page || 1,
+            size: params.size || 10,
+            memberId: params.memberId || null,
+            startTime: params.startTime || null,
+            endTime: params.endTime || null
+        };
+
+        let useCache = false;
+
+        // 1. 如果不是强制刷新，先检查网络状态
+        if (!forceRefresh && !navigator.onLine) {
+            console.log('【Service】网络不可用，尝试从缓存获取存钱记录');
+            useCache = true;
+        }
+
+        // 2. 优先从后端获取数据
+        if (!useCache) {
+            try {
+                console.log('【Service】从后端获取存钱记录, planId:', planId, 'params:', queryParams);
+                const responseData = await savingApi.getSavingRecordsByPost(planId, queryParams);
+                console.log('【Service】后端返回记录:', responseData);
+
+                if (responseData && responseData.code === 200 && responseData.data) {
+                    const recordsData = responseData.data;
+
+                    // 后端返回成功，更新前端数据库
+                    console.log('【Service】后端数据获取成功，开始更新前端数据库');
+
+                    // 保存存钱记录到缓存
+                    await groupSavingCacheService.saveDepositRecords(
+                        userId,
+                        planId,
+                        recordsData.records || [],
+                        queryParams
+                    );
+
+                    // 保存统计信息
+                    await groupSavingCacheService.saveRecordsStats(userId, planId, {
+                        total: recordsData.total,
+                        normalCount: recordsData.stats?.normalCount || 0,
+                        deletedCount: recordsData.stats?.deletedCount || 0
+                    });
+
+                    return {
+                        code: 200,
+                        message: responseData.message || '获取成功',
+                        data: {
+                            records: recordsData.records || [],
+                            total: recordsData.total || 0,
+                            page: queryParams.page,
+                            size: queryParams.size,
+                            pages: recordsData.pages || 0,
+                            stats: recordsData.stats || { normalCount: 0, deletedCount: 0 }
+                        }
+                    };
+                } else {
+                    console.warn('【Service】后端返回格式异常:', responseData);
+                    useCache = true;
+                }
+            } catch (error) {
+                console.error('【Service】从后端获取存钱记录失败:', error);
+                useCache = true;
+            }
+        }
+
+        // 3. 使用缓存数据
+        if (useCache) {
+            console.log('【Service】从缓存获取存钱记录, planId:', planId);
+
+            try {
+                const cachedRecords = await groupSavingCacheService.getDepositRecords(
+                    userId,
+                    planId,
+                    queryParams
+                );
+
+                if (cachedRecords) {
+                    console.log('【Service】从缓存获取到存钱记录:', cachedRecords.records?.length || 0);
+                    return {
+                        code: 200,
+                        message: '获取成功（缓存）',
+                        data: cachedRecords
+                    };
+                } else {
+                    console.log('【Service】缓存中没有存钱记录');
+                    return {
+                        code: 200,
+                        message: '暂无记录',
+                        data: {
+                            records: [],
+                            total: 0,
+                            page: queryParams.page,
+                            size: queryParams.size,
+                            pages: 0,
+                            stats: { normalCount: 0, deletedCount: 0 }
+                        }
+                    };
+                }
+            } catch (cacheError) {
+                console.error('【Service】读取缓存失败:', cacheError);
+                return {
+                    code: 500,
+                    message: '数据加载失败',
+                    data: {
+                        records: [],
+                        total: 0,
+                        page: queryParams.page,
+                        size: queryParams.size,
+                        pages: 0,
+                        stats: { normalCount: 0, deletedCount: 0 }
+                    }
+                };
+            }
+        }
+
+        return {
+            code: 500,
+            message: '未知错误',
+            data: {
+                records: [],
+                total: 0,
+                page: queryParams.page,
+                size: queryParams.size,
+                pages: 0,
+                stats: { normalCount: 0, deletedCount: 0 }
+            }
+        };
     }
 
     /**
      * 获取成员的存钱记录
+     * @param {number} planId - 计划ID
+     * @param {number} memberId - 成员用户ID
+     * @param {boolean} forceRefresh - 是否强制从服务器刷新
+     * @returns {Promise<Object>} 成员存钱记录
      */
     async getMemberSavingRecords(planId, memberId, forceRefresh = false) {
-        // TODO 获取成员的存钱记录
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id;
+        if (!userId) {
+            console.error('【Service】无法获取用户ID');
+            return {
+                code: 401,
+                message: '用户未登录',
+                data: []
+            };
+        }
+
+        let useCache = false;
+
+        // 1. 如果不是强制刷新，先检查网络状态
+        if (!forceRefresh && !navigator.onLine) {
+            console.log('【Service】网络不可用，尝试从缓存获取成员记录');
+            useCache = true;
+        }
+
+        // 2. 优先从后端获取数据
+        if (!useCache) {
+            try {
+                console.log('【Service】从后端获取成员存钱记录, planId:', planId, 'memberId:', memberId);
+                const response = await savingApi.getMemberSavingRecords(planId, memberId);
+                console.log('【Service】后端返回成员记录:', response);
+
+                // http-interceptor 在 code === 200 时返回 response.data
+                // 所以 response 直接就是 data 数组
+                if (response && Array.isArray(response)) {
+                    const records = response;
+
+                    // 后端返回成功，更新前端数据库
+                    console.log('【Service】后端数据获取成功，共', records.length, '条记录');
+
+                    // 保存成员存钱记录到缓存
+                    await groupSavingCacheService.saveMemberDepositRecords(
+                        userId,
+                        planId,
+                        memberId,
+                        records
+                    );
+
+                    return {
+                        code: 200,
+                        message: '获取成功',
+                        data: records
+                    };
+                } else if (response && response.code === 200 && response.data) {
+                    // 兼容其他格式
+                    const records = response.data;
+                    await groupSavingCacheService.saveMemberDepositRecords(
+                        userId,
+                        planId,
+                        memberId,
+                        records
+                    );
+                    return {
+                        code: 200,
+                        message: response.message || '获取成功',
+                        data: records
+                    };
+                } else {
+                    console.warn('【Service】后端返回格式异常:', response);
+                    useCache = true;
+                }
+            } catch (error) {
+                console.error('【Service】从后端获取成员记录失败:', error);
+                useCache = true;
+            }
+        }
+
+        // 3. 使用缓存数据
+        if (useCache) {
+            console.log('【Service】从缓存获取成员存钱记录, planId:', planId, 'memberId:', memberId);
+
+            try {
+                const cachedRecords = await groupSavingCacheService.getMemberDepositRecords(
+                    userId,
+                    planId,
+                    memberId
+                );
+
+                if (cachedRecords && cachedRecords.length > 0) {
+                    console.log('【Service】从缓存获取到成员记录:', cachedRecords.length);
+                    return {
+                        code: 200,
+                        message: '获取成功（缓存）',
+                        data: cachedRecords
+                    };
+                } else {
+                    console.log('【Service】缓存中没有成员记录');
+                    return {
+                        code: 200,
+                        message: '暂无记录',
+                        data: []
+                    };
+                }
+            } catch (cacheError) {
+                console.error('【Service】读取缓存失败:', cacheError);
+                return {
+                    code: 500,
+                    message: '数据加载失败',
+                    data: []
+                };
+            }
+        }
+
+        return {
+            code: 500,
+            message: '未知错误',
+            data: []
+        };
     }
 
     // ==================== 个人存钱计划（前端存储） ====================
