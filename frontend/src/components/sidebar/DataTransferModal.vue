@@ -1,6 +1,6 @@
 <template>
   <div class="modal" :class="{ active: visible }" @click="closeOnOverlay">
-    <div class="modal-content">
+    <div class="modal-content data-transfer-modal">
       <div class="modal-header">
         <i class="fas fa-exchange-alt"></i>
         <h3>数据迁移</h3>
@@ -10,47 +10,182 @@
       </div>
 
       <div class="modal-body">
-        <div class="data-transfer-container">
-          <!-- 导出数据 -->
-          <div class="transfer-section">
-            <div class="section-icon">
-              <i class="fas fa-file-export"></i>
-            </div>
-            <div class="section-content">
-              <h4>导出数据</h4>
-              <p>将您的记账数据导出为文件，用于备份或迁移</p>
-              <div class="export-options">
-                <div class="option-item">
-                  <input type="radio" id="exportAll" value="all" v-model="exportType">
-                  <label for="exportAll">导出全部数据</label>
-                </div>
-                <div class="option-item">
-                  <input type="radio" id="exportYear" value="year" v-model="exportType">
-                  <label for="exportYear">导出指定年份</label>
-                  <select v-if="exportType === 'year'" v-model="selectedYear" class="year-select">
-                    <option v-for="year in availableYears" :key="year" :value="year">{{ year }}年</option>
-                  </select>
+        <!-- 标签页切换 -->
+        <div class="transfer-tabs">
+          <button
+              class="tab-btn"
+              :class="{ active: activeTab === 'export' }"
+              @click="activeTab = 'export'"
+          >
+            <i class="fas fa-file-export"></i>
+            <span>导出数据</span>
+          </button>
+          <button
+              class="tab-btn"
+              :class="{ active: activeTab === 'import' }"
+              @click="activeTab = 'import'"
+          >
+            <i class="fas fa-file-import"></i>
+            <span>导入数据</span>
+          </button>
+        </div>
+
+        <!-- 导出面板 -->
+        <div v-if="activeTab === 'export'" class="export-panel">
+          <div class="export-options-container">
+            <div class="export-section">
+              <div class="section-title">
+                <i class="fas fa-chart-line"></i>
+                <h4>收支数据</h4>
+              </div>
+              <div class="option-group">
+                <label class="option-checkbox">
+                  <input type="checkbox" v-model="exportOptions.incomeExpense">
+                  <span>导出收支数据</span>
+                </label>
+                <div class="sub-options" v-if="exportOptions.incomeExpense">
+                  <label class="option-checkbox">
+                    <input type="checkbox" v-model="exportOptions.incomeExpenseType.personal">
+                    <span>个人记账</span>
+                  </label>
+                  <label class="option-checkbox">
+                    <input type="checkbox" v-model="exportOptions.incomeExpenseType.business">
+                    <span>生意记账</span>
+                  </label>
                 </div>
               </div>
-              <button class="action-btn export-btn" @click="handleExport" :disabled="exporting">
-                <i class="fas fa-download"></i>
-                <span>{{ exporting ? '导出中...' : '开始导出' }}</span>
+            </div>
+
+            <div class="export-section">
+              <div class="section-title">
+                <i class="fas fa-piggy-bank"></i>
+                <h4>存钱数据</h4>
+              </div>
+              <div class="option-group">
+                <label class="option-checkbox">
+                  <input type="checkbox" v-model="exportOptions.saving">
+                  <span>导出存钱数据</span>
+                </label>
+                <div class="sub-options" v-if="exportOptions.saving">
+                  <label class="option-checkbox">
+                    <input type="checkbox" v-model="exportOptions.savingType.personal">
+                    <span>个人存钱</span>
+                  </label>
+                  <label class="option-checkbox">
+                    <input type="checkbox" v-model="exportOptions.savingType.group">
+                    <span>多人存钱</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="export-section">
+              <div class="section-title">
+                <i class="fas fa-boxes"></i>
+                <h4>库存与商品数据</h4>
+              </div>
+              <div class="option-group">
+                <label class="option-checkbox">
+                  <input type="checkbox" v-model="exportOptions.inventory">
+                  <span>导出库存数据</span>
+                </label>
+                <label class="option-checkbox">
+                  <input type="checkbox" v-model="exportOptions.products">
+                  <span>导出商品数据</span>
+                </label>
+                <label class="option-checkbox">
+                  <input type="checkbox" v-model="exportOptions.categories">
+                  <span>导出商品分类</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="export-section">
+              <div class="section-title">
+                <i class="fas fa-handshake"></i>
+                <h4>业务数据</h4>
+              </div>
+              <div class="option-group">
+                <label class="option-checkbox">
+                  <input type="checkbox" v-model="exportOptions.suppliers">
+                  <span>导出供应商</span>
+                </label>
+                <label class="option-checkbox">
+                  <input type="checkbox" v-model="exportOptions.customers">
+                  <span>导出客户</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 日期范围筛选 -->
+            <div class="export-section">
+              <div class="section-title">
+                <i class="fas fa-calendar-alt"></i>
+                <h4>时间范围（收支数据）</h4>
+              </div>
+              <div class="date-range">
+                <div class="date-input-group">
+                  <label>开始日期</label>
+                  <input type="date" v-model="dateRange.start" class="date-input">
+                </div>
+                <span class="date-separator">至</span>
+                <div class="date-input-group">
+                  <label>结束日期</label>
+                  <input type="date" v-model="dateRange.end" class="date-input">
+                </div>
+                <button class="clear-date-btn" @click="clearDateRange" title="清除日期筛选">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+              <div class="date-hint">
+                <i class="fas fa-info-circle"></i>
+                <span>不选择则导出全部数据</span>
+              </div>
+            </div>
+
+            <div class="export-actions-bar">
+              <button class="select-all-btn" @click="selectAll" :disabled="exporting">
+                <i class="fas fa-check-double"></i>
+                <span>全选</span>
+              </button>
+              <button class="deselect-all-btn" @click="deselectAll" :disabled="exporting">
+                <i class="fas fa-times"></i>
+                <span>取消全选</span>
               </button>
             </div>
           </div>
 
-          <div class="transfer-divider">
-            <span>或</span>
+          <div class="export-actions">
+            <button class="action-btn export-btn" @click="handleExport" :disabled="exporting">
+              <i class="fas fa-download"></i>
+              <span>{{ exporting ? '导出中...' : '开始导出' }}</span>
+            </button>
           </div>
+          <div v-if="exportProgress" class="export-progress">
+            <i class="fas fa-spinner fa-spin"></i>
+            <span>{{ exportProgress }}</span>
+          </div>
+        </div>
 
-          <!-- 导入数据 -->
-          <div class="transfer-section">
-            <div class="section-icon">
-              <i class="fas fa-file-import"></i>
+        <!-- 导入面板 -->
+        <div v-if="activeTab === 'import'" class="import-panel">
+          <div class="import-options-container">
+            <div class="import-section">
+              <div class="section-title">
+                <i class="fas fa-info-circle"></i>
+                <h4>导入说明</h4>
+              </div>
+              <div class="import-note">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>导入数据将覆盖现有数据，请确保已备份重要数据</span>
+              </div>
             </div>
-            <div class="section-content">
-              <h4>导入数据</h4>
-              <p>从备份文件恢复数据，支持 JSON 格式</p>
+
+            <div class="import-section">
+              <div class="section-title">
+                <i class="fas fa-file-upload"></i>
+                <h4>选择文件</h4>
+              </div>
               <div class="import-area"
                    @dragover.prevent="dragOver"
                    @dragleave.prevent="dragLeave"
@@ -59,6 +194,7 @@
                 <input type="file" ref="fileInput" accept=".json" @change="handleFileSelect" style="display: none">
                 <i class="fas fa-cloud-upload-alt"></i>
                 <p>点击或拖拽文件到此处上传</p>
+                <p class="file-hint">支持 JSON 格式文件</p>
                 <button class="action-btn select-file-btn" @click="selectFile">
                   <i class="fas fa-folder-open"></i>
                   <span>选择文件</span>
@@ -71,18 +207,42 @@
                   <i class="fas fa-times"></i>
                 </button>
               </div>
-              <button class="action-btn import-btn" @click="handleImport" :disabled="!selectedFile || importing">
-                <i class="fas fa-upload"></i>
-                <span>{{ importing ? '导入中...' : '开始导入' }}</span>
-              </button>
+            </div>
+
+            <div class="import-section">
+              <div class="section-title">
+                <i class="fas fa-check-circle"></i>
+                <h4>导入选项</h4>
+              </div>
+              <div class="option-group">
+                <label class="option-checkbox">
+                  <input type="checkbox" v-model="importOptions.clearBeforeImport">
+                  <span>导入前清空现有数据</span>
+                </label>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- 提示信息 -->
-        <div class="transfer-note">
-          <i class="fas fa-info-circle"></i>
-          <span>导入数据将覆盖现有数据，请谨慎操作</span>
+          <div class="import-actions">
+            <button class="action-btn import-btn" @click="handleImport" :disabled="!selectedFile || importing">
+              <i class="fas fa-upload"></i>
+              <span>{{ importing ? '导入中...' : '开始导入' }}</span>
+            </button>
+          </div>
+          <div v-if="importProgress" class="import-progress">
+            <i class="fas fa-spinner fa-spin"></i>
+            <span>{{ importProgress }}</span>
+          </div>
+          <div v-if="importResult" class="import-result">
+            <div class="result-item success">
+              <i class="fas fa-check-circle"></i>
+              <span>成功导入: {{ importResult.successCount }} 条</span>
+            </div>
+            <div v-if="importResult.failCount > 0" class="result-item fail">
+              <i class="fas fa-times-circle"></i>
+              <span>失败: {{ importResult.failCount }} 条</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -96,9 +256,11 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
+import { ref, reactive, watch } from 'vue'
+import authHelperService from '@/services/utils/auth-helper.service.js'
 import notificationService from '@/services/utils/notification.service.js'
+import {Export} from "@/services/data_migration/export.js";
+import {Import} from "@/services/data_migration/import.js";
 
 const props = defineProps({
   visible: {
@@ -109,57 +271,172 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'close'])
 
+// 使用导出和导入逻辑
+const { exportToExcel } = Export()
+const {
+  parseImportFile,
+  importIncomeExpenseData,
+  importPersonalSavingData,
+  importGroupSavingData,
+  importProductsData,
+  importInventoryData,
+  importCategoriesData,
+  importSuppliersData,
+  importCustomersData,
+  clearUserData
+} = Import()
+
+// 状态
+const activeTab = ref('export')
+const currentUser = ref(null)
+const exporting = ref(false)
+const importing = ref(false)
+const exportProgress = ref('')
+const importProgress = ref('')
+const importResult = ref(null)
+
+// 文件相关
 const fileInput = ref(null)
 const selectedFile = ref(null)
 const isDragging = ref(false)
-const exportType = ref('all')
-const selectedYear = ref(new Date().getFullYear().toString())
-const exporting = ref(false)
-const importing = ref(false)
 
-// 可用年份列表
-const availableYears = computed(() => {
-  const years = []
-  const currentYear = new Date().getFullYear()
-  for (let i = currentYear; i >= currentYear - 5; i--) {
-    years.push(i.toString())
-  }
-  return years
+// 导出选项
+const exportOptions = reactive({
+  incomeExpense: true,
+  incomeExpenseType: {
+    personal: true,
+    business: true
+  },
+  saving: true,
+  savingType: {
+    personal: true,
+    group: true
+  },
+  inventory: true,
+  products: true,
+  categories: true,
+  suppliers: true,
+  customers: true
 })
 
-// 监听弹框关闭时重置状态
-watch(() => props.visible, (newVal) => {
-  if (!newVal) {
-    resetState()
-  }
+// 导入选项
+const importOptions = reactive({
+  clearBeforeImport: true
 })
 
-// 重置状态
-const resetState = () => {
-  selectedFile.value = null
-  isDragging.value = false
-  exportType.value = 'all'
-  selectedYear.value = new Date().getFullYear().toString()
+// 日期范围
+const dateRange = reactive({
+  start: '',
+  end: ''
+})
+
+// 获取当前用户
+const fetchCurrentUser = async () => {
+  const userFromStorage = authHelperService.getCurrentUser()
+  if (userFromStorage && userFromStorage.id) {
+    currentUser.value = {
+      id: userFromStorage.id,
+      username: userFromStorage.username || userFromStorage.nickname || '用户'
+    }
+  } else {
+    const savedUserId = localStorage.getItem('userId')
+    if (savedUserId) {
+      currentUser.value = {
+        id: parseInt(savedUserId),
+        username: '用户'
+      }
+    }
+  }
 }
 
-// 选择文件
+// ==================== 导出相关 ====================
+const selectAll = () => {
+  exportOptions.incomeExpense = true
+  exportOptions.incomeExpenseType.personal = true
+  exportOptions.incomeExpenseType.business = true
+  exportOptions.saving = true
+  exportOptions.savingType.personal = true
+  exportOptions.savingType.group = true
+  exportOptions.inventory = true
+  exportOptions.products = true
+  exportOptions.categories = true
+  exportOptions.suppliers = true
+  exportOptions.customers = true
+}
+
+const deselectAll = () => {
+  exportOptions.incomeExpense = false
+  exportOptions.incomeExpenseType.personal = false
+  exportOptions.incomeExpenseType.business = false
+  exportOptions.saving = false
+  exportOptions.savingType.personal = false
+  exportOptions.savingType.group = false
+  exportOptions.inventory = false
+  exportOptions.products = false
+  exportOptions.categories = false
+  exportOptions.suppliers = false
+  exportOptions.customers = false
+}
+
+const clearDateRange = () => {
+  dateRange.start = ''
+  dateRange.end = ''
+}
+
+const handleExport = async () => {
+  if (!currentUser.value?.id) {
+    notificationService.showNotification('请先登录', 'warning')
+    return
+  }
+
+  exporting.value = true
+  exportProgress.value = '正在准备导出数据...'
+
+  try {
+    const { workbook, sheets } = await exportToExcel(
+        currentUser.value.id,
+        exportOptions,
+        dateRange,
+        (msg) => { exportProgress.value = msg }
+    )
+
+    if (sheets.length === 0) {
+      notificationService.showNotification('没有选择任何数据或数据为空', 'warning')
+      return
+    }
+
+    const timestamp = new Date().toISOString().split('T')[0]
+    const fileName = `账易数据导出_${currentUser.value.username}_${timestamp}.xlsx`
+
+    XLSX.writeFile(workbook, fileName)
+    notificationService.showNotification(`导出成功，共导出 ${sheets.length} 个工作表`, 'success')
+    exportProgress.value = ''
+  } catch (error) {
+    console.error('导出失败:', error)
+    notificationService.showNotification('导出失败：' + (error.message || '未知错误'), 'error')
+    exportProgress.value = ''
+  } finally {
+    exporting.value = false
+  }
+}
+
+// ==================== 导入相关 ====================
 const selectFile = () => {
   fileInput.value.click()
 }
 
-// 处理文件选择
 const handleFileSelect = (event) => {
   const file = event.target.files[0]
   if (file) {
-    if (file.type !== 'application/json' && !file.name.endsWith('.json')) {
+    if (!file.name.endsWith('.json')) {
       notificationService.showNotification('请选择 JSON 格式的文件', 'warning')
       return
     }
     selectedFile.value = file
+    importResult.value = null
   }
 }
 
-// 拖拽相关
 const dragOver = () => {
   isDragging.value = true
 }
@@ -172,89 +449,154 @@ const handleDrop = (event) => {
   isDragging.value = false
   const file = event.dataTransfer.files[0]
   if (file) {
-    if (file.type !== 'application/json' && !file.name.endsWith('.json')) {
+    if (!file.name.endsWith('.json')) {
       notificationService.showNotification('请上传 JSON 格式的文件', 'warning')
       return
     }
     selectedFile.value = file
+    importResult.value = null
   }
 }
 
-// 处理导出
-const handleExport = async () => {
-  exporting.value = true
-  try {
-    let data
-    if (exportType.value === 'all') {
-      data = await businessDataService.exportAllData()
-    } else {
-      data = await businessDataService.exportYearData(selectedYear.value)
-    }
-
-    // 创建并下载文件
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    const fileName = exportType.value === 'all'
-        ? `账易数据备份_${new Date().toISOString().split('T')[0]}.json`
-        : `账易数据_${selectedYear.value}年_${new Date().toISOString().split('T')[0]}.json`
-    link.download = fileName
-    link.click()
-    URL.revokeObjectURL(url)
-
-    notificationService.showNotification('导出成功', 'success')
-  } catch (error) {
-    console.error('导出失败:', error)
-    notificationService.showNotification('导出失败，请重试', 'error')
-  } finally {
-    exporting.value = false
-  }
-}
-
-// 处理导入
 const handleImport = async () => {
   if (!selectedFile.value) return
+  if (!currentUser.value?.id) {
+    notificationService.showNotification('请先登录', 'warning')
+    return
+  }
+
+  const confirmImport = confirm('导入数据将覆盖现有数据，是否继续？')
+  if (!confirmImport) return
 
   importing.value = true
-  try {
-    const text = await selectedFile.value.text()
-    const data = JSON.parse(text)
+  importProgress.value = '正在解析文件...'
+  importResult.value = null
 
-    // 确认导入
-    const confirmImport = confirm('导入数据将覆盖当前所有数据，是否继续？')
-    if (!confirmImport) {
-      return
+  try {
+    const data = await parseImportFile(selectedFile.value)
+
+    // 清空现有数据
+    if (importOptions.clearBeforeImport) {
+      importProgress.value = '正在清空现有数据...'
+      await clearUserData(currentUser.value.id)
     }
 
-    await businessDataService.importData(data)
-    notificationService.showNotification('导入成功', 'success')
-    selectedFile.value = null
+    const results = {
+      successCount: 0,
+      failCount: 0
+    }
 
-    // 关闭弹框
-    setTimeout(() => {
-      close()
-    }, 1500)
+    // 导入收支数据
+    if (data.incomeExpense && data.incomeExpense.length > 0) {
+      importProgress.value = '正在导入收支数据...'
+      const result = await importIncomeExpenseData(data)
+      results.successCount += result.successCount
+      results.failCount += result.failCount
+    }
+
+    // 导入个人存钱数据
+    if (data.personalSaving && data.personalSaving.length > 0) {
+      importProgress.value = '正在导入个人存钱数据...'
+      const result = await importPersonalSavingData(currentUser.value.id, data)
+      results.successCount += result.successCount
+      results.failCount += result.failCount
+    }
+
+    // 导入多人存钱数据
+    if (data.groupSaving && data.groupSaving.length > 0) {
+      importProgress.value = '正在导入多人存钱数据...'
+      const result = await importGroupSavingData(currentUser.value.id, data)
+      results.successCount += result.successCount
+      results.failCount += result.failCount
+    }
+
+    // 导入商品数据
+    if (data.products && data.products.length > 0) {
+      importProgress.value = '正在导入商品数据...'
+      const result = await importProductsData(data)
+      results.successCount += result.successCount
+      results.failCount += result.failCount
+    }
+
+    // 导入库存数据
+    if (data.inventory && data.inventory.length > 0) {
+      importProgress.value = '正在导入库存数据...'
+      const result = await importInventoryData(data)
+      results.successCount += result.successCount
+      results.failCount += result.failCount
+    }
+
+    // 导入商品分类
+    if (data.categories && data.categories.length > 0) {
+      importProgress.value = '正在导入商品分类...'
+      const result = await importCategoriesData(data)
+      results.successCount += result.successCount
+      results.failCount += result.failCount
+    }
+
+    // 导入供应商
+    if (data.suppliers && data.suppliers.length > 0) {
+      importProgress.value = '正在导入供应商...'
+      const result = await importSuppliersData(data)
+      results.successCount += result.successCount
+      results.failCount += result.failCount
+    }
+
+    // 导入客户
+    if (data.customers && data.customers.length > 0) {
+      importProgress.value = '正在导入客户...'
+      const result = await importCustomersData(data)
+      results.successCount += result.successCount
+      results.failCount += result.failCount
+    }
+
+    importResult.value = results
+    importProgress.value = ''
+    notificationService.showNotification(`导入完成，成功 ${results.successCount} 条，失败 ${results.failCount} 条`, 'success')
+
+    selectedFile.value = null
   } catch (error) {
     console.error('导入失败:', error)
-    notificationService.showNotification('导入失败，请检查文件格式', 'error')
+    notificationService.showNotification('导入失败：' + error.message, 'error')
+    importProgress.value = ''
   } finally {
     importing.value = false
   }
 }
 
-// 关闭弹框
+// ==================== 通用 ====================
 const close = () => {
   emit('update:visible', false)
   emit('close')
 }
 
-// 点击遮罩层关闭
 const closeOnOverlay = (event) => {
   if (event.target.classList.contains('modal')) {
     close()
   }
 }
+
+// 重置状态
+const resetState = () => {
+  selectedFile.value = null
+  isDragging.value = false
+  importResult.value = null
+  exportProgress.value = ''
+  importProgress.value = ''
+  dateRange.start = ''
+  dateRange.end = ''
+}
+
+// 监听弹框
+watch(() => props.visible, async (newVal) => {
+  if (newVal) {
+    await fetchCurrentUser()
+    resetState()
+  }
+})
+
+// 动态导入 XLSX
+import * as XLSX from 'xlsx'
 </script>
 
 <style scoped>
@@ -264,7 +606,7 @@ const closeOnOverlay = (event) => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: var(--overlay);
+  background-color: rgba(0, 0, 0, 0.5);
   z-index: 2000;
   display: flex;
   align-items: center;
@@ -286,8 +628,13 @@ const closeOnOverlay = (event) => {
   border-radius: 20px;
   padding: 20px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-  max-height: 80vh;
+  max-height: 85vh;
   overflow-y: auto;
+}
+
+.data-transfer-modal {
+  width: 95%;
+  max-width: 650px;
 }
 
 .modal-header {
@@ -338,7 +685,7 @@ const closeOnOverlay = (event) => {
 
 .modal-body {
   margin-bottom: 20px;
-  max-height: calc(80vh - 150px);
+  max-height: calc(85vh - 120px);
   overflow-y: auto;
   padding-right: 5px;
 }
@@ -372,92 +719,200 @@ const closeOnOverlay = (event) => {
   background-color: var(--secondary-color);
 }
 
-/* 数据迁移容器 */
-.data-transfer-container {
+/* 标签页 */
+.transfer-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 20px;
+  gap: 5px;
   margin-bottom: 20px;
+  background: var(--primary-color);
+  padding: 5px;
+  border-radius: 30px;
 }
 
-.transfer-section {
-  display: flex;
-  gap: 20px;
-  padding: 20px;
-  background-color: rgba(213, 235, 225, 0.1);
-  border-radius: 15px;
-  border: 1px solid var(--primary-color);
-}
-
-.section-icon {
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  background-color: var(--primary-color);
+.tab-btn {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 25px;
+  background: transparent;
+  color: var(--accent-color);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  gap: 8px;
+}
+
+.tab-btn.active {
+  background: var(--white);
   color: var(--accent-color);
-  flex-shrink: 0;
+  font-weight: 500;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
-.section-content {
-  flex: 1;
+/* 导出面板 */
+.export-panel, .import-panel {
+  padding: 5px 0;
 }
 
-.section-content h4 {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--accent-color);
-  margin: 0 0 5px 0;
+.export-options-container {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-bottom: 20px;
 }
 
-.section-content p {
-  font-size: 14px;
-  color: var(--text-light);
-  margin: 0 0 15px 0;
+.import-options-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-/* 导出选项 */
-.export-options {
-  margin-bottom: 15px;
+.export-section, .import-section {
+  background-color: rgba(213, 235, 225, 0.1);
+  border-radius: 12px;
+  padding: 15px;
+  border: 1px solid var(--primary-color);
 }
 
-.option-item {
+.section-title {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--secondary-color);
 }
 
-.option-item input[type="radio"] {
+.section-title i {
+  font-size: 18px;
+  color: var(--accent-color);
+}
+
+.section-title h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent-color);
+  margin: 0;
+}
+
+.option-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.option-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-dark);
+}
+
+.option-checkbox input[type="checkbox"] {
   width: 18px;
   height: 18px;
   accent-color: var(--accent-color);
-}
-
-.option-item label {
-  font-size: 14px;
-  color: var(--text-dark);
   cursor: pointer;
 }
 
-.year-select {
-  margin-left: 10px;
-  padding: 5px 10px;
+.sub-options {
+  margin-left: 28px;
+  padding-left: 12px;
+  border-left: 2px solid var(--secondary-color);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 日期范围 */
+.date-range {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.date-input-group {
+  flex: 1;
+  min-width: 120px;
+}
+
+.date-input-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 4px;
+}
+
+.date-input {
+  width: 100%;
+  padding: 8px 10px;
   border: 1px solid var(--secondary-color);
   border-radius: 8px;
+  font-size: 13px;
   background-color: var(--white);
-  color: var(--text-dark);
-  font-size: 14px;
+}
+
+.clear-date-btn {
+  background: none;
+  border: none;
+  color: var(--text-light);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  transition: all 0.3s;
+  margin-bottom: 8px;
+}
+
+.clear-date-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.date-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-light);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* 全选/取消全选按钮 */
+.export-actions-bar {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 5px;
+}
+
+.select-all-btn, .deselect-all-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--secondary-color);
+  border-radius: 20px;
+  background: white;
+  color: var(--accent-color);
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.select-all-btn:hover, .deselect-all-btn:hover {
+  background-color: var(--primary-color);
 }
 
 /* 导入区域 */
 .import-area {
   border: 2px dashed var(--secondary-color);
   border-radius: 12px;
-  padding: 20px;
+  padding: 30px 20px;
   text-align: center;
   cursor: pointer;
   transition: all 0.3s;
@@ -471,18 +926,23 @@ const closeOnOverlay = (event) => {
 }
 
 .import-area i {
-  font-size: 40px;
+  font-size: 48px;
   color: var(--accent-color);
-  margin-bottom: 10px;
+  margin-bottom: 15px;
 }
 
 .import-area p {
   font-size: 14px;
   color: var(--text-light);
-  margin: 0 0 10px 0;
+  margin: 0 0 5px 0;
 }
 
-/* 文件信息 */
+.file-hint {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 15px !important;
+}
+
 .file-info {
   display: flex;
   align-items: center;
@@ -490,10 +950,10 @@ const closeOnOverlay = (event) => {
   padding: 10px;
   background-color: rgba(213, 235, 225, 0.2);
   border-radius: 10px;
-  margin-bottom: 15px;
+  margin-top: 15px;
 }
 
-.file-info i.fa-file {
+.file-info i {
   font-size: 20px;
   color: var(--accent-color);
 }
@@ -510,7 +970,6 @@ const closeOnOverlay = (event) => {
   border: none;
   color: var(--text-light);
   cursor: pointer;
-  font-size: 16px;
   padding: 5px;
   border-radius: 50%;
   transition: all 0.3s;
@@ -527,9 +986,9 @@ const closeOnOverlay = (event) => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 12px 20px;
+  padding: 12px 24px;
   border: none;
-  border-radius: 10px;
+  border-radius: 30px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -543,21 +1002,23 @@ const closeOnOverlay = (event) => {
 }
 
 .export-btn {
-  background-color: var(--accent-color);
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%);
   color: var(--white);
 }
 
 .export-btn:hover:not(:disabled) {
-  background-color: #6a8f7e;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(128, 164, 146, 0.4);
 }
 
 .import-btn {
-  background-color: var(--primary-color);
-  color: var(--accent-color);
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%);
+  color: var(--white);
 }
 
 .import-btn:hover:not(:disabled) {
-  background-color: var(--secondary-color);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(128, 164, 146, 0.4);
 }
 
 .select-file-btn {
@@ -566,46 +1027,54 @@ const closeOnOverlay = (event) => {
   color: var(--accent-color);
   width: auto;
   display: inline-flex;
-  padding: 8px 16px;
+  padding: 8px 20px;
+  margin-top: 5px;
 }
 
 .select-file-btn:hover {
   background-color: rgba(128, 164, 146, 0.1);
 }
 
-/* 分隔线 */
-.transfer-divider {
+.export-actions, .import-actions {
+  margin-top: 20px;
+}
+
+/* 进度和结果 */
+.export-progress, .import-progress {
   text-align: center;
-  position: relative;
+  padding: 10px;
+  color: var(--accent-color);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
-.transfer-divider::before,
-.transfer-divider::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  width: calc(50% - 30px);
-  height: 1px;
-  background-color: var(--secondary-color);
+.import-result {
+  margin-top: 15px;
+  padding: 10px;
+  background-color: rgba(213, 235, 225, 0.2);
+  border-radius: 10px;
 }
 
-.transfer-divider::before {
-  left: 0;
+.result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
 }
 
-.transfer-divider::after {
-  right: 0;
+.result-item.success {
+  color: #2ecc71;
 }
 
-.transfer-divider span {
-  background-color: var(--white);
-  padding: 0 10px;
-  color: var(--text-light);
-  font-size: 14px;
+.result-item.fail {
+  color: #e74c3c;
 }
 
-/* 提示信息 */
-.transfer-note {
+.import-note {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -614,28 +1083,38 @@ const closeOnOverlay = (event) => {
   border-radius: 10px;
   color: #856404;
   font-size: 13px;
-  border: 1px solid #ffeeba;
 }
 
-.transfer-note i {
+.import-note i {
   font-size: 16px;
 }
 
+/* 响应式 */
 @media (max-width: 480px) {
-  .transfer-section {
+  .date-range {
     flex-direction: column;
-    align-items: center;
+    align-items: stretch;
+  }
+
+  .date-separator {
     text-align: center;
+    padding: 0;
   }
 
-  .option-item {
-    justify-content: center;
+  .clear-date-btn {
+    align-self: flex-end;
   }
 
-  .year-select {
-    margin-left: 0;
-    margin-top: 5px;
-    width: 100%;
+  .export-actions-bar {
+    flex-direction: column;
+  }
+
+  .transfer-tabs .tab-btn span {
+    display: none;
+  }
+
+  .transfer-tabs .tab-btn i {
+    font-size: 18px;
   }
 }
 </style>
