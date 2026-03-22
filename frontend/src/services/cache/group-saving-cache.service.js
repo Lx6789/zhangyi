@@ -1236,6 +1236,42 @@ class GroupSavingCacheService {
     }
 
     /**
+     * 清除指定计划的所有存钱记录缓存
+     * @param {string} userId - 用户ID
+     * @param {number} planId - 计划ID
+     * @returns {Promise<boolean>}
+     */
+    async clearPlanDepositRecordsCache(userId, planId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            // 检查表是否存在
+            if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                console.log('【缓存】saving_deposit_records_cache 表不存在');
+                return true;
+            }
+
+            // 查询该计划的所有存钱记录
+            const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
+
+            // 过滤出当前用户的记录
+            const userRecords = allRecords.filter(r => r.userId === userId);
+
+            // 删除这些记录
+            for (const record of userRecords) {
+                await indexedDBService.delete('saving_deposit_records_cache', record.id);
+            }
+
+            console.log(`【缓存】已清除计划 ${planId} 的 ${userRecords.length} 条存钱记录缓存`);
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】清除计划存钱记录缓存失败:', error);
+            return false;
+        }
+    }
+
+    /**
      * 根据类型获取图标
      * @param {string} type - 计划类型
      * @returns {string} 图标类名

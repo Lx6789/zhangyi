@@ -20,7 +20,8 @@
             @click="switchTab('personal')"
         >
           <i class="fas fa-user"></i>
-          <span>个人存钱记录</span>
+          <span>个人存钱</span>
+          <span class="tab-count" v-if="personalPlans.length > 0">{{ personalPlans.length }}</span>
         </button>
         <button
             class="tab-btn"
@@ -28,186 +29,280 @@
             @click="switchTab('group')"
         >
           <i class="fas fa-users"></i>
-          <span>多人存钱记录</span>
+          <span>多人存钱</span>
+          <span class="tab-count" v-if="groupPlans.length > 0">{{ groupPlans.length }}</span>
         </button>
       </div>
 
-      <!-- 个人存钱记录 -->
-      <div v-if="activeTab === 'personal'" class="tab-content">
-        <!-- 计划选择器 -->
-        <div class="plan-selector">
-          <select v-model="selectedPersonalPlanId" class="plan-select" @change="loadPersonalRecords">
-            <option value="">请选择存钱计划</option>
-            <option
-                v-for="plan in personalPlans"
-                :key="plan.id"
-                :value="plan.id"
-            >
-              {{ plan.name }} (进度: {{ plan.progress }}%)
-            </option>
-          </select>
-        </div>
+      <!-- 加载状态 -->
+      <div v-if="loading" class="loading-state">
+        <i class="fas fa-spinner fa-spin"></i>
+        <p>加载记录中...</p>
+      </div>
 
-        <!-- 个人记录列表 -->
-        <div v-if="selectedPersonalPlanId" class="records-container">
-          <div class="plan-summary" v-if="selectedPersonalPlan">
-            <div class="plan-icon" :style="{ backgroundColor: selectedPersonalPlan.color }">
-              <i :class="selectedPersonalPlan.icon"></i>
+      <!-- 个人存钱计划列表 -->
+      <div v-else-if="activeTab === 'personal'" class="plans-container">
+        <div v-if="personalPlans.length === 0" class="empty-state">
+          <i class="fas fa-coins"></i>
+          <p>暂无个人存钱计划</p>
+          <p class="hint-text">点击"新增计划"开始存钱吧</p>
+        </div>
+        <div v-else class="plans-list">
+          <div
+              v-for="plan in personalPlans"
+              :key="plan.id"
+              class="plan-card"
+              :class="{ expanded: expandedPersonalPlanId === plan.id }"
+          >
+            <!-- 计划卡片头部 - 点击展开/收起 -->
+            <div class="plan-header" @click="togglePersonalPlan(plan.id)">
+              <div class="plan-header-left">
+                <div class="plan-icon" :style="{ backgroundColor: plan.color || '#2ecc71' }">
+                  <i :class="plan.icon || getIconByType(plan.type)"></i>
+                </div>
+                <div class="plan-info">
+                  <div class="plan-name">{{ plan.name }}</div>
+                  <div class="plan-meta">
+                    <span class="plan-type">{{ plan.type || '日常储蓄' }}</span>
+                    <span class="plan-deadline" v-if="plan.deadline">
+                      <i class="far fa-calendar-alt"></i>
+                      {{ formatDate(plan.deadline) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div class="plan-header-right">
+                <div class="plan-progress-info">
+                  <span class="progress-text">{{ plan.progress || 0 }}%</span>
+                  <div class="progress-bar-small">
+                    <div class="progress-fill-small" :style="{ width: (plan.progress || 0) + '%', backgroundColor: plan.color || '#2ecc71' }"></div>
+                  </div>
+                </div>
+                <div class="plan-amount">
+                  <span class="amount-current">¥{{ formatNumber(plan.currentAmount) }}</span>
+                  <span class="amount-separator">/</span>
+                  <span class="amount-target">¥{{ formatNumber(plan.targetAmount) }}</span>
+                </div>
+                <i class="expand-icon" :class="expandedPersonalPlanId === plan.id ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
+              </div>
             </div>
-            <div class="plan-info">
-              <h4>{{ selectedPersonalPlan.name }}</h4>
-              <p>{{ selectedPersonalPlan.reason }}</p>
-              <div class="plan-stats">
-                <span>目标: ¥{{ formatNumber(selectedPersonalPlan.targetAmount) }}</span>
-                <span>已存: ¥{{ formatNumber(selectedPersonalPlan.currentAmount) }}</span>
-                <span>进度: {{ selectedPersonalPlan.progress }}%</span>
+
+            <!-- 展开的存钱记录列表 - 固定高度滚动区域 -->
+            <div v-if="expandedPersonalPlanId === plan.id" class="plan-records-wrapper">
+              <div v-if="plan.recordsLoading" class="records-loading">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span>加载记录中...</span>
+              </div>
+              <div v-else-if="plan.records && plan.records.length === 0" class="no-records">
+                <i class="fas fa-coins"></i>
+                <span>暂无存钱记录</span>
+                <span class="hint-small">点击"存钱"按钮开始记录</span>
+              </div>
+              <div v-else class="records-scroll-area">
+                <div class="records-list">
+                  <div
+                      v-for="record in plan.records"
+                      :key="record.id"
+                      class="record-item"
+                      @click.stop="showRecordDetail(record, plan)"
+                  >
+                    <div class="record-time">
+                      <i class="far fa-clock"></i>
+                      {{ formatDateTime(record.depositTime) }}
+                    </div>
+                    <div class="record-amount positive">
+                      +¥{{ formatNumber(record.amount) }}
+                    </div>
+                    <div v-if="record.note" class="record-note">
+                      <i class="fas fa-comment"></i>
+                      {{ record.note.length > 30 ? record.note.slice(0, 30) + '...' : record.note }}
+                    </div>
+                    <div class="record-balance">
+                      余额: ¥{{ formatNumber(record.afterAmount) }}
+                    </div>
+                    <i class="fas fa-chevron-right record-detail-icon"></i>
+                  </div>
+                </div>
+                <div class="records-footer" v-if="plan.records && plan.records.length > 0">
+                  <span class="records-count">共 {{ plan.records.length }} 条记录</span>
+                  <span class="records-total">累计存入 ¥{{ formatNumber(plan.totalDeposited) }}</span>
+                </div>
               </div>
             </div>
           </div>
-
-          <div class="records-list">
-            <div v-if="loadingPersonal" class="loading-state">
-              <i class="fas fa-spinner fa-spin"></i>
-              <p>加载记录中...</p>
-            </div>
-
-            <div v-else-if="personalRecords.length === 0" class="empty-state">
-              <i class="fas fa-coins"></i>
-              <p>暂无存钱记录</p>
-            </div>
-
-            <div v-else class="records-list-content">
-              <div
-                  v-for="record in personalRecords"
-                  :key="record.id"
-                  class="record-card"
-              >
-                <div class="record-time">
-                  <i class="far fa-clock"></i>
-                  {{ formatDateTime(record.time) }}
-                </div>
-                <div class="record-amount positive">+¥{{ formatNumber(record.amount) }}</div>
-                <div v-if="record.note" class="record-note">
-                  备注: {{ record.note }}
-                </div>
-                <div class="record-balance">
-                  余额: ¥{{ formatNumber(record.afterAmount) }}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-else class="empty-state">
-          <i class="fas fa-hand-pointer"></i>
-          <p>请先选择一个存钱计划</p>
         </div>
       </div>
 
-      <!-- 多人存钱记录 -->
-      <div v-if="activeTab === 'group'" class="tab-content">
-        <!-- 计划选择器 -->
-        <div class="plan-selector">
-          <select v-model="selectedGroupPlanId" class="plan-select" @change="loadGroupRecords">
-            <option value="">请选择多人存钱计划</option>
-            <option
-                v-for="plan in groupPlans"
-                :key="plan.id"
-                :value="plan.id"
-            >
-              {{ plan.name }} ({{ plan.members?.length || 0 }}人 - {{ plan.progress }}%)
-            </option>
-          </select>
+      <!-- 多人存钱计划列表 -->
+      <div v-else-if="activeTab === 'group'" class="plans-container">
+        <div v-if="groupPlans.length === 0" class="empty-state">
+          <i class="fas fa-users"></i>
+          <p>暂无多人存钱计划</p>
+          <p class="hint-text">创建一个多人计划邀请好友一起存钱吧</p>
         </div>
-
-        <!-- 成员选择器（当选择了计划后） -->
-        <div v-if="selectedGroupPlanId && groupMembers.length > 0" class="member-selector">
-          <select v-model="selectedMemberId" class="member-select" @change="loadGroupRecords">
-            <option value="">全部成员</option>
-            <option
-                v-for="member in groupMembers"
-                :key="member.userId"
-                :value="member.userId"
-            >
-              {{ member.name }} {{ member.isCreator ? '(创建者)' : '' }}
-            </option>
-          </select>
-
-          <!-- 日期筛选（可选） -->
-          <div class="date-filter">
-            <input
-                type="date"
-                v-model="dateRange.startTime"
-                class="date-input"
-                placeholder="开始日期"
-                @change="loadGroupRecords"
-            >
-            <span class="date-separator">至</span>
-            <input
-                type="date"
-                v-model="dateRange.endTime"
-                class="date-input"
-                placeholder="结束日期"
-                @change="loadGroupRecords"
-            >
-          </div>
-        </div>
-
-        <!-- 多人记录列表 -->
-        <div v-if="selectedGroupPlanId" class="records-container">
-          <div class="plan-summary" v-if="selectedGroupPlan">
-            <div class="plan-icon" :style="{ backgroundColor: selectedGroupPlan.color }">
-              <i :class="selectedGroupPlan.icon"></i>
+        <div v-else class="plans-list">
+          <div
+              v-for="plan in groupPlans"
+              :key="plan.id"
+              class="plan-card group-plan-card"
+              :class="{ expanded: expandedGroupPlanId === plan.id }"
+          >
+            <!-- 计划卡片头部 - 点击展开/收起 -->
+            <div class="plan-header" @click="toggleGroupPlan(plan.id)">
+              <div class="plan-header-left">
+                <div class="plan-icon" :style="{ backgroundColor: plan.color || '#3498db' }">
+                  <i :class="plan.icon || getIconByType(plan.type)"></i>
+                </div>
+                <div class="plan-info">
+                  <div class="plan-name">{{ plan.name }}</div>
+                  <div class="plan-meta">
+                    <span class="plan-type">{{ plan.type || '日常储蓄' }}</span>
+                    <span class="plan-member-count">
+                      <i class="fas fa-users"></i>
+                      {{ plan.members?.length || 0 }}人
+                    </span>
+                    <span class="plan-deadline" v-if="plan.deadline">
+                      <i class="far fa-calendar-alt"></i>
+                      {{ formatDate(plan.deadline) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div class="plan-header-right">
+                <div class="plan-progress-info">
+                  <span class="progress-text">{{ plan.progress || 0 }}%</span>
+                  <div class="progress-bar-small">
+                    <div class="progress-fill-small" :style="{ width: (plan.progress || 0) + '%', backgroundColor: plan.color || '#3498db' }"></div>
+                  </div>
+                </div>
+                <div class="plan-amount">
+                  <span class="amount-current">¥{{ formatNumber(plan.currentAmount) }}</span>
+                  <span class="amount-separator">/</span>
+                  <span class="amount-target">¥{{ formatNumber(plan.targetAmount) }}</span>
+                </div>
+                <i class="expand-icon" :class="expandedGroupPlanId === plan.id ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
+              </div>
             </div>
-            <div class="plan-info">
-              <h4>{{ selectedGroupPlan.name }}</h4>
-              <p>{{ selectedGroupPlan.reason }}</p>
-              <div class="plan-stats">
-                <span>目标: ¥{{ formatNumber(selectedGroupPlan.targetAmount) }}</span>
-                <span>已存: ¥{{ formatNumber(selectedGroupPlan.currentAmount) }}</span>
-                <span>进度: {{ selectedGroupPlan.progress }}%</span>
+
+            <!-- 展开的存钱记录列表 - 固定高度滚动区域 -->
+            <div v-if="expandedGroupPlanId === plan.id" class="plan-records-wrapper">
+              <div v-if="plan.recordsLoading" class="records-loading">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span>加载记录中...</span>
+              </div>
+              <div v-else-if="plan.records && plan.records.length === 0" class="no-records">
+                <i class="fas fa-coins"></i>
+                <span>暂无存钱记录</span>
+                <span class="hint-small">成员存入后会显示在这里</span>
+              </div>
+              <div v-else class="records-scroll-area">
+                <div class="records-list group-records-list">
+                  <div
+                      v-for="record in plan.records"
+                      :key="record.id"
+                      class="record-item group-record"
+                      @click.stop="showRecordDetail(record, plan)"
+                  >
+                    <div class="record-member">
+                      <span class="member-avatar" :style="{ backgroundColor: getMemberColor(record.memberId) + '20', color: getMemberColor(record.memberId) }">
+                        {{ (record.memberName || '用户').charAt(0).toUpperCase() }}
+                      </span>
+                      <span class="member-name">{{ record.memberName }}</span>
+                    </div>
+                    <div class="record-time">
+                      <i class="far fa-clock"></i>
+                      {{ formatDateTime(record.depositTime) }}
+                    </div>
+                    <div class="record-amount positive">
+                      +¥{{ formatNumber(record.amount) }}
+                    </div>
+                    <div v-if="record.note" class="record-note">
+                      <i class="fas fa-comment"></i>
+                      {{ record.note.length > 30 ? record.note.slice(0, 30) + '...' : record.note }}
+                    </div>
+                    <div class="record-balance">
+                      累计: ¥{{ formatNumber(record.afterAmount) }}
+                    </div>
+                    <i class="fas fa-chevron-right record-detail-icon"></i>
+                  </div>
+                </div>
+                <div class="records-footer" v-if="plan.records && plan.records.length > 0">
+                  <span class="records-count">共 {{ plan.records.length }} 条记录</span>
+                  <span class="records-total">累计存入 ¥{{ formatNumber(plan.totalDeposited) }}</span>
+                </div>
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
 
-          <div class="records-list">
-            <div v-if="loadingGroup" class="loading-state">
-              <i class="fas fa-spinner fa-spin"></i>
-              <p>加载记录中...</p>
+    <!-- 记录详情弹窗 - 淡色风格 -->
+    <div v-if="showDetailModal" class="detail-modal-overlay" @click.self="closeDetailModal">
+      <div class="detail-modal-content" :class="currentDetailPlan?.type === 'personal' ? 'personal-detail' : 'group-detail'">
+        <div class="detail-header">
+          <div class="detail-header-left">
+            <div class="detail-plan-icon" :style="{ backgroundColor: currentDetailPlan?.color || (currentDetailPlan?.type === 'personal' ? '#2ecc71' : '#3498db') }">
+              <i :class="currentDetailPlan?.icon || getIconByType(currentDetailPlan?.type)"></i>
             </div>
-
-            <div v-else-if="groupRecords.length === 0" class="empty-state">
-              <i class="fas fa-coins"></i>
-              <p>暂无存钱记录</p>
+            <div>
+              <h3>{{ currentDetailPlan?.name }}</h3>
+              <p class="detail-plan-type">{{ currentDetailPlan?.type || '日常储蓄' }}</p>
             </div>
+          </div>
+          <button class="detail-close" @click="closeDetailModal">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
 
-            <div v-else class="records-list-content">
-              <div
-                  v-for="record in groupRecords"
-                  :key="record.id"
-                  class="record-card"
-              >
-                <div class="record-member">
-                  <span class="member-badge" :style="{ backgroundColor: getMemberColor(record.memberId) + '20' }">
-                    {{ record.memberName }}
-                  </span>
-                </div>
-                <div class="record-time">
-                  <i class="far fa-clock"></i>
-                  {{ formatDateTime(record.depositTime || record.createTime) }}
-                </div>
-                <div class="record-amount positive">+¥{{ formatNumber(record.amount) }}</div>
-                <div v-if="record.note" class="record-note">
-                  备注: {{ record.note }}
-                </div>
-              </div>
+        <div class="detail-body" v-if="selectedRecord">
+          <!-- 存入信息 -->
+          <div class="detail-amount-card">
+            <span class="amount-label">存入金额</span>
+            <span class="amount-value positive">+¥{{ formatNumber(selectedRecord.amount) }}</span>
+            <span class="amount-time">{{ formatFullDateTime(selectedRecord.depositTime) }}</span>
+          </div>
+
+          <!-- 成员信息（多人） -->
+          <div class="detail-info-row" v-if="selectedRecord.memberName">
+            <div class="info-icon">
+              <i class="fas fa-user-circle"></i>
+            </div>
+            <div class="info-content">
+              <span class="info-label">存入成员</span>
+              <span class="info-value">{{ selectedRecord.memberName }}</span>
+            </div>
+          </div>
+
+          <!-- 金额变化 -->
+          <div class="detail-compare-row">
+            <div class="compare-item">
+              <span class="compare-label">存前金额</span>
+              <span class="compare-value">¥{{ formatNumber(selectedRecord.beforeAmount || 0) }}</span>
+            </div>
+            <div class="compare-arrow">
+              <i class="fas fa-arrow-right"></i>
+            </div>
+            <div class="compare-item">
+              <span class="compare-label">存后金额</span>
+              <span class="compare-value highlight">¥{{ formatNumber(selectedRecord.afterAmount) }}</span>
+            </div>
+          </div>
+
+          <!-- 备注 -->
+          <div class="detail-info-row full-width" v-if="selectedRecord.note">
+            <div class="info-icon">
+              <i class="fas fa-comment"></i>
+            </div>
+            <div class="info-content">
+              <span class="info-label">备注</span>
+              <span class="info-value note-text">{{ selectedRecord.note }}</span>
             </div>
           </div>
         </div>
 
-        <div v-else class="empty-state">
-          <i class="fas fa-hand-pointer"></i>
-          <p>请先选择一个多人存钱计划</p>
+        <div class="detail-footer">
+          <button class="detail-btn" @click="closeDetailModal">关闭</button>
         </div>
       </div>
     </div>
@@ -215,11 +310,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
-import savingService from '@/services/api/saving.service'
-import { notificationService } from "@/services/index.js"
-import authHelperService from '@/services/utils/auth-helper.service.js'
+import {ref, reactive, computed, onMounted, watch} from 'vue'
+import {
+  savingService,
+  personalSavingCache,
+  groupSavingCache,
+  authHelperService,
+  notificationService
+} from '@/services'
 
 const props = defineProps({
   visible: {
@@ -228,285 +326,27 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:visible', 'close'])
+const emit = defineEmits(['update:visible', 'close', 'view-plan'])
 
-// 当前用户
+// ==================== 状态 ====================
 const currentUser = ref(null)
-
-// 标签页状态
 const activeTab = ref('personal')
+const loading = ref(false)
 
-// 个人存钱相关
+// 个人计划数据（带记录）
 const personalPlans = ref([])
-const selectedPersonalPlanId = ref('')
-const selectedPersonalPlan = computed(() => {
-  return personalPlans.value.find(p => p.id === Number(selectedPersonalPlanId.value))
-})
-const personalRecords = ref([])
-const loadingPersonal = ref(false)
+const expandedPersonalPlanId = ref(null)
 
-// 多人存钱相关
+// 多人计划数据（带记录）
 const groupPlans = ref([])
-const selectedGroupPlanId = ref('')
-const selectedGroupPlan = computed(() => {
-  return groupPlans.value.find(p => p.id === Number(selectedGroupPlanId.value))
-})
-const groupMembers = ref([])
-const selectedMemberId = ref('')
-const groupRecords = ref([])
-const loadingGroup = ref(false)
+const expandedGroupPlanId = ref(null)
 
-// 日期范围筛选
-const dateRange = reactive({
-  startTime: '',
-  endTime: ''
-})
+// 详情弹窗
+const showDetailModal = ref(false)
+const selectedRecord = ref(null)
+const currentDetailPlan = ref(null)
 
-// 获取当前用户
-const fetchCurrentUser = async () => {
-  // 从认证服务获取当前用户
-  currentUser.value = {
-    id: '1',
-    username: '测试用户',
-    nickname: '测试用户',
-    avatar: '👤'
-  }
-
-  // 确保用户ID是字符串
-  const userId = String(currentUser.value.id)
-
-  console.log('【Saving】设置用户ID:', userId)
-
-  // 设置 savingService 的当前用户ID
-  savingService.setCurrentUser(userId)
-
-  // 初始化业务数据服务
-  try {
-    const { default: businessDataService } = await import('@/services/business-data.service')
-    await businessDataService.init(userId)
-    console.log('【Saving】业务数据服务初始化成功')
-  } catch (error) {
-    console.error('【Saving】业务数据服务初始化失败:', error)
-  }
-}
-
-// 加载个人存钱计划
-const loadPersonalPlans = async () => {
-  try {
-    const plans = await businessDataService.getSavingsPlans('active')
-    personalPlans.value = plans.map(plan => ({
-      ...plan,
-      progress: plan.targetAmount > 0 ? Math.round((plan.currentAmount / plan.targetAmount) * 100) : 0,
-      icon: plan.icon || getIconByType(plan.type),
-      color: plan.color || getColorByType(plan.type)
-    }))
-  } catch (error) {
-    console.error('加载个人计划失败:', error)
-  }
-}
-
-// 加载个人存钱记录
-const loadPersonalRecords = async () => {
-  if (!selectedPersonalPlanId.value) return
-
-  loadingPersonal.value = true
-  try {
-    const planId = Number(selectedPersonalPlanId.value)
-    const key = `personal_deposits_${planId}`
-    const records = JSON.parse(localStorage.getItem(key) || '[]')
-
-    // 按时间倒序排序
-    personalRecords.value = records.sort((a, b) =>
-        new Date(b.time) - new Date(a.time)
-    )
-  } catch (error) {
-    console.error('加载个人存钱记录失败:', error)
-    personalRecords.value = []
-  } finally {
-    loadingPersonal.value = false
-  }
-}
-
-// 加载多人存钱计划
-const loadGroupPlans = async () => {
-  try {
-    // 初始化缓存
-    await groupSavingCache.init(currentUser.value?.id)
-
-    let plans = []
-
-    // 尝试从缓存获取
-    plans = await groupSavingCache.getCachedGroupSavingsList()
-
-    // 如果缓存没有，尝试从后端获取
-    if (plans.length === 0 && navigator.onLine) {
-      const response = await savingService.getGroupSavingsList()
-      if (response && response.code === 200) {
-        plans = response.data || []
-        await groupSavingCache.cacheGroupSavingsList(plans)
-      }
-    }
-
-    groupPlans.value = plans.map(plan => ({
-      id: Number(plan.id),
-      name: plan.name,
-      reason: plan.description || plan.reason,
-      targetAmount: plan.targetAmount,
-      currentAmount: plan.currentAmount,
-      deadline: plan.deadline,
-      type: plan.type || '其他',
-      icon: getIconByType(plan.type),
-      color: getColorByType(plan.type),
-      progress: plan.targetAmount > 0 ? Math.round((plan.currentAmount / plan.targetAmount) * 100) : 0,
-      creatorId: Number(plan.creatorId || plan.createdBy),
-      creatorName: plan.creatorName,
-      members: plan.members || []
-    }))
-  } catch (error) {
-    console.error('加载多人计划失败:', error)
-  }
-}
-
-// 加载多人存钱记录（复用 saving.vue 的逻辑）
-const loadGroupRecords = async () => {
-  if (!selectedGroupPlanId.value) return
-
-  loadingGroup.value = true
-  try {
-    const planId = Number(selectedGroupPlanId.value)
-
-    // 构建查询参数
-    const params = {
-      page: 1,
-      size: 100
-    }
-
-    if (selectedMemberId.value) {
-      params.memberId = Number(selectedMemberId.value)
-    }
-
-    if (dateRange.startTime) {
-      params.startTime = dateRange.startTime
-    }
-    if (dateRange.endTime) {
-      params.endTime = dateRange.endTime
-    }
-
-    let records = []
-
-    if (navigator.onLine) {
-      // 在线模式：尝试从后端获取
-      try {
-        const response = await savingService.getPlanSavingRecordsByPost(planId, params)
-        if (response.code === 200) {
-          records = response.data || []
-
-          // 缓存记录
-          if (records.length > 0) {
-            await groupSavingCache.cacheDepositRecords(records, planId)
-          }
-        }
-      } catch (error) {
-        console.warn('从后端获取失败，尝试从缓存获取:', error)
-        // 失败时从缓存获取
-        records = await loadGroupRecordsFromCache(planId)
-      }
-    } else {
-      // 离线模式：从缓存获取
-      records = await loadGroupRecordsFromCache(planId)
-    }
-
-    groupRecords.value = records
-
-    // 加载成员列表（用于筛选）
-    await loadGroupMembers(planId)
-
-  } catch (error) {
-    console.error('加载多人存钱记录失败:', error)
-    groupRecords.value = []
-  } finally {
-    loadingGroup.value = false
-  }
-}
-
-// 从缓存加载多人记录
-const loadGroupRecordsFromCache = async (planId) => {
-  try {
-    const filters = {
-      memberId: selectedMemberId.value || null,
-      startTime: dateRange.startTime || null,
-      endTime: dateRange.endTime || null
-    }
-
-    return await groupSavingCache.getCachedDepositRecordsByGroupId(planId, filters)
-  } catch (error) {
-    console.error('从缓存加载记录失败:', error)
-    return []
-  }
-}
-
-// 加载多人计划的成员列表
-const loadGroupMembers = async (planId) => {
-  try {
-    const members = await groupSavingCache.getCachedMembersByGroupId(planId)
-    groupMembers.value = members
-  } catch (error) {
-    console.error('加载成员列表失败:', error)
-    groupMembers.value = []
-  }
-}
-
-// 切换标签页
-const switchTab = (tab) => {
-  activeTab.value = tab
-  // 重置选择
-  if (tab === 'personal') {
-    selectedGroupPlanId.value = ''
-    selectedMemberId.value = ''
-    dateRange.startTime = ''
-    dateRange.endTime = ''
-  } else {
-    selectedPersonalPlanId.value = ''
-    personalRecords.value = []
-  }
-}
-
-// 监听计划选择变化
-watch(selectedGroupPlanId, (newVal) => {
-  if (newVal) {
-    selectedMemberId.value = ''
-    dateRange.startTime = ''
-    dateRange.endTime = ''
-    loadGroupRecords()
-  } else {
-    groupRecords.value = []
-    groupMembers.value = []
-  }
-})
-
-// 监听成员和日期变化
-watch([selectedMemberId, () => dateRange.startTime, () => dateRange.endTime], () => {
-  if (selectedGroupPlanId.value) {
-    loadGroupRecords()
-  }
-})
-
-// 初始化
-onMounted(async () => {
-  await fetchCurrentUser()
-  if (currentUser.value) {
-    await loadPersonalPlans()
-    await loadGroupPlans()
-  }
-})
-
-// 处理关闭
-const handleClose = () => {
-  emit('update:visible', false)
-  emit('close')
-}
-
-// 工具函数（复用 saving.vue 的）
+// ==================== 工具函数 ====================
 const getIconByType = (type) => {
   const icons = {
     '日常储蓄': 'fas fa-coins',
@@ -534,21 +374,284 @@ const getColorByType = (type) => {
 }
 
 const getMemberColor = (memberId) => {
-  const colors = ['#2ecc71', '#3498db', '#9b59b6', '#f39c12', '#e74c3c', '#1abc9c']
+  const colors = ['#2ecc71', '#3498db', '#9b59b6', '#f39c12', '#e74c3c', '#1abc9c', '#e67e22', '#95a5a6']
   if (!memberId) return colors[0]
-  const index = (memberId % colors.length)
+  const index = String(memberId).length % colors.length
   return colors[index]
 }
 
 const formatNumber = (num) => {
-  return num !== undefined && num !== null ? num.toLocaleString('zh-CN') : '0'
+  if (num === undefined || num === null) return '0'
+  return num.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+}
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return dateStr
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 const formatDateTime = (dateTimeStr) => {
   if (!dateTimeStr) return ''
   const date = new Date(dateTimeStr)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  if (isNaN(date.getTime())) return dateTimeStr
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
+
+const formatFullDateTime = (dateTimeStr) => {
+  if (!dateTimeStr) return ''
+  const date = new Date(dateTimeStr)
+  if (isNaN(date.getTime())) return dateTimeStr
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+// ==================== 获取当前用户 ====================
+const fetchCurrentUser = async () => {
+  const token = authHelperService.getToken()
+  const userFromStorage = authHelperService.getCurrentUser()
+
+  if (userFromStorage && userFromStorage.id) {
+    currentUser.value = {
+      id: userFromStorage.id,
+      username: userFromStorage.username || userFromStorage.nickname || '用户',
+      avatar: userFromStorage.avatar || '👤'
+    }
+    savingService.setCurrentUser(currentUser.value.id)
+    console.log('【SavingRecords】当前用户:', currentUser.value.id)
+    return
+  }
+
+  const savedUserId = localStorage.getItem('userId')
+  if (savedUserId) {
+    currentUser.value = {
+      id: parseInt(savedUserId),
+      username: '用户',
+      avatar: '👤'
+    }
+    savingService.setCurrentUser(currentUser.value.id)
+    console.log('【SavingRecords】从localStorage获取用户:', currentUser.value.id)
+  }
+}
+
+// ==================== 加载个人计划及记录 ====================
+const loadPersonalPlansWithRecords = async () => {
+  if (!currentUser.value?.id) return []
+
+  try {
+    await personalSavingCache.init(currentUser.value.id)
+    const plans = await personalSavingCache.getAllPlans(currentUser.value.id)
+    const activePlans = plans.filter(p => p.deleted !== 1)
+
+    const plansWithRecords = []
+    for (const plan of activePlans) {
+      const result = await personalSavingCache.getDepositRecords(
+          currentUser.value.id,
+          plan.id,
+          {page: 1, size: 500}
+      )
+
+      const records = result.records || []
+      const totalDeposited = records.reduce((sum, r) => sum + (r.amount || 0), 0)
+
+      plansWithRecords.push({
+        ...plan,
+        progress: plan.targetAmount > 0 ? Math.round((plan.currentAmount / plan.targetAmount) * 100) : 0,
+        icon: plan.icon || getIconByType(plan.type),
+        color: plan.color || getColorByType(plan.type),
+        records: records.map(r => ({
+          ...r,
+          depositTime: r.depositTime,
+          afterAmount: r.afterAmount,
+          beforeAmount: r.beforeAmount
+        })),
+        recordsLoading: false,
+        totalDeposited: totalDeposited,
+        type: 'personal'
+      })
+    }
+
+    console.log('个人计划加载成功:', plansWithRecords.length)
+    return plansWithRecords
+  } catch (error) {
+    console.error('加载个人计划失败:', error)
+    return []
+  }
+}
+
+// ==================== 加载多人计划及记录 ====================
+const loadGroupPlansWithRecords = async () => {
+  if (!currentUser.value?.id) return []
+
+  try {
+    // 初始化多人存钱缓存服务
+    await groupSavingCache.init(currentUser.value.id)
+
+    // 获取多人计划列表
+    const response = await savingService.getGroupSavingsList({}, false)
+    const plans = response.code === 200 ? (response.data || []) : []
+
+    console.log('多人计划数量:', plans.length)
+
+    const plansWithRecords = []
+    for (const plan of plans) {
+      // 获取该计划的存钱记录
+      const result = await groupSavingCache.getDepositRecords(
+          currentUser.value.id,
+          plan.id,
+          {page: 1, size: 500}
+      )
+
+      const records = (result && result.records) ? result.records : []
+      const totalDeposited = records.reduce((sum, r) => sum + (r.amount || 0), 0)
+
+      // 获取成员列表
+      const members = await groupSavingCache.getTableDataById('groupSavingId', plan.id, 'savings_members_cache', false)
+
+      console.log(`计划 ${plan.name} 的记录数:`, records.length)
+
+      plansWithRecords.push({
+        ...plan,
+        progress: plan.targetAmount > 0 ? Math.round((plan.currentAmount / plan.targetAmount) * 100) : 0,
+        icon: plan.icon || getIconByType(plan.type),
+        color: plan.color || getColorByType(plan.type),
+        records: records.map(r => ({
+          ...r,
+          depositTime: r.depositTime || r.createTime,
+          afterAmount: r.afterAmount,
+          beforeAmount: r.beforeAmount,
+          memberName: r.memberName
+        })),
+        members: members,
+        recordsLoading: false,
+        totalDeposited: totalDeposited,
+        type: 'group'
+      })
+    }
+
+    console.log('多人计划加载成功:', plansWithRecords.length)
+    return plansWithRecords
+  } catch (error) {
+    console.error('加载多人计划失败:', error)
+    return []
+  }
+}
+
+// ==================== 单独加载多人计划记录 ====================
+const loadGroupPlanRecords = async (plan) => {
+  if (!plan) return
+
+  plan.recordsLoading = true
+  try {
+    await groupSavingCache.init(currentUser.value.id)
+    const result = await groupSavingCache.getDepositRecords(
+        currentUser.value.id,
+        plan.id,
+        {page: 1, size: 500}
+    )
+
+    const records = (result && result.records) ? result.records : []
+    plan.records = records.map(r => ({
+      ...r,
+      depositTime: r.depositTime || r.createTime,
+      afterAmount: r.afterAmount,
+      beforeAmount: r.beforeAmount,
+      memberName: r.memberName
+    }))
+    plan.totalDeposited = records.reduce((sum, r) => sum + (r.amount || 0), 0)
+    console.log(`加载计划 ${plan.name} 的记录: ${records.length}条`)
+  } catch (error) {
+    console.error('加载多人计划记录失败:', error)
+    plan.records = []
+  } finally {
+    plan.recordsLoading = false
+  }
+}
+
+// ==================== 加载所有数据 ====================
+const loadAllData = async () => {
+  if (!currentUser.value?.id) return
+
+  loading.value = true
+  try {
+    const [personalData, groupData] = await Promise.all([
+      loadPersonalPlansWithRecords(),
+      loadGroupPlansWithRecords()
+    ])
+
+    personalPlans.value = personalData
+    groupPlans.value = groupData
+
+    console.log(`个人计划: ${personalData.length}个, 多人计划: ${groupData.length}个`)
+  } catch (error) {
+    console.error('加载数据失败:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+// ==================== 切换标签页 ====================
+const switchTab = async (tab) => {
+  activeTab.value = tab
+  // 重置展开状态
+  if (tab === 'personal') {
+    expandedGroupPlanId.value = null
+  } else {
+    expandedPersonalPlanId.value = null
+  }
+}
+
+// ==================== 展开/收起个人计划 ====================
+const togglePersonalPlan = async (planId) => {
+  if (expandedPersonalPlanId.value === planId) {
+    expandedPersonalPlanId.value = null
+  } else {
+    expandedPersonalPlanId.value = planId
+  }
+}
+
+// ==================== 展开/收起多人计划 ====================
+const toggleGroupPlan = async (planId) => {
+  if (expandedGroupPlanId.value === planId) {
+    expandedGroupPlanId.value = null
+  } else {
+    expandedGroupPlanId.value = planId
+    const plan = groupPlans.value.find(p => p.id === planId)
+    // 如果记录还没加载，加载记录
+    if (plan && (!plan.records || plan.records.length === 0) && !plan.recordsLoading) {
+      await loadGroupPlanRecords(plan)
+    }
+  }
+}
+
+// ==================== 显示记录详情 ====================
+const showRecordDetail = (record, plan) => {
+  selectedRecord.value = record
+  currentDetailPlan.value = plan
+  showDetailModal.value = true
+}
+
+const closeDetailModal = () => {
+  showDetailModal.value = false
+  selectedRecord.value = null
+  currentDetailPlan.value = null
+}
+
+// ==================== 关闭弹框 ====================
+const handleClose = () => {
+  emit('update:visible', false)
+  emit('close')
+}
+
+// ==================== 监听 ====================
+watch(() => props.visible, async (newVal) => {
+  if (newVal) {
+    await fetchCurrentUser()
+    if (currentUser.value?.id) {
+      await loadAllData()
+    }
+  }
+})
 </script>
 
 <style scoped>
@@ -679,75 +782,78 @@ const formatDateTime = (dateTimeStr) => {
   font-weight: 500;
 }
 
-.tab-content {
-  padding: 0 25px 25px;
+.tab-count {
+  background: #e0e0e0;
+  color: #666;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 20px;
 }
 
-/* 选择器样式 */
-.plan-selector,
-.member-selector {
-  margin-bottom: 20px;
+.tab-btn.active .tab-count {
+  background: #80A492;
+  color: white;
 }
 
-.plan-select,
-.member-select {
-  width: 100%;
-  padding: 12px 15px;
-  border: 1px solid #B1D5C8;
-  border-radius: 25px;
-  font-size: 14px;
+/* 计划列表容器 */
+.plans-container {
+  margin: 0 20px 20px;
+  max-height: calc(90vh - 140px);
+  overflow-y: auto;
+}
+
+.plans-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 计划卡片 */
+.plan-card {
   background: white;
-  cursor: pointer;
-  outline: none;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   transition: all 0.3s;
 }
 
-.plan-select:focus,
-.member-select:focus {
-  border-color: #80A492;
-  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+.plan-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.date-filter {
+.group-plan-card {
+  border-left: 3px solid #3498db;
+}
+
+/* 计划头部 */
+.plan-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 15px;
+  justify-content: space-between;
+  padding: 16px;
+  cursor: pointer;
+  transition: background 0.3s;
 }
 
-.date-input {
-  flex: 1;
-  padding: 10px 15px;
-  border: 1px solid #B1D5C8;
-  border-radius: 25px;
-  font-size: 14px;
-  outline: none;
+.plan-header:hover {
+  background: rgba(213, 235, 225, 0.3);
 }
 
-.date-separator {
-  color: #999;
-  font-size: 14px;
-}
-
-/* 计划摘要 */
-.plan-summary {
+.plan-header-left {
   display: flex;
-  gap: 15px;
-  margin-bottom: 20px;
-  padding: 15px;
-  background-color: white;
-  border-radius: 12px;
-  border: 1px solid #D5EBE1;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
 }
 
 .plan-icon {
-  width: 50px;
-  height: 50px;
+  width: 48px;
+  height: 48px;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: 20px;
   color: white;
   flex-shrink: 0;
 }
@@ -756,77 +862,211 @@ const formatDateTime = (dateTimeStr) => {
   flex: 1;
 }
 
-.plan-info h4 {
+.plan-name {
   font-size: 16px;
   font-weight: 600;
   color: #333;
-  margin: 0 0 5px 0;
+  margin-bottom: 4px;
 }
 
-.plan-info p {
-  font-size: 13px;
-  color: #666;
-  margin: 0 0 8px 0;
-}
-
-.plan-stats {
+.plan-meta {
   display: flex;
-  gap: 15px;
+  gap: 10px;
   font-size: 12px;
-  color: #666;
+  color: #999;
   flex-wrap: wrap;
 }
 
-.plan-stats span {
-  background: rgba(213, 235, 225, 0.3);
-  padding: 4px 10px;
-  border-radius: 20px;
+.plan-type {
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 12px;
 }
 
-/* 记录列表 */
-.records-container {
-  background: white;
-  border-radius: 16px;
-  border: 1px solid #D5EBE1;
+.plan-member-count i,
+.plan-deadline i {
+  margin-right: 3px;
+}
+
+.plan-header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-width: 180px;
+}
+
+.plan-progress-info {
+  text-align: center;
+  min-width: 55px;
+}
+
+.progress-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+}
+
+.progress-bar-small {
+  width: 50px;
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
   overflow: hidden;
+  margin-top: 4px;
+}
+
+.progress-fill-small {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+.plan-amount {
+  text-align: right;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.amount-current {
+  color: #2ecc71;
+  font-weight: 600;
+}
+
+.group-plan-card .amount-current {
+  color: #3498db;
+}
+
+.amount-separator {
+  color: #ccc;
+  margin: 0 2px;
+}
+
+.amount-target {
+  color: #999;
+}
+
+.expand-icon {
+  color: #ccc;
+  font-size: 14px;
+  transition: transform 0.3s;
+}
+
+/* 记录区域 - 固定高度滚动 */
+.plan-records-wrapper {
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
+}
+
+.records-scroll-area {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.records-scroll-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.records-scroll-area::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 3px;
+}
+
+.records-scroll-area::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border-radius: 3px;
+}
+
+.records-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: #a0a0a0;
+}
+
+.records-loading,
+.no-records {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.records-loading i,
+.no-records i {
+  font-size: 32px;
+  color: #B1D5C8;
+}
+
+.hint-small {
+  font-size: 11px;
+  color: #ccc;
 }
 
 .records-list {
-  max-height: 400px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.records-list-content {
-  padding: 15px;
-}
-
-.record-card {
-  padding: 15px;
-  border-bottom: 1px solid #D5EBE1;
+.record-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: white;
+  border-radius: 12px;
+  cursor: pointer;
   transition: all 0.3s;
+  position: relative;
 }
 
-.record-card:last-child {
-  border-bottom: none;
+.record-item:hover {
+  background: #f5f5f5;
+  transform: translateX(4px);
 }
 
-.record-card:hover {
-  background-color: rgba(213, 235, 225, 0.1);
+.group-record {
+  flex-wrap: wrap;
+}
+
+.record-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 80px;
+}
+
+.member-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.member-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #666;
 }
 
 .record-time {
-  font-size: 13px;
-  color: #666;
-  margin-bottom: 5px;
+  font-size: 12px;
+  color: #999;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  min-width: 100px;
 }
 
 .record-amount {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 5px 0;
+  font-size: 16px;
+  font-weight: 700;
+  min-width: 100px;
 }
 
 .record-amount.positive {
@@ -836,53 +1076,76 @@ const formatDateTime = (dateTimeStr) => {
 .record-note {
   font-size: 12px;
   color: #999;
-  margin: 5px 0;
-  padding-left: 10px;
-  border-left: 2px solid #D5EBE1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .record-balance {
-  font-size: 12px;
+  font-size: 11px;
   color: #80A492;
+  min-width: 80px;
   text-align: right;
 }
 
-.record-member {
-  margin-bottom: 5px;
+.record-detail-icon {
+  color: #ccc;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.3s;
 }
 
-.member-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 20px;
+.record-item:hover .record-detail-icon {
+  opacity: 1;
+}
+
+.records-footer {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 12px;
+  margin-top: 8px;
+  border-top: 1px solid #e0e0e0;
   font-size: 12px;
+  color: #999;
+}
+
+.records-total {
+  color: #2ecc71;
   font-weight: 500;
+}
+
+.group-plan-card .records-total {
+  color: #3498db;
 }
 
 /* 加载状态 */
 .loading-state {
   text-align: center;
-  padding: 40px 20px;
+  padding: 60px 20px;
   color: #999;
 }
 
 .loading-state i {
-  font-size: 30px;
+  font-size: 40px;
   color: #80A492;
-  margin-bottom: 10px;
+  margin-bottom: 15px;
 }
 
 /* 空状态 */
 .empty-state {
   text-align: center;
-  padding: 40px 20px;
+  padding: 60px 20px;
   color: #999;
 }
 
 .empty-state i {
-  font-size: 40px;
+  font-size: 60px;
   color: #B1D5C8;
-  margin-bottom: 10px;
+  margin-bottom: 15px;
 }
 
 .empty-state p {
@@ -890,19 +1153,275 @@ const formatDateTime = (dateTimeStr) => {
   margin: 0;
 }
 
+.hint-text {
+  font-size: 12px;
+  color: #B1D5C8;
+  margin-top: 5px !important;
+}
+
+/* 详情弹窗 - 淡色风格 */
+.detail-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 3100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.detail-modal-content {
+  background: white;
+  border-radius: 24px;
+  width: 100%;
+  max-width: 380px;
+  overflow: hidden;
+  animation: modalSlideIn 0.3s ease;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.detail-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-plan-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: white;
+}
+
+.detail-header-left h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  color: #333;
+}
+
+.detail-plan-type {
+  font-size: 11px;
+  color: #999;
+  margin: 0;
+}
+
+.detail-close {
+  background: none;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+}
+
+.detail-close:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.detail-body {
+  padding: 20px;
+}
+
+.detail-amount-card {
+  text-align: center;
+  padding: 20px;
+  background: rgba(46, 204, 113, 0.05);
+  border-radius: 16px;
+  margin-bottom: 20px;
+}
+
+.personal-detail .detail-amount-card {
+  background: rgba(46, 204, 113, 0.05);
+}
+
+.group-detail .detail-amount-card {
+  background: rgba(52, 152, 219, 0.05);
+}
+
+.amount-label {
+  font-size: 12px;
+  color: #999;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.amount-value {
+  font-size: 28px;
+  font-weight: 700;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.amount-value.positive {
+  color: #2ecc71;
+}
+
+.amount-time {
+  font-size: 11px;
+  color: #999;
+}
+
+.detail-info-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.detail-info-row.full-width {
+  flex-direction: column;
+}
+
+.info-icon {
+  width: 32px;
+  color: #999;
+  font-size: 16px;
+  text-align: center;
+}
+
+.info-content {
+  flex: 1;
+}
+
+.info-label {
+  font-size: 11px;
+  color: #999;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.info-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+}
+
+.note-text {
+  background: #f8f9fa;
+  padding: 8px 12px;
+  border-radius: 8px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.detail-compare-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 12px;
+  margin: 15px 0;
+}
+
+.compare-item {
+  text-align: center;
+  flex: 1;
+}
+
+.compare-label {
+  font-size: 11px;
+  color: #999;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.compare-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #555;
+}
+
+.compare-value.highlight {
+  color: #2ecc71;
+  font-weight: 700;
+}
+
+.group-detail .compare-value.highlight {
+  color: #3498db;
+}
+
+.compare-arrow {
+  color: #ccc;
+  padding: 0 10px;
+}
+
+.detail-footer {
+  padding: 15px 20px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: center;
+}
+
+.detail-btn {
+  padding: 10px 30px;
+  background: #f5f5f5;
+  border: none;
+  border-radius: 25px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
+  color: #666;
+}
+
+.detail-btn:hover {
+  background: #e8e8e8;
+}
+
 /* 响应式 */
 @media (max-width: 600px) {
-  .plan-stats {
+  .plan-header {
     flex-direction: column;
-    gap: 5px;
+    align-items: flex-start;
+    gap: 12px;
   }
 
-  .date-filter {
-    flex-direction: column;
+  .plan-header-right {
+    width: 100%;
+    justify-content: space-between;
   }
 
-  .date-separator {
-    display: none;
+  .record-item {
+    flex-wrap: wrap;
+  }
+
+  .record-time,
+  .record-amount,
+  .record-balance {
+    width: auto;
+  }
+
+  .record-note {
+    width: 100%;
+    order: 1;
+    margin-top: 8px;
+  }
+
+  .records-scroll-area {
+    max-height: 280px;
   }
 }
 </style>
