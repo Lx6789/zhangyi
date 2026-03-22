@@ -569,50 +569,6 @@ class BusinessDataService {
         }
     }
 
-    // ==================== 个人存钱计划 (personal_savings) ====================
-
-    async addSavingsPlan(plan) {
-        const newPlan = this.addUserIdentifier({
-            ...plan,
-            id: plan.id || Date.now().toString(),
-            status: 'active'
-        })
-        return indexedDBService.add('personal_savings', newPlan)
-    }
-
-    async getSavingsPlans(status = null) {
-        const plans = await indexedDBService.getAll('personal_savings')
-        const userId = this.getCurrentUserId()
-        let filtered = plans.filter(p => p.userId === userId)
-
-        if (status) {
-            filtered = filtered.filter(p => p.status === status)
-        }
-
-        return filtered.sort((a, b) => new Date(b.targetDate) - new Date(a.targetDate))
-    }
-
-    async updateSavingsPlan(id, data) {
-        const plan = await indexedDBService.get('personal_savings', id)
-        if (plan && plan.userId === this.getCurrentUserId()) {
-            const updatedPlan = {
-                ...plan,
-                ...data,
-                updateTime: new Date().toISOString()
-            }
-            return indexedDBService.update('personal_savings', updatedPlan)
-        }
-        return false
-    }
-
-    async deleteSavingsPlan(id) {
-        const plan = await indexedDBService.get('personal_savings', id)
-        if (plan && plan.userId === this.getCurrentUserId()) {
-            return indexedDBService.delete('personal_savings', id)
-        }
-        return false
-    }
-
     // ==================== 商品管理（生意记账用） ====================
 
     async addProduct(product) {

@@ -6,6 +6,7 @@ export { default as notificationService } from './utils/notification.service'
 export { default as dateHelper } from './utils/date-helper.service'
 export { default as businessDataService } from './business-data.service'
 export { default as userDataService } from './user-data.service'
+export { default as personalSavingCache } from './cache/personal-saving-cache.service.js'
 
 // 导出API服务
 export { default as authService } from './api/auth.service'

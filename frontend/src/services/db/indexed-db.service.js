@@ -99,9 +99,14 @@ class IndexedDBService {
                 // 6. 创建个人存钱计划表
                 if (!db.objectStoreNames.contains('personal_savings')) {
                     const savingsStore = db.createObjectStore('personal_savings', { keyPath: 'id' })
-                    savingsStore.createIndex('status', 'status', { unique: false })
-                    savingsStore.createIndex('targetDate', 'targetDate', { unique: false })
                     savingsStore.createIndex('userId', 'userId', { unique: false })
+                    savingsStore.createIndex('status', 'status', { unique: false })
+                    savingsStore.createIndex('deadline', 'deadline', { unique: false })
+                    savingsStore.createIndex('createdAt', 'createdAt', { unique: false })
+                    savingsStore.createIndex('updatedAt', 'updatedAt', { unique: false })
+                    savingsStore.createIndex('type', 'type', { unique: false })
+                    savingsStore.createIndex('completed', 'completed', { unique: false })
+                    savingsStore.createIndex('deleted', 'deleted', { unique: false })
                     console.log('创建 personal_savings 表')
                 }
 

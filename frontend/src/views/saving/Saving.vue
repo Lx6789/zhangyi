@@ -382,6 +382,7 @@ const loadPersonalSavings = async () => {
       console.log('个人存钱计划加载成功，共', personalSavings.value.length, '条')
     } else {
       showNotification(response.message || '加载失败', 'error')
+      personalSavings.value = []
     }
   } catch (error) {
     console.error('加载个人存钱计划失败:', error)
@@ -403,30 +404,40 @@ const loadGroupSavings = async (forceRefresh = false) => {
     // 传递 forceRefresh 参数，强制从服务器获取最新数据
     const response = await savingService.getGroupSavingsList({}, forceRefresh)
 
-    groupSavings.value = response.data || []
-
+    if (response.code === 200) {
+      groupSavings.value = response.data || []
+      console.log('多人存钱计划加载成功，共', groupSavings.value.length, '条')
+    } else {
+      showNotification(response.message || '加载失败', 'error')
+      groupSavings.value = []
+    }
   } catch (error) {
     console.error('加载多人存钱计划失败:', error)
     groupSavings.value = []
+    if (!forceRefresh) {
+      showNotification('加载失败: ' + error.message, 'error')
+    }
   } finally {
     loading.value = false
   }
 }
 
 // ========== 切换存钱类型 ==========
-const switchSavingsType = (type) => {
+const switchSavingsType = async (type) => {
   currentSavingsType.value = type
   resetForm()
+
   if (type === 'group') {
-    loadGroupSavings() // 切换时正常加载（可能使用缓存）
+    await loadGroupSavings() // 切换时正常加载（可能使用缓存）
   } else {
-    loadPersonalSavings()
+    await loadPersonalSavings()
   }
 }
 
 // ========== 显示个人表单 ==========
 const showPersonalForm = () => {
   resetForm()
+  currentSavingsType.value = 'personal'
   scrollToForm()
 }
 
@@ -590,12 +601,29 @@ onUnmounted(() => {
   window.removeEventListener('offline', handleOffline)
 })
 
+// 监听用户信息变化
 watch(() => currentUser.value, (newUser) => {
   console.log('当前用户信息更新:', newUser)
   if (newUser?.id) {
     // 如果用户信息变化，重新设置 savingService
     savingService.setCurrentUser(newUser.id)
-    loadPersonalSavings()
+    // 根据当前类型重新加载数据
+    if (currentSavingsType.value === 'personal') {
+      loadPersonalSavings()
+    } else if (currentSavingsType.value === 'group') {
+      loadGroupSavings(true)
+    }
+  }
+}, { deep: true })
+
+// 监听存钱类型变化，确保数据加载
+watch(() => currentSavingsType.value, async (newType, oldType) => {
+  if (newType !== oldType) {
+    if (newType === 'personal') {
+      await loadPersonalSavings()
+    } else if (newType === 'group') {
+      await loadGroupSavings()
+    }
   }
 })
 </script>

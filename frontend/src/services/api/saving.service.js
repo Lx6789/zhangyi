@@ -1,12 +1,11 @@
 // src/services/api/saving.service.js
 
-import http from '@/services/utils/http-interceptor'
 import * as savingApi from '@/api/saving'
 import {authHelperService, notificationService} from '@/services'
 import businessDataService from '@/services/business-data.service'
-import groupSavingCache from '@/services/cache/group-saving-cache.service'
 import groupSavingCacheService from "@/services/cache/group-saving-cache.service";
 import indexedDBService from '@/services/db/indexed-db.service.js'
+import {personalSavingCache} from "@/services";
 
 class SavingService {
     constructor() {
@@ -76,8 +75,8 @@ class SavingService {
                 console.log('【SavingService】从 localStorage 初始化用户ID:', this.currentUserId)
 
                 // 初始化缓存服务
-                if (groupSavingCache && groupSavingCache.init) {
-                    groupSavingCache.init(this.currentUserId).catch(console.warn)
+                if (groupSavingCacheService && groupSavingCacheService.init) {
+                    groupSavingCacheService.init(this.currentUserId).catch(console.warn)
                 }
                 // 初始化业务数据服务
                 businessDataService.init(this.currentUserId).catch(console.warn)
@@ -93,8 +92,11 @@ class SavingService {
     setCurrentUser(userId) {
         this.currentUserId = userId
         // 初始化缓存服务
-        if (groupSavingCache && groupSavingCache.init) {
-            groupSavingCache.init(userId).catch(console.warn)
+        if (groupSavingCacheService && groupSavingCacheService.init) {
+            groupSavingCacheService.init(userId).catch(console.warn)
+        }
+        if (personalSavingCache && personalSavingCache.init) {
+            personalSavingCache.init(userId).catch(console.warn)
         }
         // 初始化业务数据服务
         businessDataService.init(userId).catch(console.warn)
@@ -1577,31 +1579,86 @@ class SavingService {
     }
 
     // ==================== 个人存钱计划（前端存储） ====================
-
     /**
      * 获取个人存钱计划列表
      * 从 IndexedDB 中获取数据
      */
     async getPersonalSavingsList(params = {}) {
-        try {
-            // 确保业务数据服务已初始化
-            await businessDataService.init(this.currentUserId)
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id
+        if (!userId) {
+            console.error('【Service】无法获取用户ID')
+            return {
+                code: 401,
+                message: '用户未登录',
+                data: []
+            }
+        }
 
-            // 从 IndexedDB 获取个人存钱计划
-            const plans = await businessDataService.getSavingsPlans(params.status)
+        try {
+            // 确保缓存服务已初始化
+            await personalSavingCache.init(userId)
+
+            const plans = await personalSavingCache.getAllPlans(userId)
+
+            // 只返回未删除的计划
+            const activePlans = plans.filter(plan => plan.deleted !== 1)
+
+            console.log('【Service】获取个人存钱计划列表成功，共', activePlans.length, '条')
 
             return {
                 code: 200,
-                data: plans || [],
-                message: '获取成功'
+                message: '获取成功',
+                data: activePlans
             }
         } catch (error) {
-            console.error('获取个人存钱计划列表失败:', error)
-
+            console.error('【Service】获取个人存钱计划列表失败:', error)
             return {
                 code: 500,
-                data: [],
-                message: '获取失败: ' + error.message
+                message: error.message || '获取失败',
+                data: []
+            }
+        }
+    }
+
+    /**
+     * 获取个人存钱计划详情
+     * @param {string} id - 计划ID
+     * @returns {Promise<Object>} 计划详情
+     */
+    async getPersonalSavingsDetail(id) {
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id
+        if (!userId) {
+            console.error('【Service】无法获取用户ID')
+            return {
+                code: 401,
+                message: '用户未登录',
+                data: null
+            }
+        }
+
+        try {
+            await personalSavingCache.init(userId)
+            const plan = await personalSavingCache.getPlanById(userId, id)
+
+            if (!plan) {
+                return {
+                    code: 404,
+                    message: '计划不存在',
+                    data: null
+                }
+            }
+
+            return {
+                code: 200,
+                message: '获取成功',
+                data: plan
+            }
+        } catch (error) {
+            console.error('【Service】获取个人存钱计划详情失败:', error)
+            return {
+                code: 500,
+                message: error.message || '获取失败',
+                data: null
             }
         }
     }
@@ -1611,54 +1668,81 @@ class SavingService {
      * 保存到 IndexedDB 中
      */
     async createPersonalSavings(data) {
-        try {
-            console.log('创建个人存钱计划 - 原始数据:', data)
-
-            // 确保业务数据服务已初始化
-            await businessDataService.init(this.currentUserId)
-
-            // 处理金额字段
-            const targetAmount = parseFloat(data.targetAmount) || 0
-            const currentAmount = parseFloat(data.currentAmount) || 0
-
-            if (targetAmount <= 0) {
-                throw new Error('目标金额必须大于0')
-            }
-
-            if (currentAmount > targetAmount) {
-                throw new Error('已存金额不能大于目标金额')
-            }
-
-            // 理由非必填
-            const planData = {
-                ...data,
-                reason: data.reason?.trim() || '',
-                targetAmount,
-                currentAmount,
-                status: 'active',
-                createTime: new Date().toISOString(),
-                updateTime: new Date().toISOString()
-            }
-
-            console.log('创建个人存钱计划 - 处理后数据:', planData)
-
-            // 保存到 IndexedDB
-            const result = await businessDataService.addSavingsPlan(planData)
-
-            notificationService.showNotification('创建成功', 'success')
-
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id
+        if (!userId) {
+            console.error('【Service】无法获取用户ID')
+            notificationService.showNotification('用户未登录，请重新登录', 'error')
             return {
-                code: 200,
-                data: result,
-                message: '创建成功'
+                code: 401,
+                message: '用户未登录，请重新登录',
+                data: null
+            }
+        }
+
+        // 验证数据
+        if (!data.name || !data.name.trim()) {
+            notificationService.showNotification('请输入存钱目标名称', 'warning')
+            return {
+                code: 400,
+                message: '请输入存钱目标名称',
+                data: null
+            }
+        }
+
+        if (!data.targetAmount || data.targetAmount <= 0) {
+            notificationService.showNotification('请输入有效的目标金额', 'warning')
+            return {
+                code: 400,
+                message: '请输入有效的目标金额',
+                data: null
+            }
+        }
+
+        if (!data.deadline) {
+            notificationService.showNotification('请选择截止日期', 'warning')
+            return {
+                code: 400,
+                message: '请选择截止日期',
+                data: null
+            }
+        }
+
+        if (data.currentAmount && data.currentAmount > data.targetAmount) {
+            notificationService.showNotification('已存金额不能大于目标金额', 'warning')
+            return {
+                code: 400,
+                message: '已存金额不能大于目标金额',
+                data: null
+            }
+        }
+
+        try {
+            await personalSavingCache.init(userId)
+
+            const result = await personalSavingCache.createPlan(userId, data)
+
+            if (result.success) {
+                notificationService.showNotification('计划创建成功', 'success')
+                return {
+                    code: 200,
+                    message: '创建成功',
+                    data: result.data
+                }
+            } else {
+                notificationService.showNotification(result.error || '创建失败', 'error')
+                return {
+                    code: 500,
+                    message: result.error || '创建失败',
+                    data: null
+                }
             }
         } catch (error) {
-            console.error('创建个人存钱计划失败:', error)
-
+            console.error('【Service】创建个人存钱计划失败:', error)
             notificationService.showNotification(error.message || '创建失败', 'error')
             return {
                 code: 500,
-                message: error.message || '创建失败'
+                message: error.message || '创建失败',
+                data: null
             }
         }
     }
@@ -1668,89 +1752,119 @@ class SavingService {
      * 更新 IndexedDB 中的数据
      */
     async updatePersonalSavings(id, data) {
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id
+        if (!userId) {
+            console.error('【Service】无法获取用户ID')
+            notificationService.showNotification('用户未登录，请重新登录', 'error')
+            return {
+                code: 401,
+                message: '用户未登录，请重新登录',
+                data: null
+            }
+        }
+
+        // 验证数据
+        if (!data.name || !data.name.trim()) {
+            notificationService.showNotification('请输入存钱目标名称', 'warning')
+            return {
+                code: 400,
+                message: '请输入存钱目标名称',
+                data: null
+            }
+        }
+
+        if (!data.targetAmount || data.targetAmount <= 0) {
+            notificationService.showNotification('请输入有效的目标金额', 'warning')
+            return {
+                code: 400,
+                message: '请输入有效的目标金额',
+                data: null
+            }
+        }
+
+        if (data.currentAmount && data.currentAmount > data.targetAmount) {
+            notificationService.showNotification('已存金额不能大于目标金额', 'warning')
+            return {
+                code: 400,
+                message: '已存金额不能大于目标金额',
+                data: null
+            }
+        }
+
         try {
-            console.log('更新个人存钱计划 - 原始数据:', id, data)
+            await personalSavingCache.init(userId)
 
-            // 确保业务数据服务已初始化
-            await businessDataService.init(this.currentUserId)
+            const result = await personalSavingCache.updatePlan(userId, id, data)
 
-            // 处理金额字段
-            const targetAmount = parseFloat(data.targetAmount) || 0
-            const currentAmount = parseFloat(data.currentAmount) || 0
-
-            if (targetAmount <= 0) {
-                throw new Error('目标金额必须大于0')
-            }
-
-            if (currentAmount > targetAmount) {
-                throw new Error('已存金额不能大于目标金额')
-            }
-
-            // 准备更新数据
-            const updateData = {
-                ...data,
-                reason: data.reason?.trim() || '',
-                targetAmount,
-                currentAmount,
-                updateTime: new Date().toISOString()
-            }
-
-            console.log('更新个人存钱计划 - 处理后数据:', updateData)
-
-            // 更新 IndexedDB
-            const result = await businessDataService.updateSavingsPlan(id, updateData)
-
-            if (result) {
-                notificationService.showNotification('更新成功', 'success')
+            if (result.success) {
+                notificationService.showNotification('计划更新成功', 'success')
                 return {
                     code: 200,
-                    data: result,
-                    message: '更新成功'
+                    message: '更新成功',
+                    data: result.data
                 }
             } else {
-                throw new Error('计划不存在或无权更新')
+                notificationService.showNotification(result.error || '更新失败', 'error')
+                return {
+                    code: 500,
+                    message: result.error || '更新失败',
+                    data: null
+                }
             }
         } catch (error) {
-            console.error('更新个人存钱计划失败:', error)
-
+            console.error('【Service】更新个人存钱计划失败:', error)
             notificationService.showNotification(error.message || '更新失败', 'error')
             return {
                 code: 500,
-                message: error.message || '更新失败'
+                message: error.message || '更新失败',
+                data: null
             }
         }
     }
 
     /**
      * 删除个人存钱计划
-     * 从 IndexedDB 中删除数据
+     * 从 IndexedDB 中软删除数据
      */
     async deletePersonalSavings(id) {
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id
+        if (!userId) {
+            console.error('【Service】无法获取用户ID')
+            notificationService.showNotification('用户未登录，请重新登录', 'error')
+            return {
+                code: 401,
+                message: '用户未登录，请重新登录',
+                data: null
+            }
+        }
+
         try {
-            console.log('删除个人存钱计划:', id)
+            await personalSavingCache.init(userId)
 
-            // 确保业务数据服务已初始化
-            await businessDataService.init(this.currentUserId)
+            const result = await personalSavingCache.deletePlan(userId, id)
 
-            // 从 IndexedDB 删除
-            const result = await businessDataService.deleteSavingsPlan(id)
-
-            if (result) {
+            if (result.success) {
                 notificationService.showNotification('删除成功', 'success')
                 return {
                     code: 200,
-                    message: '删除成功'
+                    message: '删除成功',
+                    data: null
                 }
             } else {
-                throw new Error('计划不存在或无权删除')
+                notificationService.showNotification(result.error || '删除失败', 'error')
+                return {
+                    code: 500,
+                    message: result.error || '删除失败',
+                    data: null
+                }
             }
         } catch (error) {
-            console.error('删除个人存钱计划失败:', error)
-
+            console.error('【Service】删除个人存钱计划失败:', error)
             notificationService.showNotification(error.message || '删除失败', 'error')
             return {
                 code: 500,
-                message: error.message || '删除失败'
+                message: error.message || '删除失败',
+                data: null
             }
         }
     }
@@ -1760,67 +1874,140 @@ class SavingService {
      * 更新计划中的已存金额
      */
     async depositToPersonalSaving(planId, data) {
-        try {
-            console.log('个人存钱 - 原始数据:', planId, data)
-
-            // 确保业务数据服务已初始化
-            await businessDataService.init(this.currentUserId)
-
-            const amount = parseFloat(data.amount) || 0
-
-            if (amount <= 0) {
-                throw new Error('存入金额必须大于0')
-            }
-
-            // 获取当前计划
-            const plans = await businessDataService.getSavingsPlans()
-            const currentPlan = plans.find(p => p.id === planId)
-
-            if (!currentPlan) {
-                throw new Error('计划不存在')
-            }
-
-            // 更新金额
-            const newAmount = (currentPlan.currentAmount || 0) + amount
-
-            if (newAmount > currentPlan.targetAmount) {
-                throw new Error(`存入金额不能超过目标金额，最多可存 ¥${currentPlan.targetAmount - (currentPlan.currentAmount || 0)}`)
-            }
-
-            const updateData = {
-                currentAmount: newAmount,
-                updateTime: new Date().toISOString()
-            }
-
-            console.log('个人存钱 - 处理后数据:', updateData)
-
-            // 保存更新
-            const result = await businessDataService.updateSavingsPlan(planId, updateData)
-
-            // 计算进度
-            const progress = Math.min(Math.round((newAmount / currentPlan.targetAmount) * 100), 100)
-
-            notificationService.showNotification(`成功存入 ¥${amount}`, 'success')
-
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id
+        if (!userId) {
+            console.error('【Service】无法获取用户ID')
+            notificationService.showNotification('用户未登录，请重新登录', 'error')
             return {
-                code: 200,
-                message: '存钱成功',
-                data: {
-                    ...result,
-                    id: planId,
-                    currentAmount: newAmount,
-                    progress: progress,
-                    completed: newAmount >= currentPlan.targetAmount
+                code: 401,
+                message: '用户未登录，请重新登录',
+                data: null
+            }
+        }
+
+        // 验证金额
+        const amount = parseFloat(data.amount)
+        if (isNaN(amount) || amount <= 0) {
+            notificationService.showNotification('请输入有效的存入金额', 'warning')
+            return {
+                code: 400,
+                message: '请输入有效的存入金额',
+                data: null
+            }
+        }
+
+        try {
+            await personalSavingCache.init(userId)
+
+            const result = await personalSavingCache.deposit(userId, planId, {
+                amount: amount,
+                note: data.note || ''
+            })
+
+            if (result.success) {
+                notificationService.showNotification(`成功存入 ¥${amount.toFixed(2)}`, 'success')
+                return {
+                    code: 200,
+                    message: '存钱成功',
+                    data: {
+                        plan: result.data.plan,
+                        record: result.data.record,
+                        newAmount: result.data.newAmount,
+                        progress: result.data.progress,
+                        completed: result.data.completed
+                    }
+                }
+            } else {
+                if (result.maxAmount !== undefined) {
+                    notificationService.showNotification(result.error, 'warning')
+                } else {
+                    notificationService.showNotification(result.error || '存钱失败', 'error')
+                }
+                return {
+                    code: 500,
+                    message: result.error || '存钱失败',
+                    data: null
                 }
             }
-
         } catch (error) {
-            console.error('个人存钱失败:', error)
-
+            console.error('【Service】个人存钱失败:', error)
             notificationService.showNotification(error.message || '存钱失败', 'error')
             return {
                 code: 500,
-                message: error.message || '存钱失败'
+                message: error.message || '存钱失败',
+                data: null
+            }
+        }
+    }
+
+    /**
+     * 获取个人存钱计划的存钱记录
+     * @param {string} planId - 计划ID
+     * @param {Object} options - 分页参数 { page, size }
+     * @returns {Promise<Object>} 存钱记录
+     */
+    async getPersonalSavingRecords(planId, options = { page: 1, size: 20 }) {
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id
+        if (!userId) {
+            console.error('【Service】无法获取用户ID')
+            return {
+                code: 401,
+                message: '用户未登录',
+                data: { records: [], total: 0, page: 1, size: 20, pages: 0 }
+            }
+        }
+
+        try {
+            await personalSavingCache.init(userId)
+
+            const records = await personalSavingCache.getDepositRecords(userId, planId, options)
+
+            return {
+                code: 200,
+                message: '获取成功',
+                data: records
+            }
+        } catch (error) {
+            console.error('【Service】获取存钱记录失败:', error)
+            return {
+                code: 500,
+                message: error.message || '获取失败',
+                data: { records: [], total: 0, page: options.page, size: options.size, pages: 0 }
+            }
+        }
+    }
+
+    /**
+     * 获取个人存钱计划统计信息
+     * @returns {Promise<Object>} 统计信息
+     */
+    async getPersonalSavingsStats() {
+        const userId = this.currentUserId || authHelperService.getCurrentUser()?.id
+        if (!userId) {
+            console.error('【Service】无法获取用户ID')
+            return {
+                code: 401,
+                message: '用户未登录',
+                data: null
+            }
+        }
+
+        try {
+            await personalSavingCache.init(userId)
+
+            const stats = await personalSavingCache.getStats(userId)
+
+            return {
+                code: 200,
+                message: '获取成功',
+                data: stats
+            }
+        } catch (error) {
+            console.error('【Service】获取统计信息失败:', error)
+            return {
+                code: 500,
+                message: error.message || '获取失败',
+                data: null
             }
         }
     }

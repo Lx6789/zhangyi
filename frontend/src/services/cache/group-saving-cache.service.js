@@ -9,6 +9,21 @@ import { notificationService } from '@/services'
 class GroupSavingCacheService {
 
     /**
+     * 初始化缓存服务
+     * @param {string|number} userId - 用户ID
+     * @returns {Promise<void>}
+     */
+    async init(userId) {
+        try {
+            await indexedDBService.ensureInitialized();
+            this.currentUserId = userId;
+            console.log('【GroupSavingCache】服务已初始化，用户ID:', userId);
+        } catch (error) {
+            console.error('【GroupSavingCache】初始化失败:', error);
+        }
+    }
+
+    /**
      * 检查多人存钱计划缓存表是否有数据
      * 正确逻辑：检查当前用户是否有参与任何计划（成员表中存在且未删除的记录）
      * @param {string} userId - 用户ID

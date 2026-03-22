@@ -237,12 +237,16 @@ const calculateProgress = (current, target) => {
 
 const formatNumber = (num) => {
   if (num === undefined || num === null) return '0'
-  return num.toLocaleString('zh-CN')
+  return num.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
 }
 
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
   const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return dateStr
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
@@ -268,6 +272,35 @@ const isAmountValid = computed(() => {
   }
 
   return true
+})
+
+// 获取剩余可存金额
+const remainingAmount = computed(() => {
+  if (!currentPlan.value) return 0
+  const target = currentPlan.value.targetAmount || 0
+  const current = currentPlan.value.currentAmount || 0
+  return Math.max(0, target - current)
+})
+
+// 预览存入后的金额
+const previewAfterAmount = computed(() => {
+  if (!currentPlan.value) return 0
+  const amount = parseFloat(addMoneyForm.amount) || 0
+  return (currentPlan.value.currentAmount || 0) + amount
+})
+
+// 预览是否超出目标
+const isExceedingTarget = computed(() => {
+  if (!currentPlan.value) return false
+  const target = currentPlan.value.targetAmount || 0
+  return previewAfterAmount.value > target
+})
+
+// 超出金额
+const exceedingAmount = computed(() => {
+  if (!currentPlan.value || !isExceedingTarget.value) return 0
+  const target = currentPlan.value.targetAmount || 0
+  return previewAfterAmount.value - target
 })
 
 // ========== 弹窗方法 ==========
@@ -308,15 +341,16 @@ const handleAddMoney = async () => {
 
   // 验证是否超过目标金额
   if (newTotal > currentPlan.value.targetAmount) {
-    notificationService.showNotification(`存入金额不能超过目标金额，最多可存 ¥${formatNumber(currentPlan.value.targetAmount - (currentPlan.value.currentAmount || 0))}`, 'warning')
+    const maxAmount = currentPlan.value.targetAmount - (currentPlan.value.currentAmount || 0)
+    notificationService.showNotification(`存入金额不能超过目标金额，最多可存 ¥${formatNumber(maxAmount)}`, 'warning')
     return
   }
 
   submitting.value = true
 
   try {
-    console.log('正在存入计划ID:', currentPlan.value.id)
-    console.log('存入数据:', { amount, note: addMoneyForm.note || '' })
+    console.log('【PersonalSaving】正在存入计划ID:', currentPlan.value.id)
+    console.log('【PersonalSaving】存入数据:', { amount, note: addMoneyForm.note || '' })
 
     // 调用个人存钱API
     const response = await savingService.depositToPersonalSaving(currentPlan.value.id, {
@@ -324,19 +358,16 @@ const handleAddMoney = async () => {
       note: addMoneyForm.note || ''
     })
 
-    console.log('API响应:', response)
+    console.log('【PersonalSaving】API响应:', response)
 
     if (response.code === 200) {
       notificationService.showNotification(`成功存入 ¥${formatNumber(amount)}`, 'success')
 
-      // 计算新的进度
-      const progress = calculateProgress(newTotal, currentPlan.value.targetAmount)
-
-      // 更新本地数据
-      const updatedPlan = {
+      // 获取更新后的计划数据
+      const updatedPlan = response.data?.plan || {
         ...currentPlan.value,
         currentAmount: newTotal,
-        progress: progress,
+        progress: calculateProgress(newTotal, currentPlan.value.targetAmount),
         completed: newTotal >= currentPlan.value.targetAmount
       }
 
@@ -349,11 +380,40 @@ const handleAddMoney = async () => {
       notificationService.showNotification(response.message || '存钱失败', 'error')
     }
   } catch (error) {
-    console.error('存钱失败详细错误:', error)
-    notificationService.showNotification('存钱失败: ' + (error.message || '请稍后重试'), 'error')
+    console.error('【PersonalSaving】存钱失败详细错误:', error)
+
+    // 处理错误信息
+    let errorMsg = '存钱失败，请稍后重试'
+    if (error.message) {
+      if (error.message.includes('超过目标金额') || error.message.includes('最多可存')) {
+        errorMsg = error.message
+      } else {
+        errorMsg = error.message
+      }
+    }
+    notificationService.showNotification(errorMsg, 'error')
   } finally {
     submitting.value = false
   }
+}
+
+// ========== 计划操作 ==========
+const handleEdit = (plan) => {
+  emit('edit', plan)
+}
+
+const handleDelete = (plan) => {
+  emit('delete', plan)
+}
+
+const handleCreate = () => {
+  emit('create')
+}
+
+// 格式化进度文本
+const formatProgressText = (progress) => {
+  if (progress === undefined || progress === null) return '0%'
+  return `${progress}%`
 }
 </script>
 
