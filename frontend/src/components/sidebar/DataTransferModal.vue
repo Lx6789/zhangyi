@@ -32,6 +32,7 @@
 
         <!-- 导出面板 -->
         <div v-if="activeTab === 'export'" class="export-panel">
+          <!-- 导出面板内容保持不变 -->
           <div class="export-options-container">
             <div class="export-section">
               <div class="section-title">
@@ -117,7 +118,6 @@
               </div>
             </div>
 
-            <!-- 日期范围筛选 -->
             <div class="export-section">
               <div class="section-title">
                 <i class="fas fa-calendar-alt"></i>
@@ -177,7 +177,84 @@
               </div>
               <div class="import-note">
                 <i class="fas fa-exclamation-triangle"></i>
-                <span>导入数据将覆盖现有数据，请确保已备份重要数据</span>
+                <span>导入数据时，旧数据不会被自动覆盖，您可以选择覆盖方式</span>
+              </div>
+            </div>
+
+            <!-- 导入类型选择 -->
+            <div class="import-section">
+              <div class="section-title">
+                <i class="fas fa-file-alt"></i>
+                <h4>导入类型</h4>
+              </div>
+              <div class="import-type-group">
+                <label class="import-type-radio">
+                  <input type="radio" v-model="importType" value="wechat">
+                  <div class="radio-content">
+                    <i class="fab fa-weixin"></i>
+                    <span>微信支付账单</span>
+                    <span class="type-desc">支持微信支付导出的Excel账单文件（.xlsx）</span>
+                  </div>
+                </label>
+                <label class="import-type-radio">
+                  <input type="radio" v-model="importType" value="json">
+                  <div class="radio-content">
+                    <i class="fas fa-code"></i>
+                    <span>JSON数据文件</span>
+                    <span class="type-desc">支持账易导出的JSON备份文件</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- 覆盖模式选择（仅微信账单） -->
+            <div class="import-section" v-if="importType === 'wechat'">
+              <div class="section-title">
+                <i class="fas fa-layer-group"></i>
+                <h4>数据覆盖方式</h4>
+              </div>
+              <div class="overwrite-mode-group">
+                <label class="overwrite-mode-radio">
+                  <input type="radio" v-model="overwriteMode" value="append">
+                  <div class="radio-content">
+                    <i class="fas fa-plus-circle"></i>
+                    <span>追加模式</span>
+                    <span class="mode-desc">保留原有数据，只添加新数据（推荐）</span>
+                  </div>
+                </label>
+                <label class="overwrite-mode-radio">
+                  <input type="radio" v-model="overwriteMode" value="overwrite_range">
+                  <div class="radio-content">
+                    <i class="fas fa-calendar-alt"></i>
+                    <span>按日期范围覆盖</span>
+                    <span class="mode-desc">覆盖指定日期范围内的现有数据</span>
+                  </div>
+                </label>
+                <label class="overwrite-mode-radio">
+                  <input type="radio" v-model="overwriteMode" value="overwrite_all">
+                  <div class="radio-content">
+                    <i class="fas fa-trash-alt"></i>
+                    <span>完全覆盖</span>
+                    <span class="mode-desc">删除所有现有数据，完全替换为新数据</span>
+                  </div>
+                </label>
+              </div>
+
+              <!-- 日期范围选择（仅当选择按日期范围覆盖时显示） -->
+              <div class="date-range-selector" v-if="overwriteMode === 'overwrite_range'">
+                <div class="range-input-group">
+                  <label>开始日期</label>
+                  <input type="date" v-model="overwriteDateRange.startDate" class="date-input">
+                </div>
+                <span class="range-separator">至</span>
+                <div class="range-input-group">
+                  <label>结束日期</label>
+                  <input type="date" v-model="overwriteDateRange.endDate" class="date-input">
+                </div>
+                <div class="range-hint">
+                  <i class="fas fa-info-circle"></i>
+                  <span>此范围内的现有数据将被删除，然后导入新数据</span>
+                </div>
               </div>
             </div>
 
@@ -191,10 +268,10 @@
                    @dragleave.prevent="dragLeave"
                    @drop.prevent="handleDrop"
                    :class="{ 'drag-over': isDragging }">
-                <input type="file" ref="fileInput" accept=".json" @change="handleFileSelect" style="display: none">
+                <input type="file" ref="fileInput" :accept="importType === 'wechat' ? '.xlsx' : '.json'" @change="handleFileSelect" style="display: none">
                 <i class="fas fa-cloud-upload-alt"></i>
                 <p>点击或拖拽文件到此处上传</p>
-                <p class="file-hint">支持 JSON 格式文件</p>
+                <p class="file-hint">{{ importType === 'wechat' ? '支持 XLSX 格式的微信账单文件' : '支持 JSON 格式文件' }}</p>
                 <button class="action-btn select-file-btn" @click="selectFile">
                   <i class="fas fa-folder-open"></i>
                   <span>选择文件</span>
@@ -209,16 +286,23 @@
               </div>
             </div>
 
-            <div class="import-section">
+            <!-- 预览导入数据日期范围 -->
+            <div class="import-section" v-if="importPreviewDateRange">
               <div class="section-title">
-                <i class="fas fa-check-circle"></i>
-                <h4>导入选项</h4>
+                <i class="fas fa-chart-line"></i>
+                <h4>导入数据预览</h4>
               </div>
-              <div class="option-group">
-                <label class="option-checkbox">
-                  <input type="checkbox" v-model="importOptions.clearBeforeImport">
-                  <span>导入前清空现有数据</span>
-                </label>
+              <div class="preview-info">
+                <div class="preview-item">
+                  <i class="fas fa-calendar"></i>
+                  <span>数据日期范围：</span>
+                  <strong>{{ importPreviewDateRange.startDate }} 至 {{ importPreviewDateRange.endDate }}</strong>
+                </div>
+                <div class="preview-item">
+                  <i class="fas fa-list"></i>
+                  <span>预计导入记录数：</span>
+                  <strong>{{ importPreviewRecordCount }} 条</strong>
+                </div>
               </div>
             </div>
           </div>
@@ -241,6 +325,14 @@
             <div v-if="importResult.failCount > 0" class="result-item fail">
               <i class="fas fa-times-circle"></i>
               <span>失败: {{ importResult.failCount }} 条</span>
+            </div>
+            <div v-if="importResult.total" class="result-item info">
+              <i class="fas fa-info-circle"></i>
+              <span>总计: {{ importResult.total }} 条</span>
+            </div>
+            <div v-if="importResult.duplicateCount" class="result-item warning">
+              <i class="fas fa-exclamation-circle"></i>
+              <span>跳过重复: {{ importResult.duplicateCount }} 条</span>
             </div>
           </div>
         </div>
@@ -283,7 +375,11 @@ const {
   importCategoriesData,
   importSuppliersData,
   importCustomersData,
-  clearUserData
+  clearUserData,
+  importWechatBillData,
+  importWechatBill,
+  getImportDateRange,
+  checkExistingRecordsByDate
 } = Import()
 
 // 状态
@@ -299,6 +395,18 @@ const importResult = ref(null)
 const fileInput = ref(null)
 const selectedFile = ref(null)
 const isDragging = ref(false)
+
+// 导入类型和覆盖模式
+const importType = ref('wechat') // 'wechat' 或 'json'
+const overwriteMode = ref('append') // 'append', 'overwrite_range', 'overwrite_all'
+const overwriteDateRange = reactive({
+  startDate: '',
+  endDate: ''
+})
+
+// 预览信息
+const importPreviewDateRange = ref(null)
+const importPreviewRecordCount = ref(0)
 
 // 导出选项
 const exportOptions = reactive({
@@ -317,11 +425,6 @@ const exportOptions = reactive({
   categories: true,
   suppliers: true,
   customers: true
-})
-
-// 导入选项
-const importOptions = reactive({
-  clearBeforeImport: true
 })
 
 // 日期范围
@@ -428,12 +531,37 @@ const selectFile = () => {
 const handleFileSelect = (event) => {
   const file = event.target.files[0]
   if (file) {
-    if (!file.name.endsWith('.json')) {
-      notificationService.showNotification('请选择 JSON 格式的文件', 'warning')
-      return
+    // 根据导入类型验证文件格式
+    if (importType.value === 'wechat') {
+      if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+        notificationService.showNotification('请选择 Excel 格式的微信账单文件（.xlsx）', 'warning')
+        return
+      }
+      // 预览微信账单数据
+      previewWechatBill(file)
+    } else {
+      if (!file.name.endsWith('.json')) {
+        notificationService.showNotification('请选择 JSON 格式的文件', 'warning')
+        return
+      }
     }
     selectedFile.value = file
     importResult.value = null
+  }
+}
+
+const previewWechatBill = async (file) => {
+  try {
+    const records = await importWechatBill(currentUser.value.id, file)
+    if (records && records.length > 0) {
+      const dateRange = getImportDateRange(records)
+      importPreviewDateRange.value = dateRange
+      importPreviewRecordCount.value = records.length
+    }
+  } catch (error) {
+    console.error('预览失败:', error)
+    importPreviewDateRange.value = null
+    importPreviewRecordCount.value = 0
   }
 }
 
@@ -449,9 +577,18 @@ const handleDrop = (event) => {
   isDragging.value = false
   const file = event.dataTransfer.files[0]
   if (file) {
-    if (!file.name.endsWith('.json')) {
-      notificationService.showNotification('请上传 JSON 格式的文件', 'warning')
-      return
+    // 根据导入类型验证文件格式
+    if (importType.value === 'wechat') {
+      if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+        notificationService.showNotification('请上传 Excel 格式的微信账单文件（.xlsx）', 'warning')
+        return
+      }
+      previewWechatBill(file)
+    } else {
+      if (!file.name.endsWith('.json')) {
+        notificationService.showNotification('请上传 JSON 格式的文件', 'warning')
+        return
+      }
     }
     selectedFile.value = file
     importResult.value = null
@@ -465,7 +602,37 @@ const handleImport = async () => {
     return
   }
 
-  const confirmImport = confirm('导入数据将覆盖现有数据，是否继续？')
+  // 验证覆盖模式下的日期范围
+  if (overwriteMode.value === 'overwrite_range') {
+    if (!overwriteDateRange.startDate || !overwriteDateRange.endDate) {
+      notificationService.showNotification('请选择要覆盖的日期范围', 'warning')
+      return
+    }
+    if (overwriteDateRange.startDate > overwriteDateRange.endDate) {
+      notificationService.showNotification('开始日期不能大于结束日期', 'warning')
+      return
+    }
+  }
+
+  // 构建确认消息
+  let confirmMessage = ''
+  if (importType.value === 'wechat') {
+    switch (overwriteMode.value) {
+      case 'append':
+        confirmMessage = '追加模式：将添加新数据，不会影响现有数据。是否继续？'
+        break
+      case 'overwrite_range':
+        confirmMessage = `按日期范围覆盖：将删除 ${overwriteDateRange.startDate} 至 ${overwriteDateRange.endDate} 范围内的现有数据，然后导入新数据。是否继续？`
+        break
+      case 'overwrite_all':
+        confirmMessage = '完全覆盖：将删除所有现有个人记账数据，完全替换为新数据。此操作不可撤销，是否继续？'
+        break
+    }
+  } else {
+    confirmMessage = '导入JSON数据将添加新数据，不会影响现有数据。是否继续？'
+  }
+
+  const confirmImport = confirm(confirmMessage)
   if (!confirmImport) return
 
   importing.value = true
@@ -473,88 +640,129 @@ const handleImport = async () => {
   importResult.value = null
 
   try {
-    const data = await parseImportFile(selectedFile.value)
-
-    // 清空现有数据
-    if (importOptions.clearBeforeImport) {
-      importProgress.value = '正在清空现有数据...'
-      await clearUserData(currentUser.value.id)
-    }
-
-    const results = {
+    let results = {
       successCount: 0,
-      failCount: 0
+      failCount: 0,
+      total: 0
     }
 
-    // 导入收支数据
-    if (data.incomeExpense && data.incomeExpense.length > 0) {
-      importProgress.value = '正在导入收支数据...'
-      const result = await importIncomeExpenseData(data)
-      results.successCount += result.successCount
-      results.failCount += result.failCount
-    }
+    // 根据导入类型处理
+    if (importType.value === 'wechat') {
+      // 导入微信账单
+      importProgress.value = '正在导入微信账单...'
 
-    // 导入个人存钱数据
-    if (data.personalSaving && data.personalSaving.length > 0) {
-      importProgress.value = '正在导入个人存钱数据...'
-      const result = await importPersonalSavingData(currentUser.value.id, data)
-      results.successCount += result.successCount
-      results.failCount += result.failCount
-    }
+      const importOptions = {
+        overwriteMode: overwriteMode.value
+      }
 
-    // 导入多人存钱数据
-    if (data.groupSaving && data.groupSaving.length > 0) {
-      importProgress.value = '正在导入多人存钱数据...'
-      const result = await importGroupSavingData(currentUser.value.id, data)
-      results.successCount += result.successCount
-      results.failCount += result.failCount
-    }
+      if (overwriteMode.value === 'overwrite_range') {
+        importOptions.overwriteDateRange = {
+          startDate: overwriteDateRange.startDate,
+          endDate: overwriteDateRange.endDate
+        }
+      }
 
-    // 导入商品数据
-    if (data.products && data.products.length > 0) {
-      importProgress.value = '正在导入商品数据...'
-      const result = await importProductsData(data)
-      results.successCount += result.successCount
-      results.failCount += result.failCount
-    }
+      const result = await importWechatBillData(
+          currentUser.value.id,
+          selectedFile.value,
+          importOptions
+      )
+      results = result
+    } else {
+      // 导入JSON数据
+      const data = await parseImportFile(selectedFile.value)
 
-    // 导入库存数据
-    if (data.inventory && data.inventory.length > 0) {
-      importProgress.value = '正在导入库存数据...'
-      const result = await importInventoryData(data)
-      results.successCount += result.successCount
-      results.failCount += result.failCount
-    }
+      // JSON导入使用追加模式
+      const importOptions = { overwriteMode: 'append' }
 
-    // 导入商品分类
-    if (data.categories && data.categories.length > 0) {
-      importProgress.value = '正在导入商品分类...'
-      const result = await importCategoriesData(data)
-      results.successCount += result.successCount
-      results.failCount += result.failCount
-    }
+      // 导入收支数据
+      if (data.incomeExpense && data.incomeExpense.length > 0) {
+        importProgress.value = '正在导入收支数据...'
+        const result = await importIncomeExpenseData(data, importOptions)
+        results.successCount += result.successCount
+        results.failCount += result.failCount
+      }
 
-    // 导入供应商
-    if (data.suppliers && data.suppliers.length > 0) {
-      importProgress.value = '正在导入供应商...'
-      const result = await importSuppliersData(data)
-      results.successCount += result.successCount
-      results.failCount += result.failCount
-    }
+      // 导入个人存钱数据
+      if (data.personalSaving && data.personalSaving.length > 0) {
+        importProgress.value = '正在导入个人存钱数据...'
+        const result = await importPersonalSavingData(currentUser.value.id, data, importOptions)
+        results.successCount += result.successCount
+        results.failCount += result.failCount
+      }
 
-    // 导入客户
-    if (data.customers && data.customers.length > 0) {
-      importProgress.value = '正在导入客户...'
-      const result = await importCustomersData(data)
-      results.successCount += result.successCount
-      results.failCount += result.failCount
+      // 导入多人存钱数据
+      if (data.groupSaving && data.groupSaving.length > 0) {
+        importProgress.value = '正在导入多人存钱数据...'
+        const result = await importGroupSavingData(currentUser.value.id, data, importOptions)
+        results.successCount += result.successCount
+        results.failCount += result.failCount
+      }
+
+      // 导入商品数据
+      if (data.products && data.products.length > 0) {
+        importProgress.value = '正在导入商品数据...'
+        const result = await importProductsData(data, importOptions)
+        results.successCount += result.successCount
+        results.failCount += result.failCount
+      }
+
+      // 导入库存数据
+      if (data.inventory && data.inventory.length > 0) {
+        importProgress.value = '正在导入库存数据...'
+        const result = await importInventoryData(data, importOptions)
+        results.successCount += result.successCount
+        results.failCount += result.failCount
+      }
+
+      // 导入商品分类
+      if (data.categories && data.categories.length > 0) {
+        importProgress.value = '正在导入商品分类...'
+        const result = await importCategoriesData(data, importOptions)
+        results.successCount += result.successCount
+        results.failCount += result.failCount
+      }
+
+      // 导入供应商
+      if (data.suppliers && data.suppliers.length > 0) {
+        importProgress.value = '正在导入供应商...'
+        const result = await importSuppliersData(data, importOptions)
+        results.successCount += result.successCount
+        results.failCount += result.failCount
+      }
+
+      // 导入客户
+      if (data.customers && data.customers.length > 0) {
+        importProgress.value = '正在导入客户...'
+        const result = await importCustomersData(data, importOptions)
+        results.successCount += result.successCount
+        results.failCount += result.failCount
+      }
+
+      results.total = results.successCount + results.failCount
     }
 
     importResult.value = results
     importProgress.value = ''
-    notificationService.showNotification(`导入完成，成功 ${results.successCount} 条，失败 ${results.failCount} 条`, 'success')
+
+    let successMsg = ''
+    if (importType.value === 'wechat') {
+      if (overwriteMode.value === 'append') {
+        successMsg = `追加完成，成功导入 ${results.successCount} 条记录`
+      } else if (overwriteMode.value === 'overwrite_range') {
+        successMsg = `覆盖完成，成功导入 ${results.successCount} 条记录`
+      } else {
+        successMsg = `导入完成，成功导入 ${results.successCount} 条记录`
+      }
+    } else {
+      successMsg = `导入完成，成功 ${results.successCount} 条，失败 ${results.failCount} 条`
+    }
+
+    notificationService.showNotification(successMsg, 'success')
 
     selectedFile.value = null
+    importPreviewDateRange.value = null
+    importPreviewRecordCount.value = 0
   } catch (error) {
     console.error('导入失败:', error)
     notificationService.showNotification('导入失败：' + error.message, 'error')
@@ -585,6 +793,12 @@ const resetState = () => {
   importProgress.value = ''
   dateRange.start = ''
   dateRange.end = ''
+  importType.value = 'wechat'
+  overwriteMode.value = 'append'
+  overwriteDateRange.startDate = ''
+  overwriteDateRange.endDate = ''
+  importPreviewDateRange.value = null
+  importPreviewRecordCount.value = 0
 }
 
 // 监听弹框
@@ -595,11 +809,20 @@ watch(() => props.visible, async (newVal) => {
   }
 })
 
+// 监听导入类型变化，重置文件选择
+watch(importType, () => {
+  selectedFile.value = null
+  importResult.value = null
+  importPreviewDateRange.value = null
+  importPreviewRecordCount.value = 0
+})
+
 // 动态导入 XLSX
 import * as XLSX from 'xlsx'
 </script>
 
 <style scoped>
+/* 样式保持不变，添加新增样式 */
 .modal {
   position: fixed;
   top: 0;
@@ -827,6 +1050,158 @@ import * as XLSX from 'xlsx'
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 导入类型选择 */
+.import-type-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-type-radio {
+  display: block;
+  cursor: pointer;
+  padding: 12px;
+  border: 1px solid var(--secondary-color);
+  border-radius: 12px;
+  transition: all 0.3s;
+}
+
+.import-type-radio:hover {
+  background-color: rgba(128, 164, 146, 0.05);
+  border-color: var(--accent-color);
+}
+
+.import-type-radio input[type="radio"] {
+  display: none;
+}
+
+.import-type-radio input[type="radio"]:checked + .radio-content {
+  color: var(--accent-color);
+}
+
+.radio-content {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.radio-content i {
+  font-size: 20px;
+  margin-bottom: 5px;
+}
+
+.radio-content span:first-of-type {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.type-desc {
+  font-size: 12px;
+  color: var(--text-light);
+  font-weight: normal;
+}
+
+/* 覆盖模式选择 */
+.overwrite-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.overwrite-mode-radio {
+  display: block;
+  cursor: pointer;
+  padding: 12px;
+  border: 1px solid var(--secondary-color);
+  border-radius: 12px;
+  transition: all 0.3s;
+}
+
+.overwrite-mode-radio:hover {
+  background-color: rgba(128, 164, 146, 0.05);
+  border-color: var(--accent-color);
+}
+
+.overwrite-mode-radio input[type="radio"] {
+  display: none;
+}
+
+.overwrite-mode-radio input[type="radio"]:checked + .radio-content {
+  color: var(--accent-color);
+}
+
+.mode-desc {
+  font-size: 12px;
+  color: var(--text-light);
+  font-weight: normal;
+}
+
+/* 日期范围选择器 */
+.date-range-selector {
+  margin-top: 15px;
+  padding: 12px;
+  background-color: rgba(128, 164, 146, 0.05);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.range-input-group {
+  flex: 1;
+  min-width: 120px;
+}
+
+.range-input-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 4px;
+}
+
+.range-separator {
+  color: var(--text-light);
+  font-size: 14px;
+}
+
+.range-hint {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-light);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* 预览信息 */
+.preview-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.preview-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  padding: 8px;
+  background-color: rgba(128, 164, 146, 0.1);
+  border-radius: 8px;
+}
+
+.preview-item i {
+  font-size: 16px;
+  color: var(--accent-color);
+}
+
+.preview-item strong {
+  color: var(--accent-color);
+  margin-left: auto;
 }
 
 /* 日期范围 */
@@ -1074,6 +1449,14 @@ import * as XLSX from 'xlsx'
   color: #e74c3c;
 }
 
+.result-item.info {
+  color: var(--accent-color);
+}
+
+.result-item.warning {
+  color: #f39c12;
+}
+
 .import-note {
   display: flex;
   align-items: center;
@@ -1115,6 +1498,14 @@ import * as XLSX from 'xlsx'
 
   .transfer-tabs .tab-btn i {
     font-size: 18px;
+  }
+
+  .date-range-selector {
+    flex-direction: column;
+  }
+
+  .range-separator {
+    text-align: center;
   }
 }
 </style>

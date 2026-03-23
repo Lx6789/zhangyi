@@ -1,11 +1,184 @@
-// data_migration/useDataImport.js
+// data_migration/import.js
 import businessDataService from '@/services/business-data.service.js'
 import { personalSavingCache, groupSavingCache, savingService } from '@/services'
 import notificationService from '@/services/utils/notification.service.js'
 import indexedDBService from '@/services/db/indexed-db.service.js'
+import * as XLSX from 'xlsx'
+
+/**
+ * 微信支付账单解析器
+ */
+class WechatBillParser {
+    constructor(userId) {
+        this.userId = userId
+    }
+
+    /**
+     * 解析微信账单Excel数据
+     * @param {Array} excelData - 从Excel解析出的原始数据
+     * @returns {Array} 转换后的daily_records数据
+     */
+    parseWechatBill(excelData) {
+        const records = []
+
+        for (let i = 0; i < excelData.length; i++) {
+            const row = excelData[i]
+            if (!row || row.length < 8) continue
+
+            const transactionTime = row[0]  // 交易时间
+            const transactionType = row[1]   // 交易类型
+            const counterparty = row[2]      // 交易对方
+            const goods = row[3]              // 商品
+            const incomeExpense = row[4]      // 收/支
+            const amountStr = row[5]          // 金额(元)
+            const paymentMethod = row[6]      // 支付方式
+            const status = row[7]             // 当前状态
+            const transactionNo = row[8]      // 交易单号
+            const merchantNo = row[9]         // 商户单号
+            const remark = row[10]            // 备注
+
+            // 跳过无效行
+            if (!transactionTime || !incomeExpense) continue
+
+            // 解析金额
+            let amount = 0
+            if (amountStr) {
+                // 去除¥符号和空格
+                const cleanAmount = String(amountStr).replace(/[¥,]/g, '').trim()
+                amount = parseFloat(cleanAmount)
+                if (isNaN(amount)) continue
+            }
+
+            // 解析日期（从交易时间中提取）
+            let dateStr = ''
+            if (transactionTime) {
+                const dateMatch = transactionTime.match(/^(\d{4}-\d{2}-\d{2})/)
+                if (dateMatch) {
+                    dateStr = dateMatch[1]
+                }
+            }
+
+            // 根据交易对方和商品自动判断分类
+            const category = this.inferCategory(transactionType, counterparty, goods)
+
+            // 根据收/支判断类型
+            const type = incomeExpense === '收入' ? '收入' : '支出'
+
+            // 生成唯一ID
+            const id = Date.now() + Math.random().toString(36).substr(2, 9)
+            const timestamp = new Date().toISOString()
+
+            // 构建daily_records对象
+            const record = {
+                id: id,
+                date: dateStr,
+                type: type,
+                category: category,
+                amount: amount,
+                note: this.buildNote(transactionType, counterparty, goods, remark),
+                businessType: 'personal',  // 个人记账
+                paymentMethod: this.mapPaymentMethod(paymentMethod, incomeExpense),
+                userId: this.userId,
+                source: this.extractSource(counterparty, goods),
+                syncStatus: 'pending',
+                createTime: timestamp,
+                updateTime: timestamp,
+                timestamp: timestamp,
+                // 保留原始微信账单信息供参考
+                wechatInfo: {
+                    transactionType: transactionType,
+                    counterparty: counterparty,
+                    goods: goods,
+                    transactionNo: transactionNo,
+                    merchantNo: merchantNo,
+                    status: status
+                }
+            }
+
+            records.push(record)
+        }
+
+        return records
+    }
+
+    /**
+     * 推断分类
+     */
+    inferCategory(transactionType, counterparty, goods) {
+        const counterpartyLower = (counterparty || '').toLowerCase()
+        const goodsLower = (goods || '').toLowerCase()
+
+        if (counterpartyLower.includes('餐饮') || counterpartyLower.includes('餐厅') ||
+            counterpartyLower.includes('美食') || goodsLower.includes('餐饮')) {
+            return '餐饮'
+        }
+
+        if (counterpartyLower.includes('超市') || counterpartyLower.includes('便利店') ||
+            counterpartyLower.includes('购物') || counterpartyLower.includes('佳源生活超市')) {
+            return '购物'
+        }
+
+        if (counterpartyLower.includes('腾讯天游') || counterpartyLower.includes('哔哩哔哩') ||
+            counterpartyLower.includes('宽娱数码') || counterpartyLower.includes('王者荣耀') ||
+            goodsLower.includes('游戏') || goodsLower.includes('漫币') || goodsLower.includes('王者荣耀')) {
+            return '游戏娱乐'
+        }
+
+        if (counterpartyLower.includes('中铁网络') || counterpartyLower.includes('铁路') ||
+            goodsLower.includes('12306')) {
+            return '交通出行'
+        }
+
+        if (counterpartyLower.includes('广电') || counterpartyLower.includes('腾讯云') ||
+            counterpartyLower.includes('网络')) {
+            return '通讯网络'
+        }
+
+        if (counterpartyLower.includes('网飞物联') || counterpartyLower.includes('快递')) {
+            return '物流快递'
+        }
+
+        if (transactionType === '转账') {
+            return '转账'
+        }
+
+        return '其他'
+    }
+
+    buildNote(transactionType, counterparty, goods, remark) {
+        const parts = []
+        if (transactionType && transactionType !== '商户消费') {
+            parts.push(`类型:${transactionType}`)
+        }
+        if (counterparty && counterparty !== '/' && counterparty !== '') {
+            parts.push(`对方:${counterparty}`)
+        }
+        if (goods && goods !== '/' && goods !== '') {
+            parts.push(`商品:${goods}`)
+        }
+        if (remark && remark !== '/' && remark !== '') {
+            parts.push(`备注:${remark}`)
+        }
+        return parts.join(' | ') || '微信支付账单'
+    }
+
+    mapPaymentMethod(paymentMethod, incomeExpense) {
+        if (incomeExpense === '收入') return '微信转账'
+        if (!paymentMethod || paymentMethod === '/') return '微信支付'
+        if (paymentMethod.includes('零钱')) return '微信零钱'
+        if (paymentMethod.includes('银行卡')) return '银行卡'
+        return paymentMethod
+    }
+
+    extractSource(counterparty, goods) {
+        if (counterparty && counterparty !== '/' && counterparty !== '') return counterparty
+        if (goods && goods !== '/' && goods !== '') return goods
+        return '微信支付'
+    }
+}
 
 export function Import() {
-    // 解析导入的文件
+    // 解析导入的文件（JSON格式）
     const parseImportFile = async (file) => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader()
@@ -22,8 +195,275 @@ export function Import() {
         })
     }
 
-    // 导入收支数据
-    const importIncomeExpenseData = async (data) => {
+    /**
+     * 解析Excel文件并导入微信账单
+     */
+    const importWechatBill = async (userId, file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result)
+                    const workbook = XLSX.read(data, { type: 'array' })
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+                    const excelData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' })
+
+                    let startRow = -1
+                    for (let i = 0; i < excelData.length; i++) {
+                        const row = excelData[i]
+                        if (row && row[0] && String(row[0]).includes('交易时间')) {
+                            startRow = i + 1
+                            break
+                        }
+                    }
+
+                    if (startRow === -1) {
+                        reject(new Error('未找到微信账单数据，请确认文件格式'))
+                        return
+                    }
+
+                    const billData = excelData.slice(startRow).filter(row => {
+                        return row && row[0] && String(row[0]).trim() !== ''
+                    })
+
+                    if (billData.length === 0) {
+                        reject(new Error('没有找到有效的账单数据'))
+                        return
+                    }
+
+                    const parser = new WechatBillParser(userId)
+                    const records = parser.parseWechatBill(billData)
+
+                    resolve(records)
+                } catch (error) {
+                    console.error('解析Excel失败:', error)
+                    reject(new Error('文件解析失败：' + error.message))
+                }
+            }
+            reader.onerror = () => reject(new Error('文件读取失败'))
+            reader.readAsArrayBuffer(file)
+        })
+    }
+
+    /**
+     * 获取指定日期范围内的现有记录
+     */
+    const getExistingRecordsInDateRange = async (userId, dateRange) => {
+        const allRecords = await indexedDBService.getAll('daily_records')
+        return allRecords.filter(record => {
+            if (record.businessType !== 'personal') return false
+            if (record.userId !== userId) return false
+
+            const recordDate = record.date
+            if (dateRange.startDate && recordDate < dateRange.startDate) return false
+            if (dateRange.endDate && recordDate > dateRange.endDate) return false
+
+            return true
+        })
+    }
+
+    /**
+     * 删除指定日期范围内的现有记录
+     */
+    const deleteRecordsInDateRange = async (userId, dateRange) => {
+        const recordsToDelete = await getExistingRecordsInDateRange(userId, dateRange)
+        let deletedCount = 0
+
+        for (const record of recordsToDelete) {
+            try {
+                await indexedDBService.delete('daily_records', record.id)
+                deletedCount++
+            } catch (error) {
+                console.error('删除记录失败:', error, record)
+            }
+        }
+
+        return deletedCount
+    }
+
+    /**
+     * 获取导入数据的日期范围
+     */
+    const getImportDateRange = (records) => {
+        if (!records || records.length === 0) return null
+
+        let minDate = records[0].date
+        let maxDate = records[0].date
+
+        for (const record of records) {
+            if (record.date < minDate) minDate = record.date
+            if (record.date > maxDate) maxDate = record.date
+        }
+
+        return { startDate: minDate, endDate: maxDate }
+    }
+
+    /**
+     * 导入微信账单数据（支持选择性覆盖）
+     */
+    const importWechatBillData = async (userId, file, options = {}) => {
+        const {
+            clearBeforeImport = false,
+            overwriteMode = 'append', // 'append', 'overwrite_all', 'overwrite_range'
+            overwriteDateRange = null // { startDate, endDate }
+        } = options
+
+        try {
+            // 解析并转换数据
+            const records = await importWechatBill(userId, file)
+
+            if (records.length === 0) {
+                return { successCount: 0, failCount: 0, total: 0, message: '没有可导入的数据' }
+            }
+
+            const importDateRange = getImportDateRange(records)
+
+            // 根据覆盖模式处理
+            if (overwriteMode === 'overwrite_all') {
+                // 删除所有个人记账数据
+                const allRecords = await indexedDBService.getAll('daily_records')
+                for (const record of allRecords) {
+                    if (record.businessType === 'personal' && record.userId === userId) {
+                        await indexedDBService.delete('daily_records', record.id)
+                    }
+                }
+            } else if (overwriteMode === 'overwrite_range' && overwriteDateRange) {
+                // 删除指定日期范围内的数据
+                await deleteRecordsInDateRange(userId, overwriteDateRange)
+            } else if (clearBeforeImport) {
+                // 兼容旧逻辑：清空所有个人记账数据
+                const allRecords = await indexedDBService.getAll('daily_records')
+                for (const record of allRecords) {
+                    if (record.businessType === 'personal' && record.userId === userId) {
+                        await indexedDBService.delete('daily_records', record.id)
+                    }
+                }
+            }
+
+            // 批量导入新数据
+            let successCount = 0
+            let failCount = 0
+
+            for (const record of records) {
+                try {
+                    // 如果是追加模式，检查是否已存在相同日期的记录
+                    if (overwriteMode === 'append') {
+                        const existingRecords = await getExistingRecordsInDateRange(userId, {
+                            startDate: record.date,
+                            endDate: record.date
+                        })
+
+                        // 如果已存在，询问用户是否覆盖（这里返回结果，由调用方处理）
+                        // 在UI层面处理这个逻辑
+                    }
+
+                    await indexedDBService.add('daily_records', record)
+                    successCount++
+                } catch (error) {
+                    console.error('导入失败:', error, record)
+                    failCount++
+                }
+            }
+
+            return {
+                successCount,
+                failCount,
+                total: records.length,
+                importDateRange,
+                message: `成功导入 ${successCount} 条记录`
+            }
+        } catch (error) {
+            console.error('导入微信账单失败:', error)
+            throw error
+        }
+    }
+
+    /**
+     * 检查并获取指定日期的现有记录（用于覆盖确认）
+     */
+    const checkExistingRecordsByDate = async (userId, records) => {
+        const dateMap = new Map()
+
+        for (const record of records) {
+            const existingRecords = await getExistingRecordsInDateRange(userId, {
+                startDate: record.date,
+                endDate: record.date
+            })
+
+            if (existingRecords.length > 0) {
+                if (!dateMap.has(record.date)) {
+                    dateMap.set(record.date, existingRecords.length)
+                }
+            }
+        }
+
+        return Array.from(dateMap.entries()).map(([date, count]) => ({
+            date,
+            count
+        }))
+    }
+
+    /**
+     * 智能导入：合并数据，不覆盖
+     */
+    const importWechatBillSmart = async (userId, file, options = {}) => {
+        const { onDuplicate } = options // onDuplicate 回调函数，用于处理重复记录
+
+        try {
+            const records = await importWechatBill(userId, file)
+            let successCount = 0
+            let failCount = 0
+            let duplicateCount = 0
+
+            for (const record of records) {
+                try {
+                    // 检查是否已存在相同日期的记录
+                    const existingRecords = await getExistingRecordsInDateRange(userId, {
+                        startDate: record.date,
+                        endDate: record.date
+                    })
+
+                    if (existingRecords.length > 0 && onDuplicate) {
+                        // 调用回调函数，让用户决定如何处理
+                        const shouldOverwrite = await onDuplicate(record, existingRecords)
+
+                        if (shouldOverwrite) {
+                            // 删除旧记录
+                            for (const oldRecord of existingRecords) {
+                                await indexedDBService.delete('daily_records', oldRecord.id)
+                            }
+                            // 添加新记录
+                            await indexedDBService.add('daily_records', record)
+                            successCount++
+                        } else {
+                            duplicateCount++
+                        }
+                    } else {
+                        // 没有重复，直接添加
+                        await indexedDBService.add('daily_records', record)
+                        successCount++
+                    }
+                } catch (error) {
+                    console.error('导入失败:', error, record)
+                    failCount++
+                }
+            }
+
+            return {
+                successCount,
+                failCount,
+                duplicateCount,
+                total: records.length,
+                message: `成功导入 ${successCount} 条，跳过重复 ${duplicateCount} 条，失败 ${failCount} 条`
+            }
+        } catch (error) {
+            console.error('导入微信账单失败:', error)
+            throw error
+        }
+    }
+
+    // 导入收支数据（JSON格式）
+    const importIncomeExpenseData = async (data, options = { overwriteMode: 'append' }) => {
         const records = data.incomeExpense || []
         let successCount = 0
         let failCount = 0
@@ -73,7 +513,7 @@ export function Import() {
     }
 
     // 导入个人存钱数据
-    const importPersonalSavingData = async (userId, data) => {
+    const importPersonalSavingData = async (userId, data, options = { overwriteMode: 'append' }) => {
         const plans = data.personalSaving || []
         let successCount = 0
         let failCount = 0
@@ -111,7 +551,7 @@ export function Import() {
     }
 
     // 导入多人存钱数据
-    const importGroupSavingData = async (userId, data) => {
+    const importGroupSavingData = async (userId, data, options = { overwriteMode: 'append' }) => {
         const plans = data.groupSaving || []
         let successCount = 0
         let failCount = 0
@@ -121,7 +561,6 @@ export function Import() {
 
             for (const planData of plans) {
                 try {
-                    // 创建计划
                     const createResult = await savingService.createGroupSavings({
                         name: planData.计划名称,
                         type: planData.计划类型 || '日常储蓄',
@@ -149,7 +588,7 @@ export function Import() {
     }
 
     // 导入商品数据
-    const importProductsData = async (data) => {
+    const importProductsData = async (data, options = { overwriteMode: 'append' }) => {
         const products = data.products || []
         let successCount = 0
         let failCount = 0
@@ -175,7 +614,7 @@ export function Import() {
     }
 
     // 导入库存数据
-    const importInventoryData = async (data) => {
+    const importInventoryData = async (data, options = { overwriteMode: 'append' }) => {
         const inventory = data.inventory || []
         let successCount = 0
         let failCount = 0
@@ -204,7 +643,7 @@ export function Import() {
     }
 
     // 导入商品分类
-    const importCategoriesData = async (data) => {
+    const importCategoriesData = async (data, options = { overwriteMode: 'append' }) => {
         const categories = data.categories || []
         let successCount = 0
         let failCount = 0
@@ -228,7 +667,7 @@ export function Import() {
     }
 
     // 导入供应商
-    const importSuppliersData = async (data) => {
+    const importSuppliersData = async (data, options = { overwriteMode: 'append' }) => {
         const suppliers = data.suppliers || []
         let successCount = 0
         let failCount = 0
@@ -253,7 +692,7 @@ export function Import() {
     }
 
     // 导入客户
-    const importCustomersData = async (data) => {
+    const importCustomersData = async (data, options = { overwriteMode: 'append' }) => {
         const customers = data.customers || []
         let successCount = 0
         let failCount = 0
@@ -293,16 +732,18 @@ export function Import() {
     // 清空当前用户数据
     const clearUserData = async (userId) => {
         try {
-            // 清空业务数据
             await businessDataService.clearUserData()
-
-            // 清空个人存钱数据
             await personalSavingCache.init(userId)
             await personalSavingCache.clearUserPlans(userId)
-
-            // 清空多人存钱数据
             await groupSavingCache.init(userId)
             await groupSavingCache.clearUserCache(userId)
+
+            const allRecords = await indexedDBService.getAll('daily_records')
+            for (const record of allRecords) {
+                if (record.businessType === 'personal') {
+                    await indexedDBService.delete('daily_records', record.id)
+                }
+            }
 
             return true
         } catch (error) {
@@ -321,6 +762,13 @@ export function Import() {
         importCategoriesData,
         importSuppliersData,
         importCustomersData,
-        clearUserData
+        clearUserData,
+        importWechatBillData,
+        importWechatBill,
+        importWechatBillSmart,
+        checkExistingRecordsByDate,
+        getExistingRecordsInDateRange,
+        deleteRecordsInDateRange,
+        getImportDateRange
     }
 }

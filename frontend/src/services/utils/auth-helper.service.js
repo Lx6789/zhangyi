@@ -1,3 +1,5 @@
+import initDataService from "@/services/init-data.service.js";
+
 /**
  * 认证辅助服务 - 处理前端认证相关逻辑（无HTTP请求）
  */
@@ -18,6 +20,13 @@ class AuthHelperService {
         } catch (error) {
             console.error('保存认证信息失败:', error)
             return false
+        }
+        if (user && user.id) {
+            // 延迟初始化，避免阻塞登录流程
+            setTimeout(() => {
+                initDataService.initUserData(user.id, { forceRefresh: true, silent: true })
+                    .catch(err => console.error('后台初始化失败:', err))
+            }, 100)
         }
     }
 
