@@ -954,6 +954,26 @@ public class GroupSavingsServiceImpl extends ServiceImpl<GroupSavingsMapper, Gro
     }
 
     /**
+     * 根据用户id获取个人的详细存钱信息
+     * @param userId
+     * @return
+     */
+    @Override
+    public RespBean getGroupRecordsByUserId(Integer userId) {
+        //1.查询用户是否存在
+        Users user = usersMapper.selectById(userId);
+        if (user == null) {
+            return RespBean.error(RespCode.DATA_NOT_FOUND, "用户不存在");
+        }
+
+        //2.查询数据
+        List<SavingDepositRecords> savingDepositRecords = savingDepositRecordsMapper.selectAllByUserId(userId);
+
+        //3.返回数据
+        return RespBean.success(RespCode.SUCCESS, "查询成功", savingDepositRecords);
+    }
+
+    /**
      * 构建存钱计划VO
      */
     private GroupSavingVO buildGroupSavingVO(GroupSavings group, List<SavingsMembers> members) {

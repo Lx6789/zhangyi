@@ -2,6 +2,7 @@
 
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import { notificationService } from '@/services'
+import idGenerator from '@/services/id-generator.service.js'
 
 /**
  * 多人存钱计划缓存服务
@@ -33,23 +34,19 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 如果没有指定userId，返回false
             if (!userId) {
                 return false;
             }
 
-            // 检查成员表是否存在
             if (!indexedDBService.db.objectStoreNames.contains('savings_members_cache')) {
                 console.warn('savings_members_cache 表不存在');
                 return false;
             }
 
-            // 查询成员表时使用 'memberId' 索引
             const userMembers = await indexedDBService.query('savings_members_cache', 'memberId', parseInt(userId));
 
             console.log(`【checkExist】用户 ${userId} 的成员记录数: ${userMembers.length}`);
 
-            // 只统计未删除的成员记录（deleted !== 1）
             const activeMembers = userMembers.filter(member => member.deleted !== 1);
 
             console.log(`【checkExist】用户 ${userId} 的活跃成员记录: ${activeMembers.length}`);
@@ -60,19 +57,16 @@ class GroupSavingCacheService {
                 return false;
             }
 
-            // 获取用户参与的计划ID列表
             const userPlanIds = [...new Set(activeMembers.map(member => member.groupSavingId))];
 
-            // 检查计划表是否存在
             if (!indexedDBService.db.objectStoreNames.contains('group_savings_cache')) {
                 console.warn('group_savings_cache 表不存在');
                 return false;
             }
 
-            // 查询计划表，确认这些计划存在且未删除
             const allPlans = await indexedDBService.query('group_savings_cache', 'userId', userId);
             const activePlans = allPlans.filter(plan =>
-                userPlanIds.includes(plan.id) && plan.deleted !== 1
+                userPlanIds.includes(plan.originalId || plan.id) && plan.deleted !== 1
             );
 
             const hasData = activePlans.length > 0;
@@ -104,7 +98,6 @@ class GroupSavingCacheService {
 
             console.log(`根据 ${idName} 查询 ${tableName}:`, id);
 
-            // 特殊处理：如果是查询 savings_members_cache 且 idName 是 'memberId'，需要确保 id 是整数
             let queryId = id;
             if (tableName === 'savings_members_cache' && idName === 'memberId') {
                 queryId = parseInt(id);
@@ -112,7 +105,6 @@ class GroupSavingCacheService {
 
             const results = await indexedDBService.query(tableName, idName, queryId);
 
-            // 🔥 如果不包含已删除的，则过滤掉 deleted=1 的数据
             if (!includeDeleted) {
                 const filtered = results.filter(item => item.deleted !== 1);
                 console.log(`查询 ${tableName} 返回 ${filtered.length}/${results.length} 条（已过滤删除）`);
@@ -130,6 +122,7 @@ class GroupSavingCacheService {
 
     /**
      * 清除指定用户的所有缓存数据（包括软删除标记）
+     * 🔥 修改：只清除计划相关的表，不清除存钱记录表（因为存钱记录是独立管理的）
      * @param {string} userId - 用户ID
      * @returns {Promise<boolean>} 清除成功返回true
      */
@@ -137,18 +130,17 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 获取所有需要清除的表
+            // 🔥 只清除计划相关的表，不清除 saving_deposit_records_cache
             const tables = [
                 'group_savings_cache',
-                'savings_members_cache',
-                'saving_deposit_records_cache'
+                'savings_members_cache'
+                // 移除 'saving_deposit_records_cache'
             ];
 
             for (const tableName of tables) {
                 if (indexedDBService.db.objectStoreNames.contains(tableName)) {
                     const userData = await indexedDBService.query(tableName, 'userId', userId);
 
-                    // 删除该用户的所有数据
                     for (const data of userData) {
                         await indexedDBService.delete(tableName, data.id);
                     }
@@ -157,7 +149,6 @@ class GroupSavingCacheService {
                 }
             }
 
-            // 等待一小段时间确保删除完成
             await new Promise(resolve => setTimeout(resolve, 50));
 
             return true;
@@ -177,19 +168,19 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 查询该计划的所有成员
             const members = await indexedDBService.query(
                 'savings_members_cache',
                 'groupSavingId',
                 planId
             );
 
-            // 删除这些成员
             for (const member of members) {
-                await indexedDBService.delete('savings_members_cache', member.id);
+                if (member.userId === userId) {
+                    await indexedDBService.delete('savings_members_cache', member.id);
+                }
             }
 
-            console.log(`已清除计划 ${planId} 的 ${members.length} 条成员缓存`);
+            console.log(`已清除计划 ${planId} 的成员缓存`);
             return true;
         } catch (error) {
             console.error('清除计划成员缓存失败:', error);
@@ -209,7 +200,6 @@ class GroupSavingCacheService {
             await indexedDBService.ensureInitialized();
 
             if (!skipClear) {
-                // 先清除该用户的旧缓存
                 await this.clearUserCache(userId);
             }
 
@@ -220,17 +210,18 @@ class GroupSavingCacheService {
 
             console.log('开始保存多人存钱计划数据到缓存，计划数:', plansData.length);
 
-            // 准备计划缓存数据
             const groupSavingsCache = [];
-            // 准备成员缓存数据
             const savingsMembersCache = [];
 
             const now = new Date().toISOString();
 
             for (const plan of plansData) {
-                // 添加计划缓存（包含deleted字段）
+                // 使用ID生成服务生成计划ID
+                const planCacheId = idGenerator.generateGroupSavingId(userId, plan.id);
+
                 groupSavingsCache.push({
-                    id: plan.id,
+                    id: planCacheId,
+                    originalId: plan.id,
                     userId: userId,
                     planName: plan.name || plan.planName,
                     reason: plan.reason || '',
@@ -250,7 +241,6 @@ class GroupSavingCacheService {
                     cacheTime: now
                 });
 
-                // 添加成员缓存 - 只添加当前计划的最新成员（包含deleted字段）
                 const members = plan.members || [];
                 for (const member of members) {
                     const memberUserId = member.userId;
@@ -259,8 +249,12 @@ class GroupSavingCacheService {
                         continue;
                     }
 
+                    // 使用ID生成服务生成成员ID
+                    const memberCacheId = idGenerator.generateMemberId(userId, plan.id, memberUserId);
+
                     savingsMembersCache.push({
-                        id: `${plan.id}_${memberUserId}`,
+                        id: memberCacheId,
+                        originalId: member.id,
                         userId: userId,
                         groupSavingId: plan.id,
                         memberId: memberUserId,
@@ -278,7 +272,6 @@ class GroupSavingCacheService {
                 }
             }
 
-            // 批量保存到IndexedDB - 使用 bulkPut 避免主键冲突
             if (groupSavingsCache.length > 0) {
                 await indexedDBService.bulkPut('group_savings_cache', groupSavingsCache);
                 console.log(`已缓存 ${groupSavingsCache.length} 条计划数据`);
@@ -297,6 +290,171 @@ class GroupSavingCacheService {
     }
 
     /**
+     * 🔥 新增：保存按用户ID获取的存钱记录到缓存
+     * @param {string} currentUserId - 当前登录用户ID（用于缓存隔离）
+     * @param {number} targetUserId - 目标用户ID（查询的用户ID）
+     * @param {Array} records - 存钱记录列表
+     * @returns {Promise<boolean>} 保存成功返回true
+     */
+    async saveUserDepositRecords(currentUserId, targetUserId, records) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            if (!records || records.length === 0) {
+                console.log('没有存钱记录需要保存');
+                return true;
+            }
+
+            console.log('【缓存】开始保存用户存钱记录到缓存，当前用户ID:', currentUserId, '目标用户ID:', targetUserId, '记录数:', records.length);
+            console.log('【缓存】记录详情:', records);
+
+            const now = new Date().toISOString();
+            const cacheRecords = [];
+
+            for (const record of records) {
+                // 生成缓存记录ID
+                const recordId = idGenerator.generateDepositRecordId(
+                    currentUserId,
+                    record.id || `${targetUserId}_${record.memberId}_${Date.now()}`
+                );
+
+                cacheRecords.push({
+                    id: recordId,
+                    originalId: record.id,
+                    userId: currentUserId,                    // 当前登录用户的ID（用于缓存隔离）
+                    targetUserId: targetUserId,                // 查询的用户ID
+                    groupSavingId: record.groupSavingId,      // 计划ID
+                    memberId: record.memberId,                 // 成员记录ID（外键关联 savings_members_cache）
+                    memberName: record.memberName,             // 成员名称
+                    amount: record.amount,                     // 金额
+                    note: record.note || '',                   // 备注
+                    depositTime: record.depositTime || record.createTime || now,  // 存钱时间
+                    beforeAmount: record.beforeAmount || 0,    // 存钱前该成员的总金额
+                    afterAmount: record.afterAmount || 0,      // 存钱后该成员的总金额
+                    planBeforeAmount: record.planBeforeAmount || 0,  // 存钱前计划总金额
+                    planAfterAmount: record.planAfterAmount || 0,    // 存钱后计划总金额
+                    deleted: record.deleted || 0,              // 是否删除
+                    deletedAt: record.deletedAt || null,       // 删除时间
+                    cacheTime: now,                            // 缓存时间
+                    isUserRecords: true                        // 标记这是按用户查询的记录
+                });
+            }
+
+            // 批量保存到缓存
+            if (cacheRecords.length > 0) {
+                await indexedDBService.bulkPut('saving_deposit_records_cache', cacheRecords);
+                console.log('【缓存】成功保存', cacheRecords.length, '条用户存钱记录到缓存');
+                console.log('【缓存】保存的记录示例:', cacheRecords[0]);
+            }
+
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】保存用户存钱记录失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 🔥 新增：清除指定用户的存钱记录缓存
+     * @param {string} currentUserId - 当前登录用户ID
+     * @param {number} targetUserId - 目标用户ID（查询的用户ID）
+     * @returns {Promise<boolean>}
+     */
+    async clearUserDepositRecordsCache(currentUserId, targetUserId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                console.log('【缓存】saving_deposit_records_cache 表不存在，跳过清除');
+                return true;
+            }
+
+            // 查询当前用户的所有记录
+            const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'userId', currentUserId);
+
+            // 过滤出目标用户的记录（通过 targetUserId 匹配）
+            const targetUserRecords = allRecords.filter(record => record.targetUserId === targetUserId);
+
+            console.log(`【缓存】找到 ${targetUserRecords.length} 条需要清除的记录（目标用户ID: ${targetUserId}）`);
+
+            // 删除这些记录
+            for (const record of targetUserRecords) {
+                await indexedDBService.delete('saving_deposit_records_cache', record.id);
+            }
+
+            console.log('【缓存】已清除用户', targetUserId, '的', targetUserRecords.length, '条存钱记录缓存');
+            return true;
+
+        } catch (error) {
+            console.error('【缓存】清除用户存钱记录缓存失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 🔥 新增：从缓存获取用户的存钱记录
+     * @param {string} currentUserId - 当前登录用户ID
+     * @param {number} targetUserId - 目标用户ID（查询的用户ID）
+     * @returns {Promise<Array>} 存钱记录列表
+     */
+    async getUserDepositRecordsFromCache(currentUserId, targetUserId) {
+        try {
+            await indexedDBService.ensureInitialized();
+
+            if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                console.warn('【缓存】saving_deposit_records_cache 表不存在');
+                return [];
+            }
+
+            // 查询当前用户的所有缓存记录
+            const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'userId', currentUserId);
+
+            // 过滤出目标用户的记录（通过 targetUserId 匹配）
+            const targetUserRecords = allRecords.filter(record => record.targetUserId === targetUserId);
+
+            console.log(`【缓存】从缓存中找到 ${targetUserRecords.length} 条用户 ${targetUserId} 的记录`);
+
+            // 按存钱时间倒序排序
+            targetUserRecords.sort((a, b) => {
+                const timeA = new Date(a.depositTime || 0).getTime();
+                const timeB = new Date(b.depositTime || 0).getTime();
+                return timeB - timeA;
+            });
+
+            // 转换为返回格式（与后端返回格式一致）
+            const formattedRecords = targetUserRecords.map(record => ({
+                id: record.originalId || record.id,
+                groupSavingId: record.groupSavingId,
+                memberId: record.memberId,              // 成员记录ID
+                userId: record.targetUserId,            // 用户ID（目标用户ID）
+                memberName: record.memberName,
+                amount: record.amount,
+                note: record.note,
+                depositTime: record.depositTime,
+                createTime: record.depositTime,
+                beforeAmount: record.beforeAmount,
+                afterAmount: record.afterAmount,
+                planBeforeAmount: record.planBeforeAmount,
+                planAfterAmount: record.planAfterAmount,
+                deleted: record.deleted || 0,
+                deletedAt: record.deletedAt || null
+            }));
+
+            console.log('【缓存】格式化后的记录数:', formattedRecords.length);
+            if (formattedRecords.length > 0) {
+                console.log('【缓存】记录示例:', formattedRecords[0]);
+            }
+
+            return formattedRecords;
+
+        } catch (error) {
+            console.error('【缓存】从缓存获取用户存钱记录失败:', error);
+            return [];
+        }
+    }
+
+    /**
      * 获取成员的总金额（从存钱记录表计算）
      * @param {number|string} planId - 计划ID
      * @param {number} memberUserId - 成员用户ID
@@ -306,23 +464,19 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 检查存钱记录表是否存在
             if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
                 console.warn('saving_deposit_records_cache 表不存在');
                 return 0;
             }
 
-            // 查询该成员的所有存钱记录（包括已删除的）
             const depositRecords = await indexedDBService.query(
                 'saving_deposit_records_cache',
                 'memberId',
                 memberUserId
             );
 
-            // 过滤出属于该计划的记录
             const planRecords = depositRecords.filter(record => record.groupSavingId === planId);
 
-            // 计算总金额
             const totalAmount = planRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
 
             console.log(`成员 ${memberUserId} 在计划 ${planId} 中的总金额: ${totalAmount}`);
@@ -341,20 +495,17 @@ class GroupSavingCacheService {
      */
     async restoreMemberDepositRecords(planId, memberUserId) {
         try {
-            // 检查存钱记录表是否存在
             if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
                 console.warn('saving_deposit_records_cache 表不存在');
                 return false;
             }
 
-            // 查询该成员的所有存钱记录
             const depositRecords = await indexedDBService.query(
                 'saving_deposit_records_cache',
                 'memberId',
                 memberUserId
             );
 
-            // 过滤出属于该计划的已删除记录
             const recordsToRestore = depositRecords.filter(record =>
                 record.groupSavingId === planId && record.deleted === 1
             );
@@ -382,20 +533,17 @@ class GroupSavingCacheService {
      */
     async softDeleteMemberDepositRecords(planId, memberUserId, deletedAt) {
         try {
-            // 检查存钱记录表是否存在
             if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
                 console.warn('saving_deposit_records_cache 表不存在');
                 return false;
             }
 
-            // 查询该成员的所有存钱记录
             const depositRecords = await indexedDBService.query(
                 'saving_deposit_records_cache',
                 'memberId',
                 memberUserId
             );
 
-            // 过滤出属于该计划的未删除记录
             const recordsToDelete = depositRecords.filter(record =>
                 record.groupSavingId === planId && record.deleted !== 1
             );
@@ -427,12 +575,10 @@ class GroupSavingCacheService {
 
             const now = new Date().toISOString();
 
-            // 1. 查询该成员
-            const memberId = `${planId}_${memberUserId}`;
+            const memberId = idGenerator.generateMemberId(userId, planId, memberUserId);
             const member = await indexedDBService.get('savings_members_cache', memberId);
 
             if (member) {
-                // 2. 更新成员为已删除状态（只修改 deleted 和 deletedAt，不修改 amount）
                 member.deleted = 1;
                 member.deletedAt = now;
                 member.updateTime = now;
@@ -440,7 +586,6 @@ class GroupSavingCacheService {
                 await indexedDBService.update('savings_members_cache', member);
                 console.log(`已软删除成员 ${memberUserId} 从计划 ${planId}，金额保持不变: ${member.amount}`);
 
-                // 3. 更新该成员的所有存钱记录为已删除
                 await this.softDeleteMemberDepositRecords(planId, memberUserId, now);
             }
 
@@ -464,21 +609,17 @@ class GroupSavingCacheService {
 
             const now = new Date().toISOString();
 
-            // 1. 查询该成员
-            const memberId = `${planId}_${memberUserId}`;
+            const memberId = idGenerator.generateMemberId(userId, planId, memberUserId);
             const member = await indexedDBService.get('savings_members_cache', memberId);
 
             if (member && member.deleted === 1) {
-                // 2. 更新成员为未删除状态（只修改 deleted 和 deletedAt，amount 保持不变）
                 member.deleted = 0;
                 member.deletedAt = null;
-                // amount 保持不变，不重新计算
                 member.updateTime = now;
 
                 await indexedDBService.update('savings_members_cache', member);
                 console.log(`已恢复成员 ${memberUserId} 到计划 ${planId}，金额保持不变: ${member.amount}`);
 
-                // 3. 恢复该成员的所有存钱记录
                 await this.restoreMemberDepositRecords(planId, memberUserId);
             }
 
@@ -500,7 +641,7 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            const memberId = `${planId}_${memberUserId}`;
+            const memberId = idGenerator.generateMemberId(userId, planId, memberUserId);
             const member = await indexedDBService.get('savings_members_cache', memberId);
 
             if (member) {
@@ -525,16 +666,14 @@ class GroupSavingCacheService {
 
             const now = new Date().toISOString();
 
-            // 1. 获取当前计划数据
-            const plans = await this.getTableDataById('userId', userId, 'group_savings_cache', true);
-            const planToUpdate = plans.find(p => p.id === planId);
+            const planIdGenerated = idGenerator.generateGroupSavingId(userId, planId);
+            const planToUpdate = await indexedDBService.get('group_savings_cache', planIdGenerated);
 
             if (!planToUpdate) {
                 console.warn('未找到要删除的计划数据，ID:', planId);
                 return false;
             }
 
-            // 2. 更新计划数据（软删除）
             planToUpdate.deleted = 1;
             planToUpdate.deletedAt = now;
             planToUpdate.updatedAt = now;
@@ -542,18 +681,18 @@ class GroupSavingCacheService {
             await indexedDBService.update('group_savings_cache', planToUpdate);
             console.log('已软删除计划缓存，ID:', planId, 'deletedAt:', now);
 
-            // 3. 也软删除该计划下的所有成员（保持缓存一致）
-            const members = await this.getTableDataById('groupSavingId', planId, 'savings_members_cache', true);
+            const members = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
             for (const member of members) {
-                member.deleted = 1;
-                member.deletedAt = now;
-                member.updateTime = now;
-                await indexedDBService.update('savings_members_cache', member);
+                if (member.userId === userId) {
+                    member.deleted = 1;
+                    member.deletedAt = now;
+                    member.updateTime = now;
+                    await indexedDBService.update('savings_members_cache', member);
 
-                // 4. 软删除该成员的所有存钱记录
-                await this.softDeleteMemberDepositRecords(planId, member.memberId, now);
+                    await this.softDeleteMemberDepositRecords(planId, member.memberId, now);
+                }
             }
-            console.log(`已软删除计划 ${planId} 的 ${members.length} 条成员缓存和对应的存钱记录`);
+            console.log(`已软删除计划 ${planId} 的相关成员缓存和对应的存钱记录`);
 
             return true;
 
@@ -577,25 +716,22 @@ class GroupSavingCacheService {
 
             const now = new Date().toISOString();
 
-            // 1. 获取当前计划数据
-            const plans = await this.getTableDataById('userId', userId, 'group_savings_cache', true);
-            const planToUpdate = plans.find(p => p.id === planId);
+            const planIdGenerated = idGenerator.generateGroupSavingId(userId, planId);
+            const planToUpdate = await indexedDBService.get('group_savings_cache', planIdGenerated);
 
             if (!planToUpdate) {
                 console.warn('未找到计划缓存数据，ID:', planId);
                 return false;
             }
 
-            // 2. 更新计划的总金额和进度
             planToUpdate.currentAmount = depositData.planTotal;
             planToUpdate.updatedAt = now;
 
             await indexedDBService.update('group_savings_cache', planToUpdate);
             console.log('已更新计划缓存，新总金额:', depositData.planTotal, '进度:', depositData.progress);
 
-            // 3. 获取并更新成员金额
-            const members = await this.getTableDataById('groupSavingId', planId, 'savings_members_cache', true);
-            const memberToUpdate = members.find(m => m.memberId === depositData.memberId);
+            const members = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
+            const memberToUpdate = members.find(m => m.memberId === depositData.memberId && m.userId === userId);
 
             let oldAmount = 0;
             if (memberToUpdate) {
@@ -608,10 +744,11 @@ class GroupSavingCacheService {
                 console.warn('未找到成员缓存数据，memberId:', depositData.memberId);
             }
 
-            // 4. 添加存钱记录到缓存（用于存钱记录列表）
             if (indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
+                const depositRecordId = idGenerator.generateDepositRecordId(userId, `${planId}_${depositData.memberId}_${Date.now()}`);
+
                 const depositRecord = {
-                    id: `${planId}_${depositData.memberId}_${Date.now()}`,
+                    id: depositRecordId,
                     userId: userId,
                     groupSavingId: planId,
                     memberId: depositData.memberId,
@@ -654,9 +791,8 @@ class GroupSavingCacheService {
 
             console.log('【缓存】开始处理退出计划:', { userId, planId, leaveData });
 
-            // 1. 获取计划数据（通过 userId 查询，因为计划表用 userId 做用户隔离）
-            const plans = await indexedDBService.query('group_savings_cache', 'userId', userId);
-            const planToUpdate = plans.find(p => p.id === planId);
+            const planIdGenerated = idGenerator.generateGroupSavingId(userId, planId);
+            const planToUpdate = await indexedDBService.get('group_savings_cache', planIdGenerated);
 
             if (!planToUpdate) {
                 console.warn('【缓存】未找到计划缓存数据，ID:', planId);
@@ -665,9 +801,8 @@ class GroupSavingCacheService {
 
             console.log('【缓存】找到计划:', planToUpdate.planName, '创建者:', planToUpdate.creatorId);
 
-            // 2. 获取当前退出成员的信息 - 注意：用 memberId 查询
-            const members = await indexedDBService.query('savings_members_cache', 'memberId', parseInt(userId));
-            const member = members.find(m => m.groupSavingId === planId);
+            const memberId = idGenerator.generateMemberId(userId, planId, userId);
+            const member = await indexedDBService.get('savings_members_cache', memberId);
 
             if (!member) {
                 console.warn('【缓存】未找到成员缓存数据，userId:', userId, 'planId:', planId);
@@ -676,11 +811,9 @@ class GroupSavingCacheService {
 
             console.log('【缓存】找到成员:', member.memberName, '当前金额:', member.amount);
 
-            // 3. 如果是创建者退出且指定了新创建者，需要更新创建者信息
             if (leaveData.isCreator && leaveData.newCreatorId) {
-                // 3.1 更新新创建者的 isCreator 状态
-                const newCreatorMembers = await indexedDBService.query('savings_members_cache', 'memberId', parseInt(leaveData.newCreatorId));
-                const newCreatorMember = newCreatorMembers.find(m => m.groupSavingId === planId);
+                const newCreatorMemberId = idGenerator.generateMemberId(userId, planId, leaveData.newCreatorId);
+                const newCreatorMember = await indexedDBService.get('savings_members_cache', newCreatorMemberId);
 
                 if (newCreatorMember) {
                     newCreatorMember.isCreator = true;
@@ -688,7 +821,6 @@ class GroupSavingCacheService {
                     await indexedDBService.update('savings_members_cache', newCreatorMember);
                     console.log(`【缓存】已更新新创建者 ${leaveData.newCreatorId} 的权限`);
 
-                    // 3.2 更新计划表中的创建者ID
                     planToUpdate.creatorId = leaveData.newCreatorId;
                     planToUpdate.updatedAt = now;
                     await indexedDBService.update('group_savings_cache', planToUpdate);
@@ -696,17 +828,14 @@ class GroupSavingCacheService {
                 }
             }
 
-            // 4. 软删除当前成员（只修改 deleted 和 deletedAt，不修改 amount）
             member.deleted = 1;
             member.deletedAt = now;
             member.updateTime = now;
             await indexedDBService.update('savings_members_cache', member);
             console.log(`【缓存】已软删除成员 ${userId} 从计划 ${planId}，金额保持不变: ${member.amount}`);
 
-            // 5. 软删除该成员的所有存钱记录
             await this.softDeleteMemberDepositRecords(planId, parseInt(userId), now);
 
-            // 6. 如果是创建者退出且没有新创建者，计划也应该被软删除
             if (leaveData.isCreator && !leaveData.newCreatorId) {
                 planToUpdate.deleted = 1;
                 planToUpdate.deletedAt = now;
@@ -724,10 +853,6 @@ class GroupSavingCacheService {
         }
     }
 
-    // services/cache/group-saving-cache.service.js
-
-// 在 GroupSavingCacheService 类中添加以下方法
-
     /**
      * 保存计划详情到缓存
      * @param {string} userId - 用户ID
@@ -744,9 +869,11 @@ class GroupSavingCacheService {
 
             const now = new Date().toISOString();
 
-            // 保存计划详情
+            const planCacheId = idGenerator.generateGroupSavingId(userId, planDetail.id);
+
             const planCache = {
-                id: planDetail.id,
+                id: planCacheId,
+                originalId: planDetail.id,
                 userId: userId,
                 planName: planDetail.name,
                 reason: planDetail.reason || '',
@@ -767,29 +894,32 @@ class GroupSavingCacheService {
                 completed: planDetail.completed || false,
                 memberCount: planDetail.memberCount || 0,
                 cacheTime: now,
-                isDetail: true  // 标记为详情数据
+                isDetail: true
             };
 
             await indexedDBService.bulkPut('group_savings_cache', [planCache]);
 
-            // 保存成员数据
             if (planDetail.members && planDetail.members.length > 0) {
-                const membersCache = planDetail.members.map(member => ({
-                    id: `${planDetail.id}_${member.userId}`,
-                    userId: userId,
-                    groupSavingId: planDetail.id,
-                    memberId: member.userId,
-                    memberName: member.memberName || member.name || `用户${member.userId}`,
-                    avatar: member.avatar || '',
-                    amount: member.amount || 0,
-                    isCreator: member.isCreator || member.userId === planDetail.creatorId,
-                    status: member.status || 'active',
-                    joinTime: member.joinTime || now,
-                    deleted: member.deleted || 0,
-                    deletedAt: member.deletedAt || null,
-                    updateTime: now,
-                    cacheTime: now
-                }));
+                const membersCache = planDetail.members.map(member => {
+                    const memberCacheId = idGenerator.generateMemberId(userId, planDetail.id, member.userId);
+                    return {
+                        id: memberCacheId,
+                        originalId: member.id,
+                        userId: userId,
+                        groupSavingId: planDetail.id,
+                        memberId: member.userId,
+                        memberName: member.memberName || member.name || `用户${member.userId}`,
+                        avatar: member.avatar || '',
+                        amount: member.amount || 0,
+                        isCreator: member.isCreator || member.userId === planDetail.creatorId,
+                        status: member.status || 'active',
+                        joinTime: member.joinTime || now,
+                        deleted: member.deleted || 0,
+                        deletedAt: member.deletedAt || null,
+                        updateTime: now,
+                        cacheTime: now
+                    };
+                });
 
                 await indexedDBService.bulkPut('savings_members_cache', membersCache);
             }
@@ -813,22 +943,19 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 查询计划详情
-            const plans = await indexedDBService.query('group_savings_cache', 'userId', userId);
-            const plan = plans.find(p => p.id === planId);
+            const planIdGenerated = idGenerator.generateGroupSavingId(userId, planId);
+            const plan = await indexedDBService.get('group_savings_cache', planIdGenerated);
 
             if (!plan) {
                 console.log('【缓存】未找到计划详情:', planId);
                 return null;
             }
 
-            // 查询成员数据
             const members = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
             const userMembers = members.filter(m => m.userId === userId);
 
-            // 构建返回数据
             return {
-                id: plan.id,
+                id: plan.originalId || plan.id,
                 name: plan.planName,
                 reason: plan.reason,
                 description: plan.description,
@@ -861,7 +988,6 @@ class GroupSavingCacheService {
                     avatar: m.avatar
                 })),
                 memberCount: members.filter(m => m.deleted !== 1).length,
-                // 标记当前用户是否在计划中
                 isMember: userMembers.length > 0,
                 userMember: userMembers[0] || null
             };
@@ -882,23 +1008,21 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 删除计划缓存
-            const plans = await indexedDBService.query('group_savings_cache', 'userId', userId);
-            const planToDelete = plans.find(p => p.id === planId);
-            if (planToDelete) {
-                await indexedDBService.delete('group_savings_cache', planToDelete.id);
-            }
+            const planIdGenerated = idGenerator.generateGroupSavingId(userId, planId);
+            await indexedDBService.delete('group_savings_cache', planIdGenerated);
 
-            // 删除成员缓存
             const members = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
             for (const member of members) {
-                await indexedDBService.delete('savings_members_cache', member.id);
+                if (member.userId === userId) {
+                    await indexedDBService.delete('savings_members_cache', member.id);
+                }
             }
 
-            // 删除存钱记录缓存
             const records = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
             for (const record of records) {
-                await indexedDBService.delete('saving_deposit_records_cache', record.id);
+                if (record.userId === userId) {
+                    await indexedDBService.delete('saving_deposit_records_cache', record.id);
+                }
             }
 
             console.log('【缓存】已清除计划缓存:', planId);
@@ -924,11 +1048,11 @@ class GroupSavingCacheService {
 
             const now = new Date().toISOString();
 
-            // 保存每条记录
             for (const record of records) {
-                const recordId = record.id || `${planId}_${record.memberId}_${Date.now()}`;
+                const recordId = idGenerator.generateDepositRecordId(userId, record.id || `${planId}_${record.memberId}_${Date.now()}`);
                 const recordCache = {
                     id: recordId,
+                    originalId: record.id,
                     userId: userId,
                     groupSavingId: planId,
                     memberId: record.memberId,
@@ -946,22 +1070,6 @@ class GroupSavingCacheService {
                 };
 
                 await indexedDBService.bulkPut('saving_deposit_records_cache', [recordCache]);
-            }
-
-            // 保存分页信息到元数据
-            const metaKey = `records_meta_${planId}`;
-            const metaData = {
-                id: metaKey,
-                userId: userId,
-                planId: planId,
-                total: records.length,
-                queryParams: queryParams,
-                updateTime: now
-            };
-
-            // 使用单独的表或存储元数据
-            if (indexedDBService.db.objectStoreNames.contains('records_meta_cache')) {
-                await indexedDBService.bulkPut('records_meta_cache', [metaData]);
             }
 
             console.log('【缓存】存钱记录保存成功:', records.length);
@@ -987,18 +1095,14 @@ class GroupSavingCacheService {
             const page = queryParams.page || 1;
             const size = queryParams.size || 10;
 
-            // 查询所有存钱记录
             const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
 
-            // 过滤用户相关记录
             let filtered = allRecords.filter(r => r.userId === userId);
 
-            // 按成员过滤
             if (queryParams.memberId) {
                 filtered = filtered.filter(r => r.memberId === queryParams.memberId);
             }
 
-            // 按时间范围过滤
             if (queryParams.startTime) {
                 filtered = filtered.filter(r => new Date(r.depositTime) >= new Date(queryParams.startTime));
             }
@@ -1006,21 +1110,17 @@ class GroupSavingCacheService {
                 filtered = filtered.filter(r => new Date(r.depositTime) <= new Date(queryParams.endTime + ' 23:59:59'));
             }
 
-            // 按时间倒序排序
             filtered.sort((a, b) => new Date(b.depositTime) - new Date(a.depositTime));
 
-            // 统计
             const normalCount = filtered.filter(r => r.deleted !== 1).length;
             const deletedCount = filtered.filter(r => r.deleted === 1).length;
 
-            // 分页
             const start = (page - 1) * size;
             const end = start + size;
             const pagedRecords = filtered.slice(start, end);
 
-            // 转换为前端需要的格式
             const records = pagedRecords.map(r => ({
-                id: r.id,
+                id: r.originalId || r.id,
                 memberId: r.memberId,
                 memberName: r.memberName,
                 amount: r.amount,
@@ -1065,16 +1165,14 @@ class GroupSavingCacheService {
 
             const now = new Date().toISOString();
 
-            // 先清除该成员旧的记录缓存
             await this.clearMemberDepositRecords(userId, planId, memberId);
 
-            // 保存每条新记录
             for (const record of records) {
-                // 生成唯一ID，使用后端返回的 id 如果存在
-                const recordId = record.id ? `record_${record.id}` : `member_${planId}_${memberId}_${Date.now()}_${Math.random()}`;
+                const recordId = idGenerator.generateDepositRecordId(userId, record.id || `${planId}_${memberId}_${Date.now()}`);
 
                 const recordCache = {
                     id: recordId,
+                    originalId: record.id,
                     userId: userId,
                     groupSavingId: planId,
                     memberId: memberId,
@@ -1090,9 +1188,7 @@ class GroupSavingCacheService {
                     deleted: record.deleted || 0,
                     deletedAt: record.deletedAt || null,
                     isMemberRecord: true,
-                    cacheTime: now,
-                    // 保留原始记录ID
-                    originalId: record.id
+                    cacheTime: now
                 };
 
                 await indexedDBService.bulkPut('saving_deposit_records_cache', [recordCache]);
@@ -1118,13 +1214,11 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 检查表是否存在
             if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
                 console.log('【缓存】saving_deposit_records_cache 表不存在');
                 return true;
             }
 
-            // 查询该成员的所有存钱记录
             const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
 
             const memberRecords = allRecords.filter(r =>
@@ -1132,7 +1226,6 @@ class GroupSavingCacheService {
                 r.memberId === memberId
             );
 
-            // 删除这些记录
             for (const record of memberRecords) {
                 await indexedDBService.delete('saving_deposit_records_cache', record.id);
             }
@@ -1146,7 +1239,6 @@ class GroupSavingCacheService {
         }
     }
 
-
     /**
      * 获取成员存钱记录
      * @param {string} userId - 用户ID
@@ -1158,29 +1250,24 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 检查表是否存在
             if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
                 console.warn('【缓存】saving_deposit_records_cache 表不存在');
                 return [];
             }
 
-            // 查询所有记录
             const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
 
-            // 过滤出该成员的记录
             const memberRecords = allRecords.filter(r =>
                 r.userId === userId &&
                 r.memberId === memberId
             );
 
-            // 按时间倒序排序
             memberRecords.sort((a, b) => {
                 const timeA = new Date(a.depositTime || a.createTime || 0).getTime();
                 const timeB = new Date(b.depositTime || b.createTime || 0).getTime();
                 return timeB - timeA;
             });
 
-            // 转换为前端需要的格式
             const formattedRecords = memberRecords.map(r => ({
                 id: r.originalId || r.id,
                 amount: r.amount,
@@ -1212,7 +1299,7 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            const statsKey = `stats_${planId}`;
+            const statsKey = idGenerator.generateRecordsMetaId(userId, planId);
             const statsCache = {
                 id: statsKey,
                 userId: userId,
@@ -1245,19 +1332,15 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            // 检查表是否存在
             if (!indexedDBService.db.objectStoreNames.contains('saving_deposit_records_cache')) {
                 console.log('【缓存】saving_deposit_records_cache 表不存在');
                 return true;
             }
 
-            // 查询该计划的所有存钱记录
             const allRecords = await indexedDBService.query('saving_deposit_records_cache', 'groupSavingId', planId);
 
-            // 过滤出当前用户的记录
             const userRecords = allRecords.filter(r => r.userId === userId);
 
-            // 删除这些记录
             for (const record of userRecords) {
                 await indexedDBService.delete('saving_deposit_records_cache', record.id);
             }

@@ -6,6 +6,7 @@ import businessDataService from '@/services/business-data.service'
 import groupSavingCacheService from "@/services/cache/group-saving-cache.service";
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import {personalSavingCache} from "@/services";
+import idGenerator from '@/services/id-generator.service.js'
 
 class SavingService {
     constructor() {
@@ -48,6 +49,10 @@ class SavingService {
         // 当前用户ID（需要在登录后设置）
         this.currentUserId = null
 
+        // 🔥 添加请求去重机制
+        this.pendingRequests = new Map() // 存储正在进行的请求
+        this.cacheExpiry = 5000 // 5秒内相同请求不重复发送
+
         // 尝试从 localStorage 初始化用户ID
         this.initFromStorage()
     }
@@ -65,6 +70,51 @@ class SavingService {
     }
 
     /**
+     * 生成请求的唯一键
+     * @param {string} method - 方法名
+     * @param {...any} args - 参数
+     * @returns {string} 唯一键
+     */
+    _generateRequestKey(method, ...args) {
+        try {
+            return `${method}_${JSON.stringify(args)}`
+        } catch (error) {
+            // 如果序列化失败，使用备用方案
+            return `${method}_${Date.now()}_${Math.random()}`
+        }
+    }
+
+    /**
+     * 带去重的请求包装器
+     * @param {string} key - 请求唯一键
+     * @param {Function} requestFn - 实际请求函数
+     * @returns {Promise<any>} 请求结果
+     */
+    async _deduplicateRequest(key, requestFn) {
+        // 检查是否有正在进行的相同请求
+        if (this.pendingRequests.has(key)) {
+            console.log(`【Service】复用正在进行的请求: ${key}`)
+            return this.pendingRequests.get(key)
+        }
+
+        // 创建新的请求 Promise
+        const requestPromise = requestFn()
+
+        // 存储到 pendingRequests
+        this.pendingRequests.set(key, requestPromise)
+
+        try {
+            const result = await requestPromise
+            return result
+        } finally {
+            // 延迟删除，避免短时间内重复请求
+            setTimeout(() => {
+                this.pendingRequests.delete(key)
+            }, this.cacheExpiry)
+        }
+    }
+
+    /**
      * 从 localStorage 初始化
      */
     initFromStorage() {
@@ -79,7 +129,7 @@ class SavingService {
                     groupSavingCacheService.init(this.currentUserId).catch(console.warn)
                 }
                 // 初始化业务数据服务
-                businessDataService.init(this.currentUserId).catch(console.warn)
+                businessDataService.init().catch(console.warn)
             }
         } catch (error) {
             console.warn('【SavingService】从 localStorage 初始化失败:', error)
@@ -109,7 +159,7 @@ class SavingService {
     // ==================== 多人存钱计划（后端API） ====================
 
     /**
-     * 获取多人存钱计划列表
+     * 获取多人存钱计划列表（带去重）
      * 策略：优先从后端获取最新数据并更新前端数据库
      *       只有在网络不可用或后端接口失败时才使用前端缓存数据
      */
@@ -124,6 +174,20 @@ class SavingService {
             };
         }
 
+        // 生成请求唯一键
+        const requestKey = this._generateRequestKey('getGroupSavingsList', userId, forceRefresh);
+
+        // 使用去重包装器
+        return this._deduplicateRequest(requestKey, async () => {
+            return this._fetchGroupSavingsList(params, forceRefresh, userId);
+        });
+    }
+
+    /**
+     * 实际获取计划列表的方法
+     * @private
+     */
+    async _fetchGroupSavingsList(params, forceRefresh, userId) {
         // 标记是否使用缓存（仅在网络不可用或后端失败时使用）
         let useCache = false;
 
@@ -399,7 +463,7 @@ class SavingService {
     }
 
     /**
-     * 获取多人存钱计划详情
+     * 获取多人存钱计划详情（带去重）
      * @param {number} id - 计划ID
      * @param {boolean} forceRefresh - 是否强制从服务器刷新
      * @returns {Promise<Object>} 计划详情
@@ -415,6 +479,20 @@ class SavingService {
             };
         }
 
+        // 生成请求唯一键
+        const requestKey = this._generateRequestKey('getGroupSavingsDetail', userId, id, forceRefresh);
+
+        // 使用去重包装器
+        return this._deduplicateRequest(requestKey, async () => {
+            return this._fetchGroupSavingsDetail(id, forceRefresh, userId);
+        });
+    }
+
+    /**
+     * 实际获取计划详情的方法
+     * @private
+     */
+    async _fetchGroupSavingsDetail(id, forceRefresh, userId) {
         // 标记是否使用缓存
         let useCache = false;
 
@@ -731,6 +809,133 @@ class SavingService {
                 stats: { normalCount: 0, deletedCount: 0 }
             }
         };
+    }
+
+    /**
+     * 根据userId获取多人存钱记录详细信息
+     * @param {number|string} userId - 用户ID
+     * @returns {Promise<Object>} 存钱记录列表
+     */
+    async getPlanSavingRecordsByUserId(userId) {
+        try {
+            console.log('【Service】开始获取用户存钱记录，userId:', userId);
+
+            // 1. 获取当前登录用户ID（用于权限验证和缓存隔离）
+            const currentUserId = this.currentUserId || authHelperService.getCurrentUser()?.id;
+            if (!currentUserId) {
+                console.error('【Service】无法获取当前用户ID');
+                return {
+                    code: 401,
+                    message: '用户未登录',
+                    data: []
+                };
+            }
+
+            // 2. 参数验证
+            if (!userId) {
+                console.error('【Service】用户ID不能为空');
+                return {
+                    code: 400,
+                    message: '用户ID不能为空',
+                    data: []
+                };
+            }
+
+            // 3. 调用后端API获取数据
+            console.log('【Service】从后端获取用户存钱记录，userId:', userId);
+            const response = await savingApi.getSavingRecordsByUserId(userId);
+            console.log('【Service】后端返回用户存钱记录:', response);
+
+            // 4. 处理响应数据
+            let records = [];
+
+            if (response && Array.isArray(response)) {
+                records = response;
+                console.log('【Service】后端返回数据格式为数组，共', records.length, '条记录');
+                console.log('【Service】记录示例:', records[0]);
+            }
+            else if (response && response.code === 200 && response.data) {
+                records = response.data;
+                console.log('【Service】后端返回数据格式为包装对象，共', records.length, '条记录');
+                console.log('【Service】记录示例:', records[0]);
+            }
+            else if (response && response.data && Array.isArray(response.data)) {
+                records = response.data;
+                console.log('【Service】后端返回数据格式为嵌套数组，共', records.length, '条记录');
+            }
+            else {
+                console.warn('【Service】后端返回数据格式异常:', response);
+                return {
+                    code: 200,
+                    message: '获取成功',
+                    data: []
+                };
+            }
+
+            // 5. 如果有数据，保存到缓存
+            if (records.length > 0) {
+                console.log('【Service】开始保存存钱记录到缓存，共', records.length, '条');
+
+                await indexedDBService.ensureInitialized();
+
+                // 先清除该用户的所有旧存钱记录缓存
+                await groupSavingCacheService.clearUserDepositRecordsCache(currentUserId, userId);
+
+                // 保存新的存钱记录到缓存
+                const saveSuccess = await groupSavingCacheService.saveUserDepositRecords(
+                    currentUserId,
+                    userId,  // userId 就是目标用户ID
+                    records
+                );
+
+                if (saveSuccess) {
+                    console.log('【Service】成功保存', records.length, '条存钱记录到缓存');
+                } else {
+                    console.warn('【Service】保存存钱记录到缓存失败');
+                }
+
+                return {
+                    code: 200,
+                    message: '获取成功',
+                    data: records
+                };
+            } else {
+                console.log('【Service】用户没有存钱记录');
+
+                await groupSavingCacheService.clearUserDepositRecordsCache(currentUserId, userId);
+
+                return {
+                    code: 200,
+                    message: '暂无记录',
+                    data: []
+                };
+            }
+
+        } catch (error) {
+            console.error('【Service】获取用户存钱记录失败:', error);
+
+            if (this.isNetworkError(error)) {
+                console.log('【Service】网络错误，尝试从缓存获取用户存钱记录');
+                const cachedRecords = await groupSavingCacheService.getUserDepositRecordsFromCache(
+                    this.currentUserId,
+                    userId
+                );
+
+                if (cachedRecords && cachedRecords.length > 0) {
+                    return {
+                        code: 200,
+                        message: '获取成功（缓存）',
+                        data: cachedRecords
+                    };
+                }
+            }
+
+            return {
+                code: 500,
+                message: error.message || '获取失败',
+                data: []
+            };
+        }
     }
 
     /**

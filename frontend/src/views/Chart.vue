@@ -1029,7 +1029,7 @@ onMounted(async () => {
   const currentUser = authHelperService.getCurrentUser()
   if (currentUser) {
     userDataService.setCurrentUser(currentUser)
-    await businessDataService.init(currentUser.phone)
+    await businessDataService.init(currentUser.id)
     console.log('当前用户:', currentUser.phone || currentUser.username)
   }
 

@@ -499,7 +499,7 @@ onMounted(async () => {
   const currentUser = authHelperService?.getCurrentUser?.()
   if (currentUser) {
     userDataService.setCurrentUser(currentUser)
-    await businessDataService.init(currentUser.phone)
+    await businessDataService.init(currentUser.id)
   }
 
   // 初始化默认数据

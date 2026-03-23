@@ -1,6 +1,7 @@
 // services/friends-cache.service.js
 import indexedDBService from '../db/indexed-db.service.js'
 import userDataService from '../user-data.service.js'
+import idGenerator from '@/services/id-generator.service.js'
 
 /**
  * 好友缓存服务
@@ -32,6 +33,7 @@ class FriendsCacheService {
 
             // 准备缓存数据，每条记录添加当前用户ID标识用于区分不同用户的缓存
             const cacheData = friendsList.map(friend => {
+                const friendId = idGenerator.generateFriendId(currentUserId, friend.friendId)
                 // 确保原始数据中的字段被保留
                 return {
                     // 保留原始好友的所有字段
@@ -41,7 +43,7 @@ class FriendsCacheService {
                     // 缓存更新时间
                     updateTime: updateTime,
                     // 使用 friendId 作为主键，但加上用户前缀避免冲突
-                    id: `friend_${currentUserId}_${friend.friendId}`
+                    id: friendId
                 }
             })
 

@@ -16,13 +16,13 @@ class UserDataService {
      */
     getCurrentUserId() {
         if (this.currentUser) {
-            return this.currentUser.phone
+            return this.currentUser.id
         }
 
         const user = authHelperService.getCurrentUser()
-        if (user && user.phone) {
+        if (user && user.id) {
             this.currentUser = user
-            return user.phone
+            return user.id
         }
 
         return null

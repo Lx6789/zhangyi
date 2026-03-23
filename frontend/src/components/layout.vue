@@ -178,7 +178,7 @@ onMounted(async () => {
   // 初始化 businessDataService
   const currentUser = authHelperService.getCurrentUser()
   if (currentUser) {
-    await businessDataService.init(currentUser.phone)
+    await businessDataService.init(currentUser.id)
 
     // 强制重新初始化 IndexedDB 确保表存在
     try {

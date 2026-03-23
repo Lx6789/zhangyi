@@ -20,7 +20,7 @@ const initServices = async () => {
         // 检查是否有用户已登录
         const user = authHelperService.getCurrentUser()
         if (user) {
-            await businessDataService.init(user.phone)
+            await businessDataService.init(user.id)
             console.log('业务数据服务初始化成功')
         }
     } catch (error) {

@@ -869,34 +869,44 @@ export default {
             // 也保存到 localStorage 备用
             localStorage.setItem('userId', userId)
 
-            // ==================== 🔥 重要：登录成功后初始化用户数据 ====================
-            console.log('【登录】开始初始化用户数据...')
+            // ==================== 🔥 登录成功后初始化数据库 ====================
+            console.log('【登录】开始初始化数据库...')
 
-            // 延迟一小段时间，确保其他初始化完成
-            setTimeout(async () => {
-              try {
-                // 调用数据初始化服务，静默模式（不显示通知）
-                const initResult = await initDataService.initUserData(userId, {
-                  forceRefresh: true,
-                  silent: true
+            try {
+              // 调用数据库初始化服务，静默模式（不显示通知）
+              const initResult = await initDataService.initAllTables(userId, {
+                forceRefresh: false,  // 不强制刷新，只初始化空表
+                silent: true          // 静默模式，不显示通知
+              })
+
+              if (initResult.success) {
+                console.log('【登录】数据库初始化成功:', {
+                  总表数: initResult.tables ? Object.keys(initResult.tables).length : 0,
+                  成功表数: initResult.tables ? Object.keys(initResult.tables).filter(k => initResult.tables[k]?.success).length : 0,
+                  耗时: initResult.duration + 'ms'
                 })
 
-                if (initResult.success) {
-                  console.log('【登录】用户数据初始化成功:', {
-                    好友数: initResult.data.friends.count,
-                    多人存钱计划数: initResult.data.groupSavings.count,
-                    计划详情数: initResult.data.groupSavingsDetails.count,
-                    耗时: initResult.duration + 'ms'
+                // ✅ 修复：添加空值检查
+                if (initResult.tables) {
+                  // 打印各表初始化详情
+                  Object.keys(initResult.tables).forEach(tableName => {
+                    const result = initResult.tables[tableName]
+                    if (result.skipped) {
+                      console.log(`  - ${tableName}: 跳过 (${result.message})`)
+                    } else if (result.success) {
+                      console.log(`  - ${tableName}: 成功 (${result.dataCount} 条数据)`)
+                    } else {
+                      console.warn(`  - ${tableName}: 失败 - ${result.error}`)
+                    }
                   })
-                } else {
-                  console.warn('【登录】部分数据初始化失败:', initResult.errors)
-                  // 不显示通知，避免干扰用户
                 }
-              } catch (error) {
-                console.error('【登录】数据初始化异常:', error)
-                // 数据初始化失败不影响登录流程
+              } else {
+                console.warn('【登录】部分数据库初始化失败:', initResult.errors || [])
               }
-            }, 100)
+            } catch (error) {
+              console.error('【登录】数据库初始化异常:', error)
+              // 数据库初始化失败不影响登录流程
+            }
             // ==================== 数据初始化结束 ====================
           }
 

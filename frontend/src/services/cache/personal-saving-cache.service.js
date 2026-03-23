@@ -1,5 +1,6 @@
 // src/services/cache/personal-saving-cache.service.js
 import indexedDBService from '@/services/db/indexed-db.service.js'
+import idGenerator from "@/services/id-generator.service.js";
 
 /**
  * 个人存钱计划缓存服务
@@ -24,7 +25,7 @@ class PersonalSavingCacheService {
      * 生成唯一ID
      */
     generateId() {
-        return Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+        return idGenerator.generatePersonalSavingId(this.userId)
     }
 
     /**

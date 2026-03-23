@@ -56,7 +56,6 @@ public interface SavingsMembersMapper extends BaseMapper<SavingsMembers> {
     @Select("SELECT * FROM savings_members WHERE group_saving_id = #{planId} AND user_id = #{userId}")
     SavingsMembers selectMemberIncludeDeleted(@Param("planId") Integer planId, @Param("userId") Integer userId);
 
-
     @Select("SELECT * FROM savings_members WHERE group_saving_id = #{groupId}")
     List<SavingsMembers> selectAllMembersByGroupId(@Param("groupId") Integer groupId);
 

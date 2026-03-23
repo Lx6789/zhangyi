@@ -104,6 +104,10 @@ export async function getMemberSavingRecords(planId, memberId) {
     return request.get(`/savings/group/${planId}/member/${memberId}/records`);
 }
 
+export async function getSavingRecordsByUserId(userId) {
+    return request.get(`/savings/group/${userId}/records`);
+}
+
 /**
  * 更新成员存款金额
  */

@@ -28,6 +28,13 @@ public interface SavingDepositRecordsMapper extends BaseMapper<SavingDepositReco
     List<SavingDepositRecords> selectAllByMemberId(@Param("planId") Integer planId, @Param("memberId") Integer memberId);
 
     /**
+     * 查询所有存钱记录（包括已逻辑删除的）
+     */
+    @InterceptorIgnore(tenantLine = "true", dynamicTableName = "true", blockAttack = "true", illegalSql = "true")
+    @Select("SELECT * FROM saving_deposit_records WHERE user_id = #{userId} ORDER BY deposit_time DESC")
+    List<SavingDepositRecords> selectAllByUserId(@Param("userId") Integer userId);
+
+    /**
      * 分页查询存钱记录（包含软删除）- 修复SQL语法错误
      * @param page 分页参数
      * @param planId 计划ID

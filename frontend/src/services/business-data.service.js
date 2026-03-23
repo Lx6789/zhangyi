@@ -1,8 +1,10 @@
 // services/business-data.service.js
+
 import indexedDBService from './db/indexed-db.service.js'
 import encryptionService from './encryption.service.js'
 import userDataService from './user-data.service.js'
-import dateHelperService from "@/services/utils/date-helper.service.js";
+import dateHelperService from "@/services/utils/date-helper.service.js"
+import idGenerator from '@/services/id-generator.service.js'
 
 /**
  * 业务数据服务 - 处理所有 IndexedDB 数据
@@ -83,9 +85,12 @@ class BusinessDataService {
      * 添加日常记账记录
      */
     async addDailyRecord(record) {
+        // 使用ID生成服务生成ID
+        const recordId = idGenerator.generateDailyRecordId(this.getCurrentUserId())
+
         const newRecord = this.addUserIdentifier({
             ...record,
-            id: record.id || Date.now().toString(),
+            id: record.id || recordId,
             type: record.type || (record.amount > 0 ? '收入' : '支出'),
             amount: Math.abs(record.amount || 0),
             businessType: 'personal', // 标记为个人记账
@@ -116,9 +121,12 @@ class BusinessDataService {
     async addDailyRecords(records) {
         const newRecords = []
         for (const record of records) {
+            // 使用ID生成服务生成ID
+            const recordId = idGenerator.generateDailyRecordId(this.getCurrentUserId())
+
             const newRecord = this.addUserIdentifier({
                 ...record,
-                id: record.id || Date.now() + Math.random().toString(),
+                id: record.id || recordId,
                 type: record.type || (record.amount > 0 ? '收入' : '支出'),
                 amount: Math.abs(record.amount || 0),
                 businessType: 'personal',
@@ -227,9 +235,12 @@ class BusinessDataService {
      * 添加支出记录
      */
     async addExpenseRecord(record) {
+        // 使用ID生成服务生成ID
+        const recordId = idGenerator.generateExpenseRecordId(this.getCurrentUserId())
+
         const newRecord = this.addUserIdentifier({
             ...record,
-            id: record.id || Date.now().toString(),
+            id: record.id || recordId,
             type: '支出',
             amount: Math.abs(record.amount || 0),
             businessType: record.businessType || 'business', // 默认为生意记账
@@ -317,9 +328,12 @@ class BusinessDataService {
      * 添加收入记录
      */
     async addIncomeRecord(record) {
+        // 使用ID生成服务生成ID
+        const recordId = idGenerator.generateIncomeRecordId(this.getCurrentUserId())
+
         const newRecord = this.addUserIdentifier({
             ...record,
-            id: record.id || Date.now().toString(),
+            id: record.id || recordId,
             type: '收入',
             amount: Math.abs(record.amount || 0),
             businessType: record.businessType || 'business', // 默认为生意记账
@@ -571,20 +585,32 @@ class BusinessDataService {
 
     // ==================== 商品管理（生意记账用） ====================
 
+    /**
+     * 添加商品
+     */
     async addProduct(product) {
+        // 使用ID生成服务生成商品ID
+        const productId = idGenerator.generateProductId(this.getCurrentUserId())
+
         const newProduct = this.addUserIdentifier({
             ...product,
-            id: product.id || Date.now().toString()
+            id: product.id || productId
         })
         return indexedDBService.add('products', newProduct)
     }
 
+    /**
+     * 获取所有商品
+     */
     async getAllProducts() {
         const products = await indexedDBService.getAll('products')
         const userId = this.getCurrentUserId()
         return products.filter(p => p.userId === userId)
     }
 
+    /**
+     * 获取商品
+     */
     async getProduct(id) {
         const product = await indexedDBService.get('products', id)
         if (product && product.userId === this.getCurrentUserId()) {
@@ -593,6 +619,9 @@ class BusinessDataService {
         return null
     }
 
+    /**
+     * 更新商品
+     */
     async updateProduct(id, data) {
         const product = await indexedDBService.get('products', id)
         if (product && product.userId === this.getCurrentUserId()) {
@@ -606,6 +635,9 @@ class BusinessDataService {
         return false
     }
 
+    /**
+     * 删除商品
+     */
     async deleteProduct(id) {
         const product = await indexedDBService.get('products', id)
         if (product && product.userId === this.getCurrentUserId()) {
@@ -614,12 +646,18 @@ class BusinessDataService {
         return false
     }
 
+    /**
+     * 获取商品分类列表
+     */
     async getProductCategories() {
         const products = await this.getAllProducts()
         const categories = [...new Set(products.map(p => p.category))]
         return categories.sort()
     }
 
+    /**
+     * 初始化默认商品
+     */
     async initDefaultProducts() {
         const products = await this.getAllProducts()
         if (products.length === 0) {
@@ -638,6 +676,9 @@ class BusinessDataService {
 
     // ==================== 商品分类（生意记账用） ====================
 
+    /**
+     * 获取所有分类
+     */
     async getAllCategories() {
         const categories = await indexedDBService.getAll('product_categories')
         const userId = this.getCurrentUserId()
@@ -647,22 +688,31 @@ class BusinessDataService {
             return []
         }
 
-        // 返回当前用户的分类和默认分类
+        // 返回当前用户的分类
         const userCategories = categories.filter(c => c.userId === userId)
         console.log(`获取到 ${userCategories.length} 个分类`)
 
         return userCategories.sort((a, b) => (a.sortOrder || 999) - (b.sortOrder || 999))
     }
 
+    /**
+     * 添加分类
+     */
     async addCategory(category) {
+        // 使用ID生成服务生成分类ID
+        const categoryId = idGenerator.generateCategoryId(this.getCurrentUserId())
+
         const newCategory = this.addUserIdentifier({
             ...category,
-            id: category.id || Date.now().toString(),
+            id: category.id || categoryId,
             isDefault: false
         })
         return indexedDBService.add('product_categories', newCategory)
     }
 
+    /**
+     * 更新分类
+     */
     async updateCategory(id, data) {
         const category = await indexedDBService.get('product_categories', id)
         if (category && (category.userId === this.getCurrentUserId() || category.isDefault)) {
@@ -676,6 +726,9 @@ class BusinessDataService {
         return false
     }
 
+    /**
+     * 删除分类
+     */
     async deleteCategory(id) {
         const category = await indexedDBService.get('product_categories', id)
         if (!category || category.isDefault) {
@@ -693,6 +746,9 @@ class BusinessDataService {
         return indexedDBService.delete('product_categories', id)
     }
 
+    /**
+     * 初始化默认分类
+     */
     async initDefaultCategories() {
         const categories = await indexedDBService.getAll('product_categories')
         const userId = this.getCurrentUserId()
@@ -721,8 +777,9 @@ class BusinessDataService {
             console.log('为用户初始化默认分类:', userId)
 
             for (const category of defaultCategories) {
+                // 使用ID生成服务生成分类ID
                 const newCategory = {
-                    id: `cat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    id: idGenerator.generateCategoryId(userId),
                     ...category,
                     userId: userId,
                     createTime: new Date().toISOString(),
@@ -747,9 +804,12 @@ class BusinessDataService {
      * 添加库存项
      */
     async addInventoryItem(item) {
+        // 使用ID生成服务生成库存ID
+        const inventoryId = idGenerator.generateInventoryId(this.getCurrentUserId())
+
         const newItem = this.addUserIdentifier({
             ...item,
-            id: item.id || Date.now().toString(),
+            id: item.id || inventoryId,
             createTime: new Date().toISOString(),
             updateTime: new Date().toISOString()
         })
@@ -760,12 +820,16 @@ class BusinessDataService {
      * 批量添加库存项
      */
     async addInventoryItems(items) {
-        const newItems = items.map(item => this.addUserIdentifier({
-            ...item,
-            id: item.id || Date.now() + Math.random().toString(),
-            createTime: new Date().toISOString(),
-            updateTime: new Date().toISOString()
-        }))
+        const newItems = items.map(item => {
+            // 使用ID生成服务生成库存ID
+            const inventoryId = idGenerator.generateInventoryId(this.getCurrentUserId())
+            return this.addUserIdentifier({
+                ...item,
+                id: item.id || inventoryId,
+                createTime: new Date().toISOString(),
+                updateTime: new Date().toISOString()
+            })
+        })
         return indexedDBService.bulkAdd('inventory', newItems)
     }
 
@@ -1044,9 +1108,12 @@ class BusinessDataService {
      * 添加供应商
      */
     async addSupplier(supplier) {
+        // 使用ID生成服务生成供应商ID
+        const supplierId = idGenerator.generateSupplierId(this.getCurrentUserId())
+
         const newSupplier = this.addUserIdentifier({
             ...supplier,
-            id: supplier.id || Date.now().toString(),
+            id: supplier.id || supplierId,
             createTime: new Date().toISOString(),
             updateTime: new Date().toISOString()
         })
@@ -1095,9 +1162,12 @@ class BusinessDataService {
      * 添加采购订单
      */
     async addPurchaseOrder(order) {
+        // 使用ID生成服务生成订单ID
+        const orderId = idGenerator.generatePurchaseOrderId(this.getCurrentUserId())
+
         const newOrder = this.addUserIdentifier({
             ...order,
-            id: order.id || Date.now().toString(),
+            id: order.id || orderId,
             status: order.status || 'pending', // pending, completed, cancelled
             createTime: new Date().toISOString(),
             updateTime: new Date().toISOString()
@@ -1164,9 +1234,12 @@ class BusinessDataService {
      * 添加采购历史
      */
     async addPurchaseHistory(history) {
+        // 使用ID生成服务生成历史ID
+        const historyId = idGenerator.generatePurchaseHistoryId(this.getCurrentUserId())
+
         const newHistory = this.addUserIdentifier({
             ...history,
-            id: history.id || Date.now().toString(),
+            id: history.id || historyId,
             createTime: new Date().toISOString()
         })
         return indexedDBService.add('purchase_history', newHistory)
@@ -1213,7 +1286,11 @@ class BusinessDataService {
             'personal_savings',
             'chart_data_cache',
             'sync_status',
-            'product_categories'
+            'product_categories',
+            'inventory',
+            'suppliers',
+            'purchase_orders',
+            'purchase_history'
         ]
 
         for (const storeName of stores) {
@@ -1238,7 +1315,11 @@ class BusinessDataService {
             'personal_savings',
             'chart_data_cache',
             'sync_status',
-            'product_categories'
+            'product_categories',
+            'inventory',
+            'suppliers',
+            'purchase_orders',
+            'purchase_history'
         ]
 
         for (const store of stores) {

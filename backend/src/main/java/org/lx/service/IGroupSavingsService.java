@@ -83,4 +83,10 @@ public interface IGroupSavingsService extends IService<GroupSavings> {
      */
     RespBean getGroupRecordsForMember(Integer planId, Integer memberId);
 
+    /**
+     * 根据用户id获取个人的详细存钱信息
+     * @param userId
+     * @return
+     */
+    RespBean getGroupRecordsByUserId(Integer userId);
 }
