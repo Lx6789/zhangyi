@@ -1,8 +1,8 @@
-// data_migration/useDataExport.js
+// data_migration/export.js
 import * as XLSX from 'xlsx'
 import businessDataService from '@/services/business-data.service.js'
 import { personalSavingCache, groupSavingCache, savingService } from '@/services'
-import notificationService from '@/services/utils/notification.service.js'
+import authHelperService from '@/services/utils/auth-helper.service.js'
 
 export function Export() {
     // 格式化日期
@@ -18,8 +18,44 @@ export function Export() {
         return parseFloat(num).toFixed(2)
     }
 
-    // 获取收支数据
-    const getIncomeExpenseData = async (userId, options, dateRange) => {
+    // 格式化时间（包含时分秒）
+    const formatDateTime = (dateStr) => {
+        if (!dateStr) return ''
+        const date = new Date(dateStr)
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
+    }
+
+    // 获取用户手机号
+    const getUserPhone = () => {
+        try {
+            const user = authHelperService.getCurrentUser()
+            return user?.phone || user?.username || user?.id || '用户'
+        } catch (error) {
+            return '用户'
+        }
+    }
+
+    // 获取当前时间字符串（用于文件名）
+    const getCurrentTimeStr = () => {
+        const now = new Date()
+        const year = now.getFullYear()
+        const month = String(now.getMonth() + 1).padStart(2, '0')
+        const day = String(now.getDate()).padStart(2, '0')
+        const hour = String(now.getHours()).padStart(2, '0')
+        const minute = String(now.getMinutes()).padStart(2, '0')
+        const second = String(now.getSeconds()).padStart(2, '0')
+        return `${year}${month}${day}_${hour}${minute}${second}`
+    }
+
+    // 生成文件名：手机号_表名_导出时间.xlsx
+    const generateFileName = (sheetName) => {
+        const userPhone = getUserPhone()
+        const timeStr = getCurrentTimeStr()
+        return `${userPhone}_${sheetName}_${timeStr}.xlsx`
+    }
+
+    // ==================== 个人记账数据（单独导出） ====================
+    const getPersonalAccountingData = async (userId, dateRange) => {
         const data = []
         const records = await businessDataService.getAllBusinessRecords()
 
@@ -32,14 +68,43 @@ export function Export() {
             filteredRecords = filteredRecords.filter(r => r.date <= dateRange.end)
         }
 
-        // 按类型筛选
-        if (!options.incomeExpenseType.personal && options.incomeExpenseType.business) {
-            filteredRecords = filteredRecords.filter(r => r.businessType === 'business')
-        } else if (options.incomeExpenseType.personal && !options.incomeExpenseType.business) {
-            filteredRecords = filteredRecords.filter(r => r.businessType !== 'business')
+        // 筛选个人记账（businessType !== 'business' 或 undefined）
+        const personalRecords = filteredRecords.filter(r => r.businessType !== 'business')
+
+        for (const record of personalRecords) {
+            data.push({
+                '日期': record.date,
+                '类型': record.type,
+                '分类': record.category,
+                '子分类/项目': record.subtype || record.source || '',
+                '金额': formatMoney(record.amount),
+                '支付/收款方式': record.paymentMethod || '',
+                '备注': record.note || ''
+            })
         }
 
-        for (const record of filteredRecords) {
+        data.sort((a, b) => a['日期'].localeCompare(b['日期']))
+        return data
+    }
+
+    // ==================== 生意记账数据（单独导出） ====================
+    const getBusinessAccountingData = async (userId, dateRange) => {
+        const data = []
+        const records = await businessDataService.getAllBusinessRecords()
+
+        // 按日期筛选
+        let filteredRecords = [...records]
+        if (dateRange.start) {
+            filteredRecords = filteredRecords.filter(r => r.date >= dateRange.start)
+        }
+        if (dateRange.end) {
+            filteredRecords = filteredRecords.filter(r => r.date <= dateRange.end)
+        }
+
+        // 筛选生意记账（businessType === 'business'）
+        const businessRecords = filteredRecords.filter(r => r.businessType === 'business')
+
+        for (const record of businessRecords) {
             data.push({
                 '日期': record.date,
                 '类型': record.type,
@@ -48,8 +113,7 @@ export function Export() {
                 '金额': formatMoney(record.amount),
                 '支付/收款方式': record.paymentMethod || '',
                 '供应商/客户': record.supplier || record.customerName || '',
-                '备注': record.note || '',
-                '业务类型': record.businessType === 'business' ? '生意记账' : '个人记账'
+                '备注': record.note || ''
             })
         }
 
@@ -57,7 +121,7 @@ export function Export() {
         return data
     }
 
-    // 获取个人存钱数据
+    // ==================== 个人存钱数据（单独导出） ====================
     const getPersonalSavingData = async (userId) => {
         const data = []
         try {
@@ -69,7 +133,7 @@ export function Export() {
                 const records = await personalSavingCache.getDepositRecords(
                     userId,
                     plan.id,
-                    { page: 1, size: 500 }
+                    { page: 1, size: 9999 }
                 )
 
                 for (const record of records.records || []) {
@@ -77,9 +141,12 @@ export function Export() {
                         '计划名称': plan.name,
                         '计划类型': plan.type || '日常储蓄',
                         '目标金额': formatMoney(plan.targetAmount),
+                        '已存金额': formatMoney(plan.currentAmount),
                         '存入金额': formatMoney(record.amount),
-                        '存入时间': formatDate(record.depositTime),
+                        '存入时间': formatDateTime(record.depositTime),
                         '存后余额': formatMoney(record.afterAmount),
+                        '进度': plan.currentAmount >= plan.targetAmount ? '已完成' : `${Math.round((plan.currentAmount / plan.targetAmount) * 100)}%`,
+                        '截止日期': plan.deadline || '',
                         '备注': record.note || ''
                     })
                 }
@@ -92,33 +159,57 @@ export function Export() {
         return data
     }
 
-    // 获取多人存钱数据
+    // ==================== 多人存钱数据（单独导出） ====================
     const getGroupSavingData = async (userId) => {
         const data = []
         try {
             await groupSavingCache.init(userId)
+
             const response = await savingService.getGroupSavingsList({}, false)
-            const plans = response.code === 200 ? (response.data || []) : []
+            let plans = []
+
+            if (response && response.code === 200) {
+                plans = response.data || []
+            } else if (Array.isArray(response)) {
+                plans = response
+            }
+
+            console.log('【导出】获取到多人存钱计划数:', plans.length)
+
+            if (plans.length === 0) {
+                return data
+            }
 
             for (const plan of plans) {
-                const result = await groupSavingCache.getDepositRecords(
-                    userId,
-                    plan.id,
-                    { page: 1, size: 500 }
-                )
+                try {
+                    const result = await groupSavingCache.getDepositRecords(
+                        userId,
+                        plan.id,
+                        { page: 1, size: 9999 }
+                    )
 
-                for (const record of result?.records || []) {
-                    data.push({
-                        '计划名称': plan.name,
-                        '计划类型': plan.type || '日常储蓄',
-                        '目标金额': formatMoney(plan.targetAmount),
-                        '当前总额': formatMoney(plan.currentAmount),
-                        '存入成员': record.memberName || `用户${record.memberId}`,
-                        '存入金额': formatMoney(record.amount),
-                        '存入时间': formatDate(record.depositTime),
-                        '该成员累计': formatMoney(record.afterAmount),
-                        '备注': record.note || ''
-                    })
+                    const records = result?.records || []
+
+                    for (const record of records) {
+                        let memberName = record.memberName || `用户${record.memberId}`
+
+                        data.push({
+                            '计划名称': plan.name,
+                            '计划类型': plan.type || '日常储蓄',
+                            '目标金额': formatMoney(plan.targetAmount),
+                            '当前总额': formatMoney(plan.currentAmount),
+                            '存入成员': memberName,
+                            '存入金额': formatMoney(record.amount),
+                            '存入时间': formatDateTime(record.depositTime),
+                            '该成员累计': formatMoney(record.afterAmount || 0),
+                            '计划进度': plan.currentAmount >= plan.targetAmount ? '已完成' : `${Math.round((plan.currentAmount / plan.targetAmount) * 100)}%`,
+                            '截止日期': plan.deadline || '',
+                            '备注': record.note || '',
+                            '计划状态': plan.status === 'active' ? '进行中' : (plan.status === 'completed' ? '已完成' : '已结束')
+                        })
+                    }
+                } catch (error) {
+                    console.error(`【导出】获取计划 ${plan.id} 的存钱记录失败:`, error)
                 }
             }
         } catch (error) {
@@ -129,7 +220,7 @@ export function Export() {
         return data
     }
 
-    // 获取库存数据
+    // ==================== 库存数据 ====================
     const getInventoryData = async () => {
         const data = []
         try {
@@ -153,7 +244,7 @@ export function Export() {
         return data
     }
 
-    // 获取商品数据
+    // ==================== 商品数据 ====================
     const getProductsData = async () => {
         const data = []
         try {
@@ -174,7 +265,7 @@ export function Export() {
         return data
     }
 
-    // 获取商品分类数据
+    // ==================== 商品分类数据 ====================
     const getCategoriesData = async () => {
         const data = []
         try {
@@ -193,7 +284,7 @@ export function Export() {
         return data
     }
 
-    // 获取供应商数据
+    // ==================== 供应商数据 ====================
     const getSuppliersData = async () => {
         const data = []
         try {
@@ -213,7 +304,7 @@ export function Export() {
         return data
     }
 
-    // 获取客户数据
+    // ==================== 客户数据 ====================
     const getCustomersData = async () => {
         const data = []
         try {
@@ -236,105 +327,188 @@ export function Export() {
         return data
     }
 
-    // 导出为 Excel
-    const exportToExcel = async (userId, options, dateRange, onProgress) => {
-        const workbook = XLSX.utils.book_new()
-        const sheets = []
+    // ==================== 导出所有数据（分别导出每个表） ====================
+    const exportAllData = async (userId, options, dateRange, onProgress) => {
+        const exportedFiles = []
 
-        // 导出收支数据
-        if (options.incomeExpense) {
-            if (onProgress) onProgress('正在导出收支数据...')
-            const data = await getIncomeExpenseData(userId, options, dateRange)
+        // 1. 导出个人记账数据
+        if (options.incomeExpense && options.incomeExpenseType.personal) {
+            if (onProgress) onProgress('正在导出个人记账数据...')
+            const data = await getPersonalAccountingData(userId, dateRange)
             if (data.length > 0) {
+                const fileName = generateFileName('个人记账')
                 const worksheet = XLSX.utils.json_to_sheet(data)
-                XLSX.utils.book_append_sheet(workbook, worksheet, '收支记录')
-                sheets.push('收支记录')
+                const workbook = XLSX.utils.book_new()
+                XLSX.utils.book_append_sheet(workbook, worksheet, '个人记账')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出个人记账数据，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有个人记账数据')
             }
         }
 
-        // 导出个人存钱数据
+        // 2. 导出生意记账数据
+        if (options.incomeExpense && options.incomeExpenseType.business) {
+            if (onProgress) onProgress('正在导出生意记账数据...')
+            const data = await getBusinessAccountingData(userId, dateRange)
+            if (data.length > 0) {
+                const fileName = generateFileName('生意记账')
+                const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
+                XLSX.utils.book_append_sheet(workbook, worksheet, '生意记账')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出生意记账数据，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有生意记账数据')
+            }
+        }
+
+        // 3. 导出个人存钱数据
         if (options.saving && options.savingType.personal) {
             if (onProgress) onProgress('正在导出个人存钱数据...')
             const data = await getPersonalSavingData(userId)
             if (data.length > 0) {
+                const fileName = generateFileName('个人存钱')
                 const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
                 XLSX.utils.book_append_sheet(workbook, worksheet, '个人存钱记录')
-                sheets.push('个人存钱记录')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出个人存钱数据，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有个人存钱数据')
             }
         }
 
-        // 导出多人存钱数据
+        // 4. 导出多人存钱数据
         if (options.saving && options.savingType.group) {
             if (onProgress) onProgress('正在导出多人存钱数据...')
             const data = await getGroupSavingData(userId)
             if (data.length > 0) {
+                const fileName = generateFileName('多人存钱')
                 const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
                 XLSX.utils.book_append_sheet(workbook, worksheet, '多人存钱记录')
-                sheets.push('多人存钱记录')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出多人存钱数据，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有多人存钱数据')
             }
         }
 
-        // 导出库存数据
+        // 5. 导出库存数据
         if (options.inventory) {
             if (onProgress) onProgress('正在导出库存数据...')
             const data = await getInventoryData()
             if (data.length > 0) {
+                const fileName = generateFileName('库存数据')
                 const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
                 XLSX.utils.book_append_sheet(workbook, worksheet, '库存数据')
-                sheets.push('库存数据')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出库存数据，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有库存数据')
             }
         }
 
-        // 导出商品数据
+        // 6. 导出商品数据
         if (options.products) {
             if (onProgress) onProgress('正在导出商品数据...')
             const data = await getProductsData()
             if (data.length > 0) {
+                const fileName = generateFileName('商品数据')
                 const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
                 XLSX.utils.book_append_sheet(workbook, worksheet, '商品数据')
-                sheets.push('商品数据')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出商品数据，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有商品数据')
             }
         }
 
-        // 导出商品分类
+        // 7. 导出商品分类
         if (options.categories) {
             if (onProgress) onProgress('正在导出商品分类...')
             const data = await getCategoriesData()
             if (data.length > 0) {
+                const fileName = generateFileName('商品分类')
                 const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
                 XLSX.utils.book_append_sheet(workbook, worksheet, '商品分类')
-                sheets.push('商品分类')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出商品分类，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有商品分类数据')
             }
         }
 
-        // 导出供应商
+        // 8. 导出供应商
         if (options.suppliers) {
             if (onProgress) onProgress('正在导出供应商...')
             const data = await getSuppliersData()
             if (data.length > 0) {
+                const fileName = generateFileName('供应商')
                 const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
                 XLSX.utils.book_append_sheet(workbook, worksheet, '供应商')
-                sheets.push('供应商')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出供应商，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有供应商数据')
             }
         }
 
-        // 导出客户
+        // 9. 导出客户
         if (options.customers) {
             if (onProgress) onProgress('正在导出客户...')
             const data = await getCustomersData()
             if (data.length > 0) {
+                const fileName = generateFileName('客户')
                 const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
                 XLSX.utils.book_append_sheet(workbook, worksheet, '客户')
-                sheets.push('客户')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出客户，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有客户数据')
             }
         }
 
-        return { workbook, sheets }
+        return { exportedFiles, count: exportedFiles.length }
+    }
+
+    // 导出为 Excel（兼容旧接口，导出到单个文件）
+    const exportToExcel = async (userId, options, dateRange, onProgress) => {
+        // 使用新的多文件导出方式
+        return exportAllData(userId, options, dateRange, onProgress)
     }
 
     return {
         exportToExcel,
+        generateFileName,
         formatDate,
-        formatMoney
+        formatDateTime,
+        formatMoney,
+        getUserPhone,
+        // 单独导出方法（供外部调用）
+        exportPersonalAccounting: getPersonalAccountingData,
+        exportBusinessAccounting: getBusinessAccountingData,
+        exportPersonalSaving: getPersonalSavingData,
+        exportGroupSaving: getGroupSavingData,
+        exportInventory: getInventoryData,
+        exportProducts: getProductsData,
+        exportCategories: getCategoriesData,
+        exportSuppliers: getSuppliersData,
+        exportCustomers: getCustomersData
     }
 }
