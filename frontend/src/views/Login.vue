@@ -574,6 +574,8 @@ import validationService from "@/services/utils/validation.service.js";
 // 单独导入formHelperService和captchaHelperService
 import formHelperService from '@/services/utils/form-helper.service'
 import captchaHelperService from '@/services/utils/captcha-helper.service'
+// 导入数据初始化服务
+import initDataService from '@/services/init-data.service.js'
 
 export default {
   name: 'LoginPage',
@@ -866,6 +868,36 @@ export default {
 
             // 也保存到 localStorage 备用
             localStorage.setItem('userId', userId)
+
+            // ==================== 🔥 重要：登录成功后初始化用户数据 ====================
+            console.log('【登录】开始初始化用户数据...')
+
+            // 延迟一小段时间，确保其他初始化完成
+            setTimeout(async () => {
+              try {
+                // 调用数据初始化服务，静默模式（不显示通知）
+                const initResult = await initDataService.initUserData(userId, {
+                  forceRefresh: true,
+                  silent: true
+                })
+
+                if (initResult.success) {
+                  console.log('【登录】用户数据初始化成功:', {
+                    好友数: initResult.data.friends.count,
+                    多人存钱计划数: initResult.data.groupSavings.count,
+                    计划详情数: initResult.data.groupSavingsDetails.count,
+                    耗时: initResult.duration + 'ms'
+                  })
+                } else {
+                  console.warn('【登录】部分数据初始化失败:', initResult.errors)
+                  // 不显示通知，避免干扰用户
+                }
+              } catch (error) {
+                console.error('【登录】数据初始化异常:', error)
+                // 数据初始化失败不影响登录流程
+              }
+            }, 100)
+            // ==================== 数据初始化结束 ====================
           }
 
           // 记住我功能
