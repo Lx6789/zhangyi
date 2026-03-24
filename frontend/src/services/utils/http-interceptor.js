@@ -4,9 +4,11 @@ import notificationService from './notification.service'
 import router from '@/router'
 import authHelperService from './auth-helper.service'
 
+const API_BASE = ''
+
 // 创建axios实例
 const service = axios.create({
-    baseURL: '',
+    baseURL: API_BASE,
     timeout: 15000 // 请求超时时间
 })
 

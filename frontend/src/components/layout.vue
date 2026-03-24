@@ -4,7 +4,8 @@
     <header class="header">
       <div class="header-content">
         <div class="logo">
-          <span><img src="@/assets/zhangyi_logo.png" class="logo-img"> 账易</span>
+          <img src="@/assets/zhangyi_logo.png" class="logo-img" alt="账易">
+          <span>账易</span>
         </div>
         <div class="sidebar-toggle" @click="toggleSidebar">
           <div class="hamburger">
@@ -288,7 +289,14 @@ const handleLogout = async () => {
   font-weight: bold;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 8px;
+}
+
+.logo-img {
+  width: auto;
+  height: 40px;
+  object-fit: contain;
+  transition: all 0.3s ease;
 }
 
 .sidebar-toggle {
@@ -534,14 +542,17 @@ const handleLogout = async () => {
   color: #f56c6c;
 }
 
-.logo-img {
-  width: 40px;
-  height: auto;
-  vertical-align: middle;
-  margin-right: 10px;
+/* 响应式调整 - 根据屏幕大小缩放 logo */
+@media (max-width: 768px) {
+  .logo {
+    font-size: 1.2rem;
+  }
+
+  .logo-img {
+    height: 32px;
+  }
 }
 
-/* 响应式调整 */
 @media (max-width: 480px) {
   .layout {
     max-width: 100%;
@@ -558,11 +569,25 @@ const handleLogout = async () => {
   }
 
   .logo {
-    font-size: 1.3rem;
+    font-size: 1rem;
   }
 
   .logo-img {
-    width: 90px;
+    height: 28px;
+  }
+}
+
+@media (max-width: 380px) {
+  .logo {
+    font-size: 0.9rem;
+  }
+
+  .logo-img {
+    height: 24px;
+  }
+
+  .logo span {
+    font-size: 0.9rem;
   }
 }
 
@@ -575,6 +600,20 @@ const handleLogout = async () => {
     box-shadow: 0 0 20px var(--shadow);
     min-height: 100vh;
     height: auto;
+  }
+
+  .logo-img {
+    height: 44px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .logo-img {
+    height: 48px;
+  }
+
+  .logo {
+    font-size: 1.8rem;
   }
 }
 </style>

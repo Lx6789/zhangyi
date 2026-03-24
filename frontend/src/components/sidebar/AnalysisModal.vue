@@ -482,7 +482,10 @@ watch(() => props.visible, (newVal) => {
   padding: 20px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   max-height: 85vh;
-  overflow-y: auto;
+  /* 隐藏外层滚动条 */
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal-header {
@@ -491,10 +494,7 @@ watch(() => props.visible, (newVal) => {
   margin-bottom: 20px;
   padding-bottom: 15px;
   border-bottom: 1px solid var(--primary-color);
-  position: sticky;
-  top: 0;
-  background-color: var(--white);
-  z-index: 10;
+  flex-shrink: 0;
 }
 
 .modal-header i {
@@ -533,9 +533,35 @@ watch(() => props.visible, (newVal) => {
 
 .modal-body {
   margin-bottom: 20px;
-  max-height: calc(85vh - 120px);
+  /* 内容区域滚动 */
+  flex: 1;
   overflow-y: auto;
-  padding-right: 5px;
+  padding-right: 8px;
+}
+
+/* modal-body 自定义滚动条样式 */
+.modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: #B1D5C8;
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: #80A492;
+}
+
+/* Firefox 滚动条样式 */
+.modal-body {
+  scrollbar-width: thin;
+  scrollbar-color: #B1D5C8 #f1f1f1;
 }
 
 .modal-footer {
@@ -543,10 +569,7 @@ watch(() => props.visible, (newVal) => {
   justify-content: center;
   padding-top: 15px;
   border-top: 1px solid var(--primary-color);
-  position: sticky;
-  bottom: 0;
-  background-color: var(--white);
-  z-index: 10;
+  flex-shrink: 0;
 }
 
 .modal-btn {

@@ -32,7 +32,6 @@
 
         <!-- 导出面板 -->
         <div v-if="activeTab === 'export'" class="export-panel">
-          <!-- 导出面板内容保持不变 -->
           <div class="export-options-container">
             <div class="export-section">
               <div class="section-title">
@@ -169,6 +168,14 @@
 
         <!-- 导入面板 -->
         <div v-if="activeTab === 'import'" class="import-panel">
+          <!-- 微信账单导出说明按钮 -->
+          <div class="help-section">
+            <button class="help-btn" @click="showWechatGuide = true">
+              <i class="fas fa-question-circle"></i>
+              <span>微信账单导出教程</span>
+            </button>
+          </div>
+
           <div class="import-options-container">
             <div class="import-section">
               <div class="section-title">
@@ -344,6 +351,12 @@
         </button>
       </div>
     </div>
+
+    <!-- 微信账单导出说明弹窗 -->
+    <WechatGuideModal
+        v-model:visible="showWechatGuide"
+        @close="showWechatGuide = false"
+    />
   </div>
 </template>
 
@@ -353,6 +366,7 @@ import authHelperService from '@/services/utils/auth-helper.service.js'
 import notificationService from '@/services/utils/notification.service.js'
 import {Export} from "@/services/data_migration/export.js";
 import {Import} from "@/services/data_migration/import.js";
+import WechatGuideModal from './WechatGuideModal.vue'
 
 const props = defineProps({
   visible: {
@@ -433,6 +447,9 @@ const dateRange = reactive({
   start: '',
   end: ''
 })
+
+// 微信账单说明弹窗状态
+const showWechatGuide = ref(false)
 
 // 获取当前用户
 const fetchCurrentUser = async () => {
@@ -846,7 +863,7 @@ import * as XLSX from 'xlsx'
 </script>
 
 <style scoped>
-/* 样式保持不变，添加新增样式 */
+/* 基础模态框样式 - 与 CategoryManagement 保持一致 */
 .modal {
   position: fixed;
   top: 0;
@@ -854,7 +871,7 @@ import * as XLSX from 'xlsx'
   width: 100%;
   height: 100%;
   background-color: rgba(0, 0, 0, 0.5);
-  z-index: 2000;
+  z-index: 2100;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -869,19 +886,17 @@ import * as XLSX from 'xlsx'
 }
 
 .modal-content {
-  background-color: var(--white);
+  background-color: white;
   width: 90%;
-  max-width: 600px;
+  max-width: 650px;
   border-radius: 20px;
-  padding: 20px;
+  padding: 25px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   max-height: 85vh;
-  overflow-y: auto;
-}
-
-.data-transfer-modal {
-  width: 95%;
-  max-width: 650px;
+  /* 隐藏外层滚动条 */
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal-header {
@@ -889,32 +904,30 @@ import * as XLSX from 'xlsx'
   align-items: center;
   margin-bottom: 20px;
   padding-bottom: 15px;
-  border-bottom: 1px solid var(--primary-color);
-  position: sticky;
-  top: 0;
-  background-color: var(--white);
-  z-index: 10;
+  border-bottom: 1px solid #D5EBE1;
+  flex-shrink: 0;
 }
 
 .modal-header i {
   font-size: 24px;
   margin-right: 10px;
-  color: var(--accent-color);
+  color: #80A492;
 }
 
 .modal-header h3 {
   font-size: 20px;
   font-weight: 600;
-  color: var(--accent-color);
+  color: #80A492;
   flex: 1;
   margin: 0;
 }
 
 .modal-close {
+  margin-left: auto;
   background: none;
   border: none;
   font-size: 24px;
-  color: var(--tertiary-color);
+  color: #99BCAC;
   cursor: pointer;
   width: 40px;
   height: 40px;
@@ -926,25 +939,49 @@ import * as XLSX from 'xlsx'
 }
 
 .modal-close:hover {
-  background-color: var(--primary-color);
-  color: var(--accent-color);
+  background-color: #D5EBE1;
+  color: #80A492;
 }
 
 .modal-body {
   margin-bottom: 20px;
-  max-height: calc(85vh - 120px);
+  /* 内容区域滚动 */
+  flex: 1;
   overflow-y: auto;
-  padding-right: 5px;
+  padding-right: 8px;
+}
+
+/* modal-body 自定义滚动条样式 */
+.modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: #B1D5C8;
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: #80A492;
+}
+
+/* Firefox 滚动条样式 */
+.modal-body {
+  scrollbar-width: thin;
+  scrollbar-color: #B1D5C8 #f1f1f1;
 }
 
 .modal-footer {
   display: flex;
   justify-content: center;
   padding-top: 15px;
-  border-top: 1px solid var(--primary-color);
-  position: sticky;
-  bottom: 0;
-  background-color: var(--white);
+  border-top: 1px solid #D5EBE1;
+  flex-shrink: 0;
 }
 
 .modal-btn {
@@ -958,12 +995,12 @@ import * as XLSX from 'xlsx'
 }
 
 .modal-cancel {
-  background-color: var(--primary-color);
-  color: var(--accent-color);
+  background-color: #D5EBE1;
+  color: #80A492;
 }
 
 .modal-cancel:hover {
-  background-color: var(--secondary-color);
+  background-color: #B1D5C8;
 }
 
 /* 标签页 */
@@ -971,9 +1008,10 @@ import * as XLSX from 'xlsx'
   display: flex;
   gap: 5px;
   margin-bottom: 20px;
-  background: var(--primary-color);
+  background: #D5EBE1;
   padding: 5px;
   border-radius: 30px;
+  flex-shrink: 0;
 }
 
 .tab-btn {
@@ -982,7 +1020,7 @@ import * as XLSX from 'xlsx'
   border: none;
   border-radius: 25px;
   background: transparent;
-  color: var(--accent-color);
+  color: #80A492;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s;
@@ -993,10 +1031,40 @@ import * as XLSX from 'xlsx'
 }
 
 .tab-btn.active {
-  background: var(--white);
-  color: var(--accent-color);
+  background: white;
+  color: #80A492;
   font-weight: 500;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+/* 帮助按钮样式 */
+.help-section {
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.help-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: #D5EBE1;
+  border: 1px solid #B1D5C8;
+  border-radius: 20px;
+  color: #80A492;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.help-btn:hover {
+  background-color: #B1D5C8;
+  transform: translateY(-2px);
+}
+
+.help-btn i {
+  font-size: 14px;
 }
 
 /* 导出面板 */
@@ -1021,7 +1089,7 @@ import * as XLSX from 'xlsx'
   background-color: rgba(213, 235, 225, 0.1);
   border-radius: 12px;
   padding: 15px;
-  border: 1px solid var(--primary-color);
+  border: 1px solid #D5EBE1;
 }
 
 .section-title {
@@ -1030,18 +1098,18 @@ import * as XLSX from 'xlsx'
   gap: 10px;
   margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px dashed var(--secondary-color);
+  border-bottom: 1px dashed #B1D5C8;
 }
 
 .section-title i {
   font-size: 18px;
-  color: var(--accent-color);
+  color: #80A492;
 }
 
 .section-title h4 {
   font-size: 15px;
   font-weight: 600;
-  color: var(--accent-color);
+  color: #80A492;
   margin: 0;
 }
 
@@ -1057,20 +1125,20 @@ import * as XLSX from 'xlsx'
   gap: 10px;
   cursor: pointer;
   font-size: 14px;
-  color: var(--text-dark);
+  color: #333;
 }
 
 .option-checkbox input[type="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: var(--accent-color);
+  accent-color: #80A492;
   cursor: pointer;
 }
 
 .sub-options {
   margin-left: 28px;
   padding-left: 12px;
-  border-left: 2px solid var(--secondary-color);
+  border-left: 2px solid #B1D5C8;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1087,14 +1155,14 @@ import * as XLSX from 'xlsx'
   display: block;
   cursor: pointer;
   padding: 12px;
-  border: 1px solid var(--secondary-color);
+  border: 1px solid #B1D5C8;
   border-radius: 12px;
   transition: all 0.3s;
 }
 
 .import-type-radio:hover {
   background-color: rgba(128, 164, 146, 0.05);
-  border-color: var(--accent-color);
+  border-color: #80A492;
 }
 
 .import-type-radio input[type="radio"] {
@@ -1102,7 +1170,7 @@ import * as XLSX from 'xlsx'
 }
 
 .import-type-radio input[type="radio"]:checked + .radio-content {
-  color: var(--accent-color);
+  color: #80A492;
 }
 
 .radio-content {
@@ -1123,7 +1191,7 @@ import * as XLSX from 'xlsx'
 
 .type-desc {
   font-size: 12px;
-  color: var(--text-light);
+  color: #99BCAC;
   font-weight: normal;
 }
 
@@ -1138,14 +1206,14 @@ import * as XLSX from 'xlsx'
   display: block;
   cursor: pointer;
   padding: 12px;
-  border: 1px solid var(--secondary-color);
+  border: 1px solid #B1D5C8;
   border-radius: 12px;
   transition: all 0.3s;
 }
 
 .overwrite-mode-radio:hover {
   background-color: rgba(128, 164, 146, 0.05);
-  border-color: var(--accent-color);
+  border-color: #80A492;
 }
 
 .overwrite-mode-radio input[type="radio"] {
@@ -1153,12 +1221,12 @@ import * as XLSX from 'xlsx'
 }
 
 .overwrite-mode-radio input[type="radio"]:checked + .radio-content {
-  color: var(--accent-color);
+  color: #80A492;
 }
 
 .mode-desc {
   font-size: 12px;
-  color: var(--text-light);
+  color: #99BCAC;
   font-weight: normal;
 }
 
@@ -1182,12 +1250,12 @@ import * as XLSX from 'xlsx'
 .range-input-group label {
   display: block;
   font-size: 12px;
-  color: var(--text-light);
+  color: #99BCAC;
   margin-bottom: 4px;
 }
 
 .range-separator {
-  color: var(--text-light);
+  color: #99BCAC;
   font-size: 14px;
 }
 
@@ -1195,7 +1263,7 @@ import * as XLSX from 'xlsx'
   width: 100%;
   margin-top: 8px;
   font-size: 12px;
-  color: var(--text-light);
+  color: #99BCAC;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1220,11 +1288,11 @@ import * as XLSX from 'xlsx'
 
 .preview-item i {
   font-size: 16px;
-  color: var(--accent-color);
+  color: #80A492;
 }
 
 .preview-item strong {
-  color: var(--accent-color);
+  color: #80A492;
   margin-left: auto;
 }
 
@@ -1244,23 +1312,30 @@ import * as XLSX from 'xlsx'
 .date-input-group label {
   display: block;
   font-size: 12px;
-  color: var(--text-light);
+  color: #99BCAC;
   margin-bottom: 4px;
 }
 
 .date-input {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--secondary-color);
+  border: 1px solid #B1D5C8;
   border-radius: 8px;
   font-size: 13px;
-  background-color: var(--white);
+  background-color: white;
+  transition: all 0.3s;
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: #80A492;
+  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
 }
 
 .clear-date-btn {
   background: none;
   border: none;
-  color: var(--text-light);
+  color: #99BCAC;
   cursor: pointer;
   padding: 8px;
   border-radius: 50%;
@@ -1270,12 +1345,13 @@ import * as XLSX from 'xlsx'
 
 .clear-date-btn:hover {
   background-color: rgba(0, 0, 0, 0.05);
+  color: #80A492;
 }
 
 .date-hint {
   margin-top: 8px;
   font-size: 12px;
-  color: var(--text-light);
+  color: #99BCAC;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1291,10 +1367,10 @@ import * as XLSX from 'xlsx'
 
 .select-all-btn, .deselect-all-btn {
   padding: 8px 16px;
-  border: 1px solid var(--secondary-color);
+  border: 1px solid #B1D5C8;
   border-radius: 20px;
   background: white;
-  color: var(--accent-color);
+  color: #80A492;
   cursor: pointer;
   transition: all 0.3s;
   display: flex;
@@ -1303,13 +1379,18 @@ import * as XLSX from 'xlsx'
   font-size: 13px;
 }
 
-.select-all-btn:hover, .deselect-all-btn:hover {
-  background-color: var(--primary-color);
+.select-all-btn:hover:not(:disabled), .deselect-all-btn:hover:not(:disabled) {
+  background-color: #D5EBE1;
+}
+
+.select-all-btn:disabled, .deselect-all-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 导入区域 */
 .import-area {
-  border: 2px dashed var(--secondary-color);
+  border: 2px dashed #B1D5C8;
   border-radius: 12px;
   padding: 30px 20px;
   text-align: center;
@@ -1320,19 +1401,19 @@ import * as XLSX from 'xlsx'
 
 .import-area:hover,
 .import-area.drag-over {
-  border-color: var(--accent-color);
+  border-color: #80A492;
   background-color: rgba(128, 164, 146, 0.05);
 }
 
 .import-area i {
   font-size: 48px;
-  color: var(--accent-color);
+  color: #80A492;
   margin-bottom: 15px;
 }
 
 .import-area p {
   font-size: 14px;
-  color: var(--text-light);
+  color: #99BCAC;
   margin: 0 0 5px 0;
 }
 
@@ -1354,20 +1435,20 @@ import * as XLSX from 'xlsx'
 
 .file-info i {
   font-size: 20px;
-  color: var(--accent-color);
+  color: #80A492;
 }
 
 .file-info span {
   flex: 1;
   font-size: 14px;
-  color: var(--text-dark);
+  color: #333;
   word-break: break-all;
 }
 
 .remove-file {
   background: none;
   border: none;
-  color: var(--text-light);
+  color: #99BCAC;
   cursor: pointer;
   padding: 5px;
   border-radius: 50%;
@@ -1401,8 +1482,8 @@ import * as XLSX from 'xlsx'
 }
 
 .export-btn {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%);
-  color: var(--white);
+  background: linear-gradient(135deg, #D5EBE1 0%, #80A492 100%);
+  color: white;
 }
 
 .export-btn:hover:not(:disabled) {
@@ -1411,8 +1492,8 @@ import * as XLSX from 'xlsx'
 }
 
 .import-btn {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%);
-  color: var(--white);
+  background: linear-gradient(135deg, #D5EBE1 0%, #80A492 100%);
+  color: white;
 }
 
 .import-btn:hover:not(:disabled) {
@@ -1422,8 +1503,8 @@ import * as XLSX from 'xlsx'
 
 .select-file-btn {
   background-color: transparent;
-  border: 1px solid var(--secondary-color);
-  color: var(--accent-color);
+  border: 1px solid #B1D5C8;
+  color: #80A492;
   width: auto;
   display: inline-flex;
   padding: 8px 20px;
@@ -1442,7 +1523,7 @@ import * as XLSX from 'xlsx'
 .export-progress, .import-progress {
   text-align: center;
   padding: 10px;
-  color: var(--accent-color);
+  color: #80A492;
   font-size: 13px;
   display: flex;
   align-items: center;
@@ -1474,7 +1555,7 @@ import * as XLSX from 'xlsx'
 }
 
 .result-item.info {
-  color: var(--accent-color);
+  color: #80A492;
 }
 
 .result-item.warning {
@@ -1530,6 +1611,10 @@ import * as XLSX from 'xlsx'
 
   .range-separator {
     text-align: center;
+  }
+
+  .help-section {
+    justify-content: center;
   }
 }
 </style>
