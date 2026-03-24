@@ -7,25 +7,37 @@
 class IndexedDBService {
     constructor() {
         this.dbName = 'FinanceDB'
-        this.version = 7  // 升级到版本6，添加离线操作队列表
+        this.version = 7
         this.db = null
         this.initPromise = null
+        this.isInitializing = false
     }
 
     /**
      * 初始化数据库
      */
     async init() {
+        // 如果已经初始化完成且有数据库连接，直接返回
+        if (this.db && this.db.name === this.dbName) {
+            console.log('数据库已初始化，直接返回')
+            return this.db
+        }
+
+        // 如果正在初始化中，等待初始化完成
         if (this.initPromise) {
+            console.log('数据库正在初始化中，等待完成...')
             return this.initPromise
         }
 
+        console.log(`开始初始化数据库 ${this.dbName}，版本 ${this.version}`)
+
         this.initPromise = new Promise((resolve, reject) => {
-            console.log(`正在打开数据库 ${this.dbName}，版本 ${this.version}`)
             const request = indexedDB.open(this.dbName, this.version)
 
             request.onerror = (event) => {
                 console.error('数据库打开失败:', event.target.error)
+                this.initPromise = null
+                this.db = null
                 reject(event.target.error)
             }
 
@@ -33,7 +45,23 @@ class IndexedDBService {
                 this.db = event.target.result
                 console.log('数据库连接成功，当前版本:', this.db.version)
                 console.log('数据库中的表:', Array.from(this.db.objectStoreNames))
-                resolve()
+
+                // 添加连接关闭事件监听
+                this.db.onclose = () => {
+                    console.warn('数据库连接被关闭')
+                    this.db = null
+                    this.initPromise = null
+                }
+
+                // 添加连接错误事件监听
+                this.db.onerror = (event) => {
+                    console.error('数据库连接错误:', event.target.error)
+                    this.db = null
+                    this.initPromise = null
+                }
+
+                this.initPromise = null
+                resolve(this.db)
             }
 
             request.onupgradeneeded = (event) => {
@@ -177,98 +205,62 @@ class IndexedDBService {
                     console.log('创建 friends_cache 表')
                 }
 
-                // ==================== 新增的多人存钱计划缓存表（版本6） ====================
-
                 // 14. 创建多人存钱计划缓存表
                 if (!db.objectStoreNames.contains('group_savings_cache')) {
                     const groupCacheStore = db.createObjectStore('group_savings_cache', { keyPath: 'id' })
-
-                    // 用户隔离索引
                     groupCacheStore.createIndex('userId', 'userId', { unique: false })
                     groupCacheStore.createIndex('createdBy', 'createdBy', { unique: false })
-
                     groupCacheStore.createIndex('planName', 'planName', { unique: false })
-                    groupCacheStore.createIndex('reason', 'reason', {unique: false})
-                    groupCacheStore.createIndex('type', 'type', {unique: false})
-                    groupCacheStore.createIndex('color', 'color', {unique: false})
-                    groupCacheStore.createIndex('icon', 'icon', {unique: false})
-                    groupCacheStore.createIndex('creatorId', 'creatorId', {unique: false})
-                    groupCacheStore.createIndex('deadline', 'deadline', {unique: false})
-                    groupCacheStore.createIndex('creatAt', 'creatAt', {unique: false})
-
-                    // 状态索引
+                    groupCacheStore.createIndex('reason', 'reason', { unique: false })
+                    groupCacheStore.createIndex('type', 'type', { unique: false })
+                    groupCacheStore.createIndex('color', 'color', { unique: false })
+                    groupCacheStore.createIndex('icon', 'icon', { unique: false })
+                    groupCacheStore.createIndex('creatorId', 'creatorId', { unique: false })
+                    groupCacheStore.createIndex('deadline', 'deadline', { unique: false })
+                    groupCacheStore.createIndex('creatAt', 'creatAt', { unique: false })
                     groupCacheStore.createIndex('status', 'status', { unique: false })
-
-                    // 时间索引
                     groupCacheStore.createIndex('updateAt', 'updateAt', { unique: false })
                     groupCacheStore.createIndex('cacheAt', 'cacheAt', { unique: false })
-
-                    // 金额相关索引
-                    groupCacheStore.createIndex('targetAmount', 'targetAmount', { unique: false }) // 目标金额索引
-                    groupCacheStore.createIndex('currentAmount', 'currentAmount', { unique: false }) // 当前金额索引
-
+                    groupCacheStore.createIndex('targetAmount', 'targetAmount', { unique: false })
+                    groupCacheStore.createIndex('currentAmount', 'currentAmount', { unique: false })
                     console.log('创建 group_savings_cache 表')
                 }
 
                 // 15. 创建成员缓存表
                 if (!db.objectStoreNames.contains('savings_members_cache')) {
                     const memberCacheStore = db.createObjectStore('savings_members_cache', { keyPath: 'id' })
-
-                    // 关联索引
                     memberCacheStore.createIndex('groupSavingId', 'groupSavingId', { unique: false })
                     memberCacheStore.createIndex('userId', 'userId', { unique: false })
-                    memberCacheStore.createIndex('memberId', 'memberId', { unique: false }) //成员id
-
-                    // 成员属性索引
-                    memberCacheStore.createIndex('memberName', 'memberName', {unique: false})
+                    memberCacheStore.createIndex('memberId', 'memberId', { unique: false })
+                    memberCacheStore.createIndex('memberName', 'memberName', { unique: false })
                     memberCacheStore.createIndex('isCreator', 'isCreator', { unique: false })
-                    memberCacheStore.createIndex('avatar', 'avatar', {unique: false})
-                    memberCacheStore.createIndex('amount', 'amount', {unique: false})
-                    memberCacheStore.createIndex('status', 'status', { unique: false }) // 成员状态（活跃/退出等）
-
-                    // 时间索引
+                    memberCacheStore.createIndex('avatar', 'avatar', { unique: false })
+                    memberCacheStore.createIndex('amount', 'amount', { unique: false })
+                    memberCacheStore.createIndex('status', 'status', { unique: false })
                     memberCacheStore.createIndex('updateTime', 'updateTime', { unique: false })
                     memberCacheStore.createIndex('cacheTime', 'cacheTime', { unique: false })
-
                     console.log('创建 savings_members_cache 表')
                 }
 
                 // 16. 创建存钱记录缓存表
                 if (!db.objectStoreNames.contains('saving_deposit_records_cache')) {
                     const recordCacheStore = db.createObjectStore('saving_deposit_records_cache', { keyPath: 'id' })
-
-                    // 关联索引
                     recordCacheStore.createIndex('groupSavingId', 'groupSavingId', { unique: false })
                     recordCacheStore.createIndex('memberId', 'memberId', { unique: false })
-                    recordCacheStore.createIndex('userId', 'userId', { unique: false }) // 用户隔离
-
-                    // 金额索引
-                    recordCacheStore.createIndex('amount', 'amount', { unique: false }) // 每次存储金额
-
-                    // 时间索引
+                    recordCacheStore.createIndex('userId', 'userId', { unique: false })
+                    recordCacheStore.createIndex('amount', 'amount', { unique: false })
                     recordCacheStore.createIndex('depositTime', 'depositTime', { unique: false })
                     recordCacheStore.createIndex('cacheTime', 'cacheTime', { unique: false })
-
                     console.log('创建 saving_deposit_records_cache 表')
                 }
 
+                // 17. 创建离线操作队列表
                 if (!db.objectStoreNames.contains('offline_queue')) {
                     const queueStore = db.createObjectStore('offline_queue', { keyPath: 'id' })
                     queueStore.createIndex('planId', 'planId', { unique: false })
                     queueStore.createIndex('status', 'status', { unique: false })
                     queueStore.createIndex('timestamp', 'timestamp', { unique: false })
                     console.log('创建 offline_queue 表')
-                }
-
-                // 数据迁移逻辑
-                if (oldVersion < 5) {
-                    console.log('从旧版本升级到版本5，处理数据迁移...')
-                    // 版本5的数据迁移逻辑
-                }
-
-                if (oldVersion < 6) {
-                    console.log('从旧版本升级到版本6，创建多人存钱计划缓存表...')
-                    // 版本6的数据迁移逻辑
                 }
 
                 console.log('升级完成，当前所有表:', Array.from(db.objectStoreNames))
@@ -282,10 +274,32 @@ class IndexedDBService {
      * 确保数据库已初始化
      */
     async ensureInitialized() {
-        if (!this.db) {
-            console.log('数据库未初始化，开始初始化...')
+        // 如果数据库已存在且有效，直接返回
+        if (this.db && this.db.name === this.dbName) {
+            // 检查连接是否仍然有效
+            try {
+                // 尝试执行一个简单的操作来验证连接
+                const storeNames = Array.from(this.db.objectStoreNames)
+                if (storeNames.length > 0) {
+                    return this.db
+                }
+            } catch (error) {
+                console.warn('数据库连接可能已失效，重新初始化:', error)
+                this.db = null
+                this.initPromise = null
+            }
+        }
+
+        // 如果数据库不存在或已失效，重新初始化
+        if (!this.db || this.db.name !== this.dbName) {
+            console.log('数据库未初始化或已失效，开始初始化...')
             await this.init()
         }
+
+        if (!this.db) {
+            throw new Error('数据库初始化失败')
+        }
+
         return this.db
     }
 
@@ -294,6 +308,10 @@ class IndexedDBService {
      */
     async getDB() {
         await this.ensureInitialized()
+        if (!this.db) {
+            console.error('数据库连接为 null')
+            throw new Error('数据库未初始化')
+        }
         return this.db
     }
 
@@ -324,6 +342,7 @@ class IndexedDBService {
 
                 transaction.onerror = (event) => {
                     console.error(`事务错误: ${storeName}`, event.target.error)
+                    reject(event.target.error)
                 }
             } catch (error) {
                 console.error(`添加数据异常:`, error)
@@ -396,6 +415,13 @@ class IndexedDBService {
         await this.ensureInitialized()
         return new Promise((resolve, reject) => {
             try {
+                // 检查表是否存在
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在，返回空数组`)
+                    resolve([])
+                    return
+                }
+
                 const transaction = this.db.transaction([storeName], 'readonly')
                 const store = transaction.objectStore(storeName)
                 const request = store.getAll()
@@ -422,6 +448,12 @@ class IndexedDBService {
         await this.ensureInitialized()
         return new Promise((resolve, reject) => {
             try {
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在`)
+                    resolve(null)
+                    return
+                }
+
                 const transaction = this.db.transaction([storeName], 'readonly')
                 const store = transaction.objectStore(storeName)
                 const request = store.get(id)
@@ -448,6 +480,12 @@ class IndexedDBService {
         await this.ensureInitialized()
         return new Promise((resolve, reject) => {
             try {
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在`)
+                    reject(new Error(`表 ${storeName} 不存在`))
+                    return
+                }
+
                 const transaction = this.db.transaction([storeName], 'readwrite')
                 const store = transaction.objectStore(storeName)
                 const request = store.put(data)
@@ -475,6 +513,12 @@ class IndexedDBService {
         await this.ensureInitialized()
         return new Promise((resolve, reject) => {
             try {
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在`)
+                    resolve(false)
+                    return
+                }
+
                 const transaction = this.db.transaction([storeName], 'readwrite')
                 const store = transaction.objectStore(storeName)
                 const request = store.delete(id)
@@ -502,6 +546,12 @@ class IndexedDBService {
         await this.ensureInitialized()
         return new Promise((resolve, reject) => {
             try {
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在`)
+                    resolve()
+                    return
+                }
+
                 const transaction = this.db.transaction([storeName], 'readwrite')
                 const store = transaction.objectStore(storeName)
                 const request = store.clear()
@@ -529,6 +579,12 @@ class IndexedDBService {
         await this.ensureInitialized()
         return new Promise((resolve, reject) => {
             try {
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在`)
+                    resolve([])
+                    return
+                }
+
                 const transaction = this.db.transaction([storeName], 'readonly')
                 const store = transaction.objectStore(storeName)
 
@@ -539,12 +595,12 @@ class IndexedDBService {
                     return
                 }
 
-                console.log(`✅ 使用索引 ${indexName} 查询值:`, value);
+                console.log(`✅ 使用索引 ${indexName} 查询值:`, value)
                 const index = store.index(indexName)
                 const request = index.getAll(value)
 
                 request.onsuccess = () => {
-                    console.log(`索引查询成功，返回 ${request.result?.length || 0} 条记录`);
+                    console.log(`索引查询成功，返回 ${request.result?.length || 0} 条记录`)
                     resolve(request.result || [])
                 }
 
@@ -566,6 +622,12 @@ class IndexedDBService {
         await this.ensureInitialized()
         return new Promise((resolve, reject) => {
             try {
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在`)
+                    resolve([])
+                    return
+                }
+
                 const transaction = this.db.transaction([storeName], 'readonly')
                 const store = transaction.objectStore(storeName)
 
@@ -660,57 +722,73 @@ class IndexedDBService {
      * 批量更新或添加数据（如果存在则更新，不存在则添加）
      */
     async bulkPut(storeName, dataArray) {
-        await this.ensureInitialized();
+        await this.ensureInitialized()
         return new Promise((resolve, reject) => {
             try {
                 if (!dataArray || dataArray.length === 0) {
-                    resolve();
-                    return;
+                    resolve()
+                    return
                 }
 
-                console.log(`开始批量更新数据到 ${storeName}，共 ${dataArray.length} 条`);
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在`)
+                    reject(new Error(`表 ${storeName} 不存在`))
+                    return
+                }
 
-                const transaction = this.db.transaction([storeName], 'readwrite');
-                const store = transaction.objectStore(storeName);
-                let completed = 0;
-                let hasError = false;
+                console.log(`开始批量更新数据到 ${storeName}，共 ${dataArray.length} 条`)
+
+                const transaction = this.db.transaction([storeName], 'readwrite')
+                const store = transaction.objectStore(storeName)
+                let completed = 0
+                let hasError = false
 
                 dataArray.forEach(data => {
-                    const request = store.put(data);
+                    const request = store.put(data)
 
                     request.onsuccess = () => {
-                        completed++;
+                        completed++
                         if (completed === dataArray.length && !hasError) {
-                            console.log(`批量更新数据到 ${storeName} 成功，共 ${completed} 条`);
-                            resolve();
+                            console.log(`批量更新数据到 ${storeName} 成功，共 ${completed} 条`)
+                            resolve()
                         }
-                    };
+                    }
 
                     request.onerror = (event) => {
                         if (!hasError) {
-                            hasError = true;
-                            console.error(`批量更新数据到 ${storeName} 失败:`, event.target.error);
-                            reject(event.target.error);
+                            hasError = true
+                            console.error(`批量更新数据到 ${storeName} 失败:`, event.target.error)
+                            reject(event.target.error)
                         }
-                    };
-                });
+                    }
+                })
 
                 transaction.oncomplete = () => {
-                    console.log(`批量更新事务完成: ${storeName}`);
-                };
+                    console.log(`批量更新事务完成: ${storeName}`)
+                }
 
                 transaction.onerror = (event) => {
                     if (!hasError) {
-                        hasError = true;
-                        console.error(`批量更新事务错误: ${storeName}`, event.target.error);
-                        reject(event.target.error);
+                        hasError = true
+                        console.error(`批量更新事务错误: ${storeName}`, event.target.error)
+                        reject(event.target.error)
                     }
-                };
+                }
             } catch (error) {
-                console.error(`批量更新数据异常:`, error);
-                reject(error);
+                console.error(`批量更新数据异常:`, error)
+                reject(error)
             }
-        });
+        })
+    }
+
+    /**
+     * 重新连接数据库（当连接失效时使用）
+     */
+    async reconnect() {
+        console.log('尝试重新连接数据库...')
+        this.close()
+        this.initPromise = null
+        return await this.init()
     }
 }
 

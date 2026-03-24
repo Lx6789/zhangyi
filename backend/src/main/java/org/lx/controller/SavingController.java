@@ -87,7 +87,6 @@ public class SavingController {
     @ApiOperation(value = "根据用户id获取个人的详细存钱信息")
     @GetMapping("/group/{userId}/records")
     public RespBean getGroupRecordsByUserId(@PathVariable("userId") Integer userId) {
-        log.info("AAAA" + userId);
         return groupSavingsService.getGroupRecordsByUserId(userId);
     }
 }

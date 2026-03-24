@@ -361,10 +361,11 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:visible', 'close'])
+// 添加 data-imported 事件，用于通知父组件数据导入成功
+const emit = defineEmits(['update:visible', 'close', 'data-imported'])
 
 // 使用导出和导入逻辑
-const { exportToExcel } = Export()
+const {exportToExcel} = Export()
 const {
   parseImportFile,
   importIncomeExpenseData,
@@ -496,11 +497,13 @@ const handleExport = async () => {
   exportProgress.value = '正在准备导出数据...'
 
   try {
-    const { workbook, sheets } = await exportToExcel(
+    const {workbook, sheets} = await exportToExcel(
         currentUser.value.id,
         exportOptions,
         dateRange,
-        (msg) => { exportProgress.value = msg }
+        (msg) => {
+          exportProgress.value = msg
+        }
     )
 
     if (sheets.length === 0) {
@@ -673,7 +676,7 @@ const handleImport = async () => {
       const data = await parseImportFile(selectedFile.value)
 
       // JSON导入使用追加模式
-      const importOptions = { overwriteMode: 'append' }
+      const importOptions = {overwriteMode: 'append'}
 
       // 导入收支数据
       if (data.incomeExpense && data.incomeExpense.length > 0) {
@@ -759,6 +762,27 @@ const handleImport = async () => {
     }
 
     notificationService.showNotification(successMsg, 'success')
+
+    // ==================== 关键修改：导入成功后触发刷新事件 ====================
+    // 如果有成功导入的数据，通知父组件刷新
+    if (results.successCount > 0) {
+      console.log('数据导入成功，触发刷新事件')
+      emit('data-imported', {
+        type: importType.value,
+        successCount: results.successCount,
+        overwriteMode: overwriteMode.value
+      })
+
+      // 可选：延迟关闭弹窗，让用户看到成功消息
+      setTimeout(() => {
+        close()
+      }, 1500)
+    } else {
+      // 没有成功导入的数据，直接关闭弹窗
+      setTimeout(() => {
+        close()
+      }, 1000)
+    }
 
     selectedFile.value = null
     importPreviewDateRange.value = null

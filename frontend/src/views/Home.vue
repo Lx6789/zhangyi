@@ -1,5 +1,15 @@
 <template>
   <div class="home">
+    <!-- 顶部工具栏（可选） -->
+    <div class="toolbar">
+      <button class="refresh-btn" @click="handleManualRefresh" title="刷新数据">
+        <i class="fas fa-sync-alt"></i>
+      </button>
+      <button class="data-transfer-btn" @click="openDataTransferModal" title="数据迁移">
+        <i class="fas fa-exchange-alt"></i>
+      </button>
+    </div>
+
     <!-- 总收支情况 -->
     <section class="total-summary">
       <div class="section-title">
@@ -201,7 +211,7 @@
       </div>
     </section>
 
-    <!-- 记账模态框 (参照 CreditManagement.vue 样式) -->
+    <!-- 记账模态框 -->
     <div class="modal" :class="{ active: recordModalVisible }" @click="closeModalOnOverlay">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
@@ -233,7 +243,6 @@
         <form @submit.prevent="submitRecord">
           <!-- 收入表单 -->
           <div v-if="recordType === '收入'">
-            <!-- 收入类型 -->
             <div class="form-group">
               <label><i class="fas fa-tag"></i> 收入类型</label>
               <div class="select-with-actions">
@@ -254,7 +263,6 @@
                 </div>
               </div>
 
-              <!-- 添加/编辑收入类型表单 -->
               <div v-if="showIncomeCategoryForm" class="edit-form">
                 <input
                     v-model="categoryForm.name"
@@ -270,7 +278,6 @@
               </div>
             </div>
 
-            <!-- 收入来源 -->
             <div class="form-group">
               <label><i class="fas fa-store"></i> 收入来源</label>
               <div class="select-with-actions">
@@ -291,7 +298,6 @@
                 </div>
               </div>
 
-              <!-- 添加/编辑收入来源表单 -->
               <div v-if="showIncomeSourceForm" class="edit-form">
                 <input
                     v-model="sourceForm.name"
@@ -342,7 +348,6 @@
 
           <!-- 支出表单 -->
           <div v-else>
-            <!-- 支出类型 -->
             <div class="form-group">
               <label><i class="fas fa-list"></i> 支出类型</label>
               <div class="select-with-actions">
@@ -363,7 +368,6 @@
                 </div>
               </div>
 
-              <!-- 添加/编辑支出类型表单 -->
               <div v-if="showExpenseCategoryForm" class="edit-form">
                 <input
                     v-model="categoryForm.name"
@@ -379,7 +383,6 @@
               </div>
             </div>
 
-            <!-- 具体项目 -->
             <div class="form-group" v-if="expenseForm.category && expenseForm.category !== '__new__'">
               <label><i class="fas fa-tag"></i> 具体项目</label>
               <div class="select-with-actions">
@@ -400,7 +403,6 @@
                 </div>
               </div>
 
-              <!-- 添加/编辑具体项目表单 -->
               <div v-if="showSubtypeForm" class="edit-form">
                 <input
                     v-model="subtypeForm.name"
@@ -450,6 +452,13 @@
         </form>
       </div>
     </div>
+
+    <!-- 数据迁移弹窗 -->
+    <DataTransferModal
+        :visible="dataTransferVisible"
+        @update:visible="dataTransferVisible = $event"
+        @data-imported="onDataImported"
+    />
   </div>
 </template>
 
@@ -459,8 +468,10 @@ import { useRouter } from 'vue-router'
 import { authHelperService, notificationService } from '@/services/index.js'
 import userDataService from '@/services/user-data.service.js'
 import businessDataService from '@/services/business-data.service.js'
+import indexedDBService from '@/services/db/indexed-db.service.js'
 import dateHelper from '@/services/utils/date-helper.service.js'
 import idGenerator from '@/services/id-generator.service.js'
+import DataTransferModal from '@/components/sidebar/DataTransferModal.vue'
 
 const router = useRouter()
 
@@ -470,6 +481,9 @@ const loading = ref(false)
 // 模态框状态
 const recordModalVisible = ref(false)
 const recordType = ref('收入')
+
+// 数据迁移弹窗状态
+const dataTransferVisible = ref(false)
 
 // 收入表单
 const incomeForm = reactive({
@@ -540,15 +554,15 @@ const selectedRecordType = ref('all')
 
 // 计算总收支结余
 const totalBalance = computed(() => {
-  const income = parseFloat(totalIncome.value.replace('¥ ', '').replace(',', ''))
-  const expense = parseFloat(totalExpense.value.replace('¥ ', '').replace(',', ''))
+  const income = parseFloat(totalIncome.value.replace('¥ ', '').replace(/,/g, ''))
+  const expense = parseFloat(totalExpense.value.replace('¥ ', '').replace(/,/g, ''))
   return (income - expense).toFixed(2)
 })
 
 // 计算今日结余
 const todayTotal = computed(() => {
-  const income = parseFloat(todayIncome.value.replace('¥ ', '').replace(',', ''))
-  const expense = parseFloat(todayExpense.value.replace('¥ ', '').replace(',', ''))
+  const income = parseFloat(todayIncome.value.replace('¥ ', '').replace(/,/g, ''))
+  const expense = parseFloat(todayExpense.value.replace('¥ ', '').replace(/,/g, ''))
   return (income - expense).toFixed(2)
 })
 
@@ -604,12 +618,51 @@ const subtypeForm = ref({
  */
 const getAllRecords = async () => {
   try {
-    const records = await businessDataService.getAllBusinessRecords()
-    console.log('所有记录:', records)
-    return records
+    // 确保数据库已初始化
+    await indexedDBService.ensureInitialized()
+
+    console.log('开始获取所有业务记录...')
+
+    // 分别从三个表获取数据
+    const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
+      businessDataService.getDailyRecords(),
+      businessDataService.getIncomeRecords(),
+      businessDataService.getExpenseRecords()
+    ])
+
+    // 合并所有记录
+    const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]
+
+    console.log('获取记录完成:', {
+      daily: dailyRecords.length,
+      income: incomeRecords.length,
+      expense: expenseRecords.length,
+      total: allRecords.length
+    })
+
+    return allRecords
   } catch (error) {
     console.error('获取记录失败:', error)
-    return []
+
+    // 如果失败，尝试重新初始化数据库
+    try {
+      console.log('尝试重新初始化数据库...')
+      await indexedDBService.init()
+      await businessDataService.init(businessDataService.getCurrentUserId())
+
+      const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
+        businessDataService.getDailyRecords(),
+        businessDataService.getIncomeRecords(),
+        businessDataService.getExpenseRecords()
+      ])
+
+      const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]
+      console.log('重新获取成功，记录数:', allRecords.length)
+      return allRecords
+    } catch (retryError) {
+      console.error('重新获取仍然失败:', retryError)
+      return []
+    }
   }
 }
 
@@ -618,12 +671,29 @@ const getAllRecords = async () => {
  */
 const getTotalData = async () => {
   const records = await getAllRecords()
-  const stats = dateHelper.calculateStats(records)
 
-  totalIncome.value = '¥ ' + stats.totalIncome.toFixed(2)
-  totalExpense.value = '¥ ' + stats.totalExpense.toFixed(2)
+  let totalIncomeAmount = 0
+  let totalExpenseAmount = 0
 
-  return {income: stats.totalIncome, expense: stats.totalExpense}
+  records.forEach(record => {
+    const amount = parseFloat(record.amount) || 0
+    if (record.type === '收入') {
+      totalIncomeAmount += amount
+    } else if (record.type === '支出') {
+      totalExpenseAmount += amount
+    }
+  })
+
+  console.log('总收支统计:', {
+    总收入: totalIncomeAmount,
+    总支出: totalExpenseAmount,
+    记录总数: records.length
+  })
+
+  totalIncome.value = '¥ ' + totalIncomeAmount.toFixed(2)
+  totalExpense.value = '¥ ' + totalExpenseAmount.toFixed(2)
+
+  return { income: totalIncomeAmount, expense: totalExpenseAmount }
 }
 
 /**
@@ -637,25 +707,31 @@ const getTodayData = async () => {
   let todayExpenseTotal = 0
 
   records.forEach(record => {
-    if (record.date === today) {
-      const amount = parseFloat(record.amount)
+    const recordDate = record.date
+    if (recordDate === today) {
+      const amount = parseFloat(record.amount) || 0
       if (record.type === '收入') {
         todayIncomeTotal += amount
-      } else {
+      } else if (record.type === '支出') {
         todayExpenseTotal += amount
       }
     }
   })
 
+  console.log('今日收支统计:', {
+    日期: today,
+    今日收入: todayIncomeTotal,
+    今日支出: todayExpenseTotal
+  })
+
   todayIncome.value = '¥ ' + todayIncomeTotal.toFixed(2)
   todayExpense.value = '¥ ' + todayExpenseTotal.toFixed(2)
 
-  return {income: todayIncomeTotal, expense: todayExpenseTotal}
+  return { income: todayIncomeTotal, expense: todayExpenseTotal }
 }
 
 /**
  * 获取指定偏移量的周范围文本
- * @param {number} offset - 周偏移量，0=本周，-1=上周，1=下周
  */
 const getWeekRangeText = (offset = 0) => {
   const baseDate = new Date()
@@ -674,7 +750,7 @@ const loadHistoryData = async () => {
     // 根据类型筛选
     let typeFiltered = records
     if (selectedRecordType.value === 'personal') {
-      typeFiltered = records.filter(r => !r.businessType || r.businessType === 'personal')
+      typeFiltered = records.filter(r => r.businessType === 'personal')
     } else if (selectedRecordType.value === 'business') {
       typeFiltered = records.filter(r => r.businessType === 'business')
     }
@@ -708,6 +784,14 @@ const loadHistoryData = async () => {
     filteredRecords.value = filtered
     historyIncome.value = stats.totalIncome
     historyExpense.value = stats.totalExpense
+
+    console.log('历史数据加载完成:', {
+      筛选类型: selectedRecordType.value,
+      时间筛选: selectedTimeFilter.value,
+      记录数: filtered.length,
+      总收入: stats.totalIncome,
+      总支出: stats.totalExpense
+    })
   } catch (error) {
     console.error('加载历史数据失败:', error)
   } finally {
@@ -724,9 +808,11 @@ watch(selectedRecordType, () => {
  * 刷新所有数据
  */
 const refreshData = async () => {
+  console.log('开始刷新数据...')
   await getTotalData()
   await getTodayData()
   await loadHistoryData()
+  console.log('数据刷新完成')
 }
 
 /**
@@ -773,7 +859,7 @@ const selectTimeFilter = (filter) => {
 
   // 重置到当前时间
   if (filter === 'week') {
-    selectedWeekOffset.value = 0 // 重置到本周
+    selectedWeekOffset.value = 0
   } else if (filter === 'month') {
     const now = new Date()
     selectedYear.value = now.getFullYear()
@@ -882,10 +968,26 @@ onMounted(async () => {
 
   // 设置当前用户
   const currentUser = authHelperService.getCurrentUser()
-  if (currentUser) {
-    userDataService.setCurrentUser(currentUser)
-    await businessDataService.init(currentUser.id)
-    console.log('当前用户:', currentUser.phone || currentUser.username)
+  if (!currentUser) {
+    console.error('无法获取当前用户')
+    router.push('/login')
+    return
+  }
+
+  userDataService.setCurrentUser(currentUser)
+
+  // 关键：先初始化业务数据服务，确保 IndexedDB 已经准备好
+  console.log('开始初始化业务数据服务...')
+  await businessDataService.init(currentUser.id)
+  console.log('业务数据服务初始化完成')
+
+  // 验证数据库是否可用
+  try {
+    const db = await indexedDBService.getDB()
+    console.log('数据库连接成功:', db ? '是' : '否')
+    console.log('数据库中的表:', db ? Array.from(db.objectStoreNames) : '无')
+  } catch (error) {
+    console.error('数据库连接失败:', error)
   }
 
   // 设置默认日期
@@ -922,7 +1024,6 @@ const loadData = () => {
   } else {
     // 如果没有数据，初始化默认值
     userDataService.initDefaultData()
-    // 重新加载
     incomeCategories.value = userDataService.getIncomeCategories()
   }
 
@@ -1238,11 +1339,10 @@ const submitRecord = async () => {
       return
     }
 
-    // ✅ 使用 idGenerator 生成ID
     const recordId = idGenerator.generateDailyRecordId(userId)
 
     record = {
-      id: recordId,  // 使用生成的ID
+      id: recordId,
       type: '收入',
       category: incomeForm.category,
       source: incomeForm.source,
@@ -1264,11 +1364,10 @@ const submitRecord = async () => {
       return
     }
 
-    // ✅ 使用 idGenerator 生成ID
     const recordId = idGenerator.generateDailyRecordId(userId)
 
     record = {
-      id: recordId,  // 使用生成的ID
+      id: recordId,
       type: '支出',
       category: expenseForm.category,
       subtype: expenseForm.subtype,
@@ -1286,6 +1385,7 @@ const submitRecord = async () => {
     await businessDataService.addDailyRecord(record)
   }
 
+  console.log('保存记录成功:', record)
   await refreshData()
   notificationService.showNotification(`${recordType.value}记录成功：¥${record.amount.toFixed(2)}`)
   recordModalVisible.value = false
@@ -1293,6 +1393,51 @@ const submitRecord = async () => {
 
 const formatNumber = (num) => {
   return parseFloat(num).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+}
+
+// ==================== 数据迁移相关 ====================
+
+/**
+ * 打开数据迁移弹窗
+ */
+const openDataTransferModal = () => {
+  dataTransferVisible.value = true
+}
+
+/**
+ * 数据导入成功后的回调
+ * 刷新页面数据
+ */
+const onDataImported = async (result) => {
+  console.log('收到数据导入成功通知:', result)
+
+  try {
+    // 显示加载提示
+    notificationService.showNotification('数据导入成功，正在刷新页面...', 'info')
+
+    // 刷新所有数据
+    await refreshData()
+
+    // 可选：重新加载配置数据（如果导入的是配置类数据）
+    await loadData()
+
+    // 显示成功提示
+    notificationService.showNotification(`数据刷新完成！共导入 ${result.successCount} 条记录`, 'success')
+
+    console.log('数据刷新完成')
+  } catch (error) {
+    console.error('刷新数据失败:', error)
+    notificationService.showNotification('数据刷新失败，请手动刷新页面', 'error')
+  }
+}
+
+/**
+ * 手动刷新数据
+ */
+const handleManualRefresh = async () => {
+  notificationService.showNotification('正在刷新数据...', 'info')
+  await refreshData()
+  notificationService.showNotification('数据刷新完成', 'success')
 }
 </script>
 
@@ -1312,6 +1457,46 @@ const formatNumber = (num) => {
   --expense-color: #e74c3c;
   padding: 0;
   max-width: 100%;
+  position: relative;
+}
+
+/* 顶部工具栏 */
+.toolbar {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 100;
+}
+
+.refresh-btn,
+.data-transfer-btn {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background-color: var(--primary-color);
+  border: none;
+  color: var(--accent-color);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
+}
+
+.refresh-btn:hover,
+.data-transfer-btn:hover {
+  background-color: var(--accent-color);
+  color: white;
+  transform: scale(1.05);
+}
+
+.refresh-btn:active {
+  transform: scale(0.95);
 }
 
 /* 总收支情况 */
@@ -1818,7 +2003,7 @@ const formatNumber = (num) => {
   font-size: 14px;
 }
 
-/* ==================== 记账模态框样式（参照 CreditManagement.vue） ==================== */
+/* ==================== 记账模态框样式 ==================== */
 .modal {
   position: fixed;
   top: 0;
@@ -2237,6 +2422,19 @@ form {
 
   .action-btn {
     width: 100%;
+  }
+
+  /* 工具栏响应式 */
+  .toolbar {
+    bottom: 70px;
+    right: 15px;
+  }
+
+  .refresh-btn,
+  .data-transfer-btn {
+    width: 45px;
+    height: 45px;
+    font-size: 18px;
   }
 }
 </style>
