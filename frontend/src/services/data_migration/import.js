@@ -4,6 +4,7 @@ import { personalSavingCache, groupSavingCache, savingService } from '@/services
 import notificationService from '@/services/utils/notification.service.js'
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import * as XLSX from 'xlsx'
+import idGenerator from '@/services/id-generator.service.js'
 
 /**
  * 微信支付账单解析器
@@ -25,31 +26,27 @@ class WechatBillParser {
             const row = excelData[i]
             if (!row || row.length < 8) continue
 
-            const transactionTime = row[0]  // 交易时间
-            const transactionType = row[1]   // 交易类型
-            const counterparty = row[2]      // 交易对方
-            const goods = row[3]              // 商品
-            const incomeExpense = row[4]      // 收/支
-            const amountStr = row[5]          // 金额(元)
-            const paymentMethod = row[6]      // 支付方式
-            const status = row[7]             // 当前状态
-            const transactionNo = row[8]      // 交易单号
-            const merchantNo = row[9]         // 商户单号
-            const remark = row[10]            // 备注
+            const transactionTime = row[0]
+            const transactionType = row[1]
+            const counterparty = row[2]
+            const goods = row[3]
+            const incomeExpense = row[4]
+            const amountStr = row[5]
+            const paymentMethod = row[6]
+            const status = row[7]
+            const transactionNo = row[8]
+            const merchantNo = row[9]
+            const remark = row[10]
 
-            // 跳过无效行
             if (!transactionTime || !incomeExpense) continue
 
-            // 解析金额
             let amount = 0
             if (amountStr) {
-                // 去除¥符号和空格
                 const cleanAmount = String(amountStr).replace(/[¥,]/g, '').trim()
                 amount = parseFloat(cleanAmount)
                 if (isNaN(amount)) continue
             }
 
-            // 解析日期（从交易时间中提取）
             let dateStr = ''
             if (transactionTime) {
                 const dateMatch = transactionTime.match(/^(\d{4}-\d{2}-\d{2})/)
@@ -58,41 +55,28 @@ class WechatBillParser {
                 }
             }
 
-            // 根据交易对方和商品自动判断分类
             const category = this.inferCategory(transactionType, counterparty, goods)
-
-            // 根据收/支判断类型
             const type = incomeExpense === '收入' ? '收入' : '支出'
-
-            // 生成唯一ID
-            const id = Date.now() + Math.random().toString(36).substr(2, 9)
             const timestamp = new Date().toISOString()
+
+            const recordId = idGenerator.generateDailyRecordId(this.userId)
 
             // 构建daily_records对象
             const record = {
-                id: id,
+                id: recordId,  // 使用生成的ID
                 date: dateStr,
                 type: type,
                 category: category,
                 amount: amount,
                 note: this.buildNote(transactionType, counterparty, goods, remark),
-                businessType: 'personal',  // 个人记账
+                businessType: 'personal',
                 paymentMethod: this.mapPaymentMethod(paymentMethod, incomeExpense),
                 userId: this.userId,
                 source: this.extractSource(counterparty, goods),
                 syncStatus: 'pending',
                 createTime: timestamp,
                 updateTime: timestamp,
-                timestamp: timestamp,
-                // 保留原始微信账单信息供参考
-                wechatInfo: {
-                    transactionType: transactionType,
-                    counterparty: counterparty,
-                    goods: goods,
-                    transactionNo: transactionNo,
-                    merchantNo: merchantNo,
-                    status: status
-                }
+                timestamp: timestamp
             }
 
             records.push(record)
@@ -346,18 +330,10 @@ export function Import() {
 
             for (const record of records) {
                 try {
-                    // 如果是追加模式，检查是否已存在相同日期的记录
-                    if (overwriteMode === 'append') {
-                        const existingRecords = await getExistingRecordsInDateRange(userId, {
-                            startDate: record.date,
-                            endDate: record.date
-                        })
+                    // 清理可能残留的 wechatInfo
+                    const { wechatInfo, ...cleanRecord } = record
 
-                        // 如果已存在，询问用户是否覆盖（这里返回结果，由调用方处理）
-                        // 在UI层面处理这个逻辑
-                    }
-
-                    await indexedDBService.add('daily_records', record)
+                    await indexedDBService.add('daily_records', cleanRecord)
                     successCount++
                 } catch (error) {
                     console.error('导入失败:', error, record)

@@ -460,6 +460,7 @@ import { authHelperService, notificationService } from '@/services/index.js'
 import userDataService from '@/services/user-data.service.js'
 import businessDataService from '@/services/business-data.service.js'
 import dateHelper from '@/services/utils/date-helper.service.js'
+import idGenerator from '@/services/id-generator.service.js'
 
 const router = useRouter()
 
@@ -1227,14 +1228,21 @@ const closeModalOnOverlay = (event) => {
 const submitRecord = async () => {
   let record
 
+  // 获取当前用户ID
+  const currentUser = authHelperService.getCurrentUser()
+  const userId = currentUser?.id
+
   if (recordType.value === '收入') {
     if (!incomeForm.category || !incomeForm.source || !incomeForm.amount || !incomeForm.date) {
       notificationService.showNotification("请填写所有必填项！", "error")
       return
     }
 
+    // ✅ 使用 idGenerator 生成ID
+    const recordId = idGenerator.generateDailyRecordId(userId)
+
     record = {
-      id: Date.now().toString(),
+      id: recordId,  // 使用生成的ID
       type: '收入',
       category: incomeForm.category,
       source: incomeForm.source,
@@ -1243,10 +1251,12 @@ const submitRecord = async () => {
       paymentMethod: incomeForm.paymentMethod,
       note: incomeForm.note,
       businessType: 'personal',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      createTime: new Date().toISOString(),
+      updateTime: new Date().toISOString(),
+      userId: userId
     }
 
-    // 保存到 daily_records（加密存储）
     await businessDataService.addDailyRecord(record)
   } else {
     if (!expenseForm.category || !expenseForm.subtype || !expenseForm.amount || !expenseForm.date) {
@@ -1254,8 +1264,11 @@ const submitRecord = async () => {
       return
     }
 
+    // ✅ 使用 idGenerator 生成ID
+    const recordId = idGenerator.generateDailyRecordId(userId)
+
     record = {
-      id: Date.now().toString(),
+      id: recordId,  // 使用生成的ID
       type: '支出',
       category: expenseForm.category,
       subtype: expenseForm.subtype,
@@ -1264,18 +1277,17 @@ const submitRecord = async () => {
       supplier: expenseForm.supplier || '无',
       note: expenseForm.note,
       businessType: 'personal',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      createTime: new Date().toISOString(),
+      updateTime: new Date().toISOString(),
+      userId: userId
     }
 
-    // 保存到 daily_records（加密存储）
     await businessDataService.addDailyRecord(record)
   }
 
-  // 刷新实时数据
   await refreshData()
-
   notificationService.showNotification(`${recordType.value}记录成功：¥${record.amount.toFixed(2)}`)
-
   recordModalVisible.value = false
 }
 
