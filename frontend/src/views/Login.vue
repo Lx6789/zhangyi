@@ -279,9 +279,9 @@
           >
           <label for="agreeTerms" class="checkbox-label">
             我已阅读并同意
-            <a href="#" class="privacy-link" @click.prevent="showPrivacyPolicy">服务条款</a>
+            <a href="#" class="privacy-link" @click.prevent="showTermsModal">服务条款</a>
             和
-            <a href="#" class="privacy-link" @click.prevent="showPrivacyPolicy">隐私政策</a>
+            <a href="#" class="privacy-link" @click.prevent="showPrivacyModal">隐私政策</a>
           </label>
         </div>
       </div>
@@ -320,9 +320,9 @@
 
     <div class="privacy-terms">
       登录/注册即表示您同意我们的
-      <a href="#" class="privacy-link" @click.prevent="showPrivacyPolicy">服务条款</a>
+      <a href="#" class="privacy-link" @click.prevent="showTermsModal">服务条款</a>
       和
-      <a href="#" class="privacy-link" @click.prevent="showPrivacyPolicy">隐私政策</a>
+      <a href="#" class="privacy-link" @click.prevent="showPrivacyModal">隐私政策</a>
     </div>
   </div>
 
@@ -559,6 +559,122 @@
       </div>
     </div>
   </div>
+
+  <!-- 服务条款弹窗 -->
+  <div v-if="showTermsModalVisible" class="modal-overlay" @click="closeTermsModal">
+    <div class="modal-content terms-modal" @click.stop>
+      <div class="modal-header">
+        <h3 class="modal-title">服务条款</h3>
+        <button class="modal-close" @click="closeTermsModal">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="modal-body terms-body">
+        <div class="terms-content">
+          <h4>1. 服务说明</h4>
+          <p>账易是一款个人记账管理工具，为您提供收入支出记录、存钱管理、生意记账等功能服务。使用本服务即表示您同意本条款。</p>
+
+          <h4>2. 用户注册与账户安全</h4>
+          <p>2.1 您需要注册账户才能使用本服务的完整功能。</p>
+          <p>2.2 您应对您的账户信息（包括用户名、密码）保密，并对账户下的所有活动负责。</p>
+          <p>2.3 如发现任何未经授权使用您账户的情况，请立即通知我们。</p>
+
+          <h4>3. 用户行为规范</h4>
+          <p>您承诺在使用本服务时遵守以下规范：</p>
+          <p>3.1 不得利用本服务从事违法、违规活动；</p>
+          <p>3.2 不得上传、传播虚假信息或侵犯他人权益的内容；</p>
+          <p>3.3 不得试图干扰、破坏本服务的正常运行；</p>
+          <p>3.4 不得进行任何可能对服务器造成损害的行为。</p>
+
+          <h4>4. 数据存储与备份</h4>
+          <p>4.1 我们会尽力保障您的数据安全，但建议您定期导出备份重要数据。</p>
+          <p>4.2 如您连续12个月未登录账户，我们有权在提前通知后删除您的数据。</p>
+
+          <h4>5. 服务变更与终止</h4>
+          <p>5.1 我们有权根据业务发展需要调整、暂停或终止部分服务。</p>
+          <p>5.2 如您违反本条款，我们有权立即终止您的账户使用权。</p>
+
+          <h4>6. 免责声明</h4>
+          <p>6.1 本服务按"现状"提供，不保证服务绝对无中断、无错误。</p>
+          <p>6.2 因不可抗力导致的服务中断，我们不承担赔偿责任。</p>
+          <p>6.3 您使用本服务所做的财务决策，风险由您自行承担。</p>
+
+          <h4>7. 条款修改</h4>
+          <p>我们可能会不时修改本条款，修改后的条款将在公布后生效。如您继续使用本服务，即视为同意修改后的条款。</p>
+
+          <h4>8. 联系我们</h4>
+          <p>如有疑问，请联系我们：support@zhangyi.com</p>
+
+          <div class="terms-footer">
+            <p>最后更新日期：2026年1月1日</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-button" @click="closeTermsModal">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 隐私政策弹窗 -->
+  <div v-if="showPrivacyModalVisible" class="modal-overlay" @click="closePrivacyModal">
+    <div class="modal-content privacy-modal" @click.stop>
+      <div class="modal-header">
+        <h3 class="modal-title">隐私政策</h3>
+        <button class="modal-close" @click="closePrivacyModal">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="modal-body privacy-body">
+        <div class="privacy-content">
+          <h4>1. 我们收集的信息</h4>
+          <p>1.1 您主动提供的信息：注册时提供的手机号、密码、安全问题和答案；使用过程中输入的收支记录、存钱记录、商品库存等数据。</p>
+          <p>1.2 自动收集的信息：设备信息、IP地址、浏览器类型、访问时间等。</p>
+
+          <h4>2. 信息的使用</h4>
+          <p>2.1 提供、维护和改进我们的服务；</p>
+          <p>2.2 保护您的账户安全，防止欺诈和滥用；</p>
+          <p>2.3 向您发送服务通知和重要更新；</p>
+          <p>2.4 分析使用情况以优化用户体验。</p>
+
+          <h4>3. 信息的存储与保护</h4>
+          <p>3.1 您的密码和安全答案采用加密方式存储，我们无法查看明文。</p>
+          <p>3.2 您的记账数据存储在安全的数据库中，我们会采取合理的技术措施保护数据安全。</p>
+          <p>3.3 尽管我们努力保护您的数据，但任何网络传输都无法保证100%安全。</p>
+
+          <h4>4. 信息的分享</h4>
+          <p>我们不会出售、交易或转让您的个人信息给第三方，以下情况除外：</p>
+          <p>4.1 获得您的明确同意；</p>
+          <p>4.2 法律法规要求；</p>
+          <p>4.3 为保护账易、用户或公众的权利、财产或安全。</p>
+
+          <h4>5. 您的权利</h4>
+          <p>5.1 您有权访问、更正、删除您的个人信息；</p>
+          <p>5.2 您有权导出您的记账数据；</p>
+          <p>5.3 您有权注销账户，注销后您的数据将被永久删除。</p>
+
+          <h4>6. Cookie 和类似技术</h4>
+          <p>我们使用Cookie来记住您的登录状态和偏好设置。您可以通过浏览器设置管理Cookie。</p>
+
+          <h4>7. 未成年人隐私</h4>
+          <p>本服务不面向14岁以下未成年人。如发现未成年人提供了个人信息，我们将及时删除。</p>
+
+          <h4>8. 隐私政策的变更</h4>
+          <p>我们可能会不时更新本隐私政策，变更内容将在本页面公布。重大变更会通过弹窗或邮件通知您。</p>
+
+          <h4>9. 联系我们</h4>
+          <p>如有隐私相关问题，请联系：privacy@zhangyi.com</p>
+
+          <div class="privacy-footer">
+            <p>最后更新日期：2026年1月1日</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-button" @click="closePrivacyModal">关闭</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script>
@@ -592,6 +708,10 @@ export default {
       showNewPassword: false,
       showConfirmNewPassword: false,
       securityQuestion: '',
+
+      // 服务条款和隐私政策弹窗
+      showTermsModalVisible: false,
+      showPrivacyModalVisible: false,
 
       // 登录表单数据
       loginForm: {
@@ -742,6 +862,36 @@ export default {
           this.showRegisterConfirmPassword = !this.showRegisterConfirmPassword
           break
       }
+    },
+
+    // ==================== 弹窗相关 ====================
+
+    /**
+     * 显示服务条款弹窗
+     */
+    showTermsModal() {
+      this.showTermsModalVisible = true
+    },
+
+    /**
+     * 关闭服务条款弹窗
+     */
+    closeTermsModal() {
+      this.showTermsModalVisible = false
+    },
+
+    /**
+     * 显示隐私政策弹窗
+     */
+    showPrivacyModal() {
+      this.showPrivacyModalVisible = true
+    },
+
+    /**
+     * 关闭隐私政策弹窗
+     */
+    closePrivacyModal() {
+      this.showPrivacyModalVisible = false
     },
 
     // ==================== 模式切换 ====================
@@ -1414,20 +1564,13 @@ export default {
      */
     handleSocialLogin(platform) {
       this.showNotification(`${platform}登录功能开发中...`, 'info')
-    },
-
-    /**
-     * 显示隐私政策
-     */
-    showPrivacyPolicy() {
-      this.showNotification('隐私政策页面开发中...', 'info')
     }
   }
 }
 </script>
 
 <style scoped>
-/* 保持原有的CSS样式不变 */
+/* 保持原有的CSS样式不变，新增服务条款和隐私政策弹窗样式 */
 :root {
   --primary-color: #D5EBE1; /* 天缥 */
   --secondary-color: #B1D5C8; /* 沧浪 */
@@ -1792,10 +1935,84 @@ body {
   border-radius: 20px;
   width: 90%;
   max-width: 450px;
-  max-height: 90vh;
+  max-height: 85vh;
   overflow-y: auto;
   animation: slideUp 0.3s ease;
   box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
+}
+
+/* 服务条款和隐私政策弹窗 - 固定大小 */
+.terms-modal,
+.privacy-modal {
+  max-width: 550px;
+  width: 90%;
+}
+
+.terms-body,
+.privacy-body {
+  max-height: calc(85vh - 140px);
+  overflow-y: auto;
+  padding: 20px 25px;
+}
+
+/* 滚动条样式 */
+.terms-body::-webkit-scrollbar,
+.privacy-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.terms-body::-webkit-scrollbar-track,
+.privacy-body::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.terms-body::-webkit-scrollbar-thumb,
+.privacy-body::-webkit-scrollbar-thumb {
+  background: #B1D5C8;
+  border-radius: 3px;
+}
+
+.terms-body::-webkit-scrollbar-thumb:hover,
+.privacy-body::-webkit-scrollbar-thumb:hover {
+  background: #80A492;
+}
+
+/* 内容样式 */
+.terms-content,
+.privacy-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-dark);
+}
+
+.terms-content h4,
+.privacy-content h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent-color);
+  margin: 20px 0 10px 0;
+}
+
+.terms-content h4:first-child,
+.privacy-content h4:first-child {
+  margin-top: 0;
+}
+
+.terms-content p,
+.privacy-content p {
+  margin-bottom: 12px;
+  color: var(--text-dark);
+}
+
+.terms-footer,
+.privacy-footer {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid var(--primary-color);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-light);
 }
 
 .modal-header {
@@ -1838,6 +2055,16 @@ body {
   padding: 25px;
 }
 
+.modal-footer {
+  padding: 15px 25px;
+  border-top: 1px solid rgba(128, 164, 146, 0.2);
+}
+
+.modal-footer .modal-button {
+  margin: 0;
+}
+
+/* 忘记密码弹窗样式 */
 .forgot-step {
   animation: fadeIn 0.3s ease;
 }
@@ -2008,6 +2235,11 @@ body {
 
   .modal-buttons {
     flex-direction: column;
+  }
+
+  .terms-body,
+  .privacy-body {
+    padding: 15px 20px;
   }
 }
 
