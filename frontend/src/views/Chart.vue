@@ -224,7 +224,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {authHelperService, notificationService} from '@/services/index.js'
 import userDataService from '@/services/user-data.service.js'
-import businessDataService from '@/services/business-data.service.js'
+import businessDataService from '@/services/cache/business-cache.service.js'
 import dateHelper from '@/services/utils/date-helper.service.js'
 
 const router = useRouter()

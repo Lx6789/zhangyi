@@ -14,32 +14,13 @@
           <!-- 报表类型切换 -->
           <div class="report-tabs">
             <button
+                v-for="type in reportTypes"
+                :key="type.key"
                 class="tab-btn"
-                :class="{ active: reportType === 'income' }"
-                @click="switchReportType('income')"
+                :class="{ active: reportType === type.key }"
+                @click="switchReportType(type.key)"
             >
-              <i class="fas fa-money-bill-wave"></i> 收入报表
-            </button>
-            <button
-                class="tab-btn"
-                :class="{ active: reportType === 'expense' }"
-                @click="switchReportType('expense')"
-            >
-              <i class="fas fa-receipt"></i> 支出报表
-            </button>
-            <button
-                class="tab-btn"
-                :class="{ active: reportType === 'profit' }"
-                @click="switchReportType('profit')"
-            >
-              <i class="fas fa-chart-line"></i> 利润报表
-            </button>
-            <button
-                class="tab-btn"
-                :class="{ active: reportType === 'category' }"
-                @click="switchReportType('category')"
-            >
-              <i class="fas fa-tags"></i> 分类统计
+              <i :class="type.icon"></i> {{ type.label }}
             </button>
           </div>
 
@@ -47,25 +28,14 @@
           <div class="date-range-section">
             <div class="date-range-tabs">
               <button
+                  v-for="option in dateRangeOptions"
+                  :key="option.key"
                   class="range-btn"
-                  :class="{ active: dateRange === 'month' }"
-                  @click="handleDateRangeChange('month')"
-              >本月</button>
-              <button
-                  class="range-btn"
-                  :class="{ active: dateRange === 'quarter' }"
-                  @click="handleDateRangeChange('quarter')"
-              >本季度</button>
-              <button
-                  class="range-btn"
-                  :class="{ active: dateRange === 'year' }"
-                  @click="handleDateRangeChange('year')"
-              >本年</button>
-              <button
-                  class="range-btn"
-                  :class="{ active: dateRange === 'custom' }"
-                  @click="handleDateRangeChange('custom')"
-              >自定义</button>
+                  :class="{ active: dateRange === option.key }"
+                  @click="handleDateRangeChange(option.key)"
+              >
+                {{ option.label }}
+              </button>
             </div>
 
             <!-- 自定义日期范围 -->
@@ -112,7 +82,7 @@
           <div class="report-table-container"
                :style="tableContainerStyle"
                :class="{ 'has-scroll': tableDataExceedsLimit }">
-            <!-- 加载状态 - 骨架屏（带淡入淡出） -->
+            <!-- 加载状态 - 骨架屏 -->
             <Transition name="fade">
               <div v-if="loading" class="skeleton-wrapper" key="skeleton">
                 <div class="skeleton-table">
@@ -123,7 +93,7 @@
               </div>
             </Transition>
 
-            <!-- 报表内容 - 使用过渡动画 -->
+            <!-- 报表内容 -->
             <Transition name="fade" mode="out-in">
               <div v-if="!loading" :key="reportType" class="report-table-wrapper">
                 <!-- 收入报表 -->
@@ -141,7 +111,7 @@
                     <td>{{ item.name }}</td>
                     <td>{{ item.count }}</td>
                     <td class="amount income">¥{{ formatNumber(item.amount) }}</td>
-                    <td>{{ item.percentage.toFixed(1) }}%</td>
+                    <td>{{ formatPercentage(item.percentage) }}</td>
                   </tr>
                   <tr v-if="currentReportData.length === 0">
                     <td colspan="4" class="empty-data">暂无收入数据</td>
@@ -166,7 +136,7 @@
                     <td>{{ item.subtype }}</td>
                     <td>{{ item.count }}</td>
                     <td class="amount expense">¥{{ formatNumber(item.amount) }}</td>
-                    <td>{{ item.percentage.toFixed(1) }}%</td>
+                    <td>{{ formatPercentage(item.percentage) }}</td>
                   </tr>
                   <tr v-if="currentReportData.length === 0">
                     <td colspan="5" class="empty-data">暂无支出数据</td>
@@ -187,7 +157,7 @@
                   </thead>
                   <tbody>
                   <tr v-for="item in currentReportData" :key="item.date">
-                    <td>{{ formatDate(item.date) }}</td>
+                    <td>{{ formatShortDate(item.date) }}</td>
                     <td class="amount income">¥{{ formatNumber(item.income) }}</td>
                     <td class="amount expense">¥{{ formatNumber(item.expense) }}</td>
                     <td class="amount" :class="item.profit >= 0 ? 'income' : 'expense'">
@@ -248,9 +218,10 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
 import reportExportService from '@/services/utils/report-export.service.js'
-import {notificationService} from "@/services/index.js";
+import { notificationService } from "@/services/index.js"
+import reportService from "@/services/api/business/report.service.js";
+import baseService from "@/services/api/business/base.service.js";
 
 const props = defineProps({
   visible: {
@@ -276,7 +247,7 @@ const reportDataCache = ref({
   category: []
 })
 
-// 当前显示的数据（用于平滑切换）
+// 当前显示的数据
 const currentDisplayData = ref([])
 
 const summary = ref({
@@ -291,6 +262,16 @@ const lastLoadedRange = ref('')
 
 // ==================== 计算属性 ====================
 
+// 报表类型列表
+const reportTypes = computed(() => {
+  return reportService.getReportTypes()
+})
+
+// 日期范围选项
+const dateRangeOptions = computed(() => {
+  return reportService.getDateRangeOptions()
+})
+
 // 获取当前报表数据
 const currentReportData = computed(() => {
   if (loading.value && currentDisplayData.value.length === 0) {
@@ -301,33 +282,39 @@ const currentReportData = computed(() => {
       : (reportDataCache.value[reportType.value] || [])
 })
 
-// 判断表格数据是否超出限制（用于样式控制）
+// 判断表格数据是否超出限制
 const tableDataExceedsLimit = computed(() => {
-  const dataLength = currentReportData.value?.length || 0
+  const dataLength = reportService.getReportDataRowCount(currentReportData.value)
   return dataLength > 5
 })
 
 // 计算表格容器高度
 const tableContainerStyle = computed(() => {
-  const dataLength = currentReportData.value?.length || 0
-  const rowHeight = 52
-  const headerHeight = 48
-  const maxRows = 5
-
-  if (dataLength === 0) {
-    return { height: '200px' }
-  }
-
-  if (dataLength <= maxRows) {
-    const contentHeight = dataLength * rowHeight + headerHeight
-    return { height: `${contentHeight}px` }
-  } else {
-    const maxHeight = maxRows * rowHeight + headerHeight + 10
-    return { height: `${maxHeight}px` }
-  }
+  const dataLength = reportService.getReportDataRowCount(currentReportData.value)
+  const height =reportService.calculateTableHeight(dataLength, 52, 48, 5)
+  return { height: `${height}px` }
 })
 
 // ==================== 方法 ====================
+
+// 格式化数字
+const formatNumber = (num) => {
+  return baseService.formatNumber(num)
+}
+
+// 格式化百分比
+const formatPercentage = (percentage) => {
+  return reportService.formatReportPercentage(percentage)
+}
+
+// 格式化短日期（月.日）
+const formatShortDate = (dateStr) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const day = date.getDate().toString().padStart(2, '0')
+  return `${month}.${day}`
+}
 
 // 切换报表类型
 const switchReportType = async (type) => {
@@ -375,28 +362,10 @@ const refreshData = (showLoading = true) => {
 
 // 获取日期范围
 const getDateRange = () => {
-  const today = new Date()
-  let start = ''
-  let end = today.toISOString().split('T')[0]
-
-  switch (dateRange.value) {
-    case 'month':
-      start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]
-      break
-    case 'quarter':
-      const quarterMonth = Math.floor(today.getMonth() / 3) * 3
-      start = new Date(today.getFullYear(), quarterMonth, 1).toISOString().split('T')[0]
-      break
-    case 'year':
-      start = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0]
-      break
-    case 'custom':
-      start = customStartDate.value || start
-      end = customEndDate.value || end
-      break
-  }
-
-  return { start, end }
+  const customRange = customStartDate.value && customEndDate.value
+      ? { start: customStartDate.value, end: customEndDate.value }
+      : null
+  return reportService.getDateRange(dateRange.value, customRange)
 }
 
 // 检查是否有有效缓存
@@ -455,24 +424,9 @@ const preloadOtherReports = async () => {
 const loadReportDataForType = async (type) => {
   try {
     const range = getDateRange()
-    const records = await businessDataService.getBusinessRecords(range)
+    const records = await reportService.getBusinessRecords(range)
 
-    let data = []
-    switch (type) {
-      case 'income':
-        data = processIncomeData(records.filter(r => r.type === '收入'))
-        break
-      case 'expense':
-        data = processExpenseData(records.filter(r => r.type === '支出'))
-        break
-      case 'profit':
-        data = processProfitData(records)
-        break
-      case 'category':
-        data = processCategoryData(records)
-        break
-    }
-
+    const data = reportService.getReportData(type, records)
     reportDataCache.value[type] = data
   } catch (error) {
     console.error(`预加载${type}数据失败:`, error)
@@ -497,7 +451,7 @@ const loadReportData = async (showLoading = true) => {
       return
     }
 
-    const records = await businessDataService.getBusinessRecords(range)
+    const records = await reportService.getBusinessRecords(range)
 
     if (!records || records.length === 0) {
       reportDataCache.value = {
@@ -507,21 +461,17 @@ const loadReportData = async (showLoading = true) => {
         category: []
       }
       currentDisplayData.value = []
-      summary.value = {
-        totalIncome: 0,
-        totalExpense: 0,
-        totalProfit: 0,
-        transactionCount: 0
-      }
+      summary.value = reportService.calculateReportSummary([])
       loading.value = false
       return
     }
 
+    // 并行处理所有报表数据
     const [incomeData, expenseData, profitData, categoryData] = await Promise.all([
-      Promise.resolve(processIncomeData(records.filter(r => r.type === '收入'))),
-      Promise.resolve(processExpenseData(records.filter(r => r.type === '支出'))),
-      Promise.resolve(processProfitData(records)),
-      Promise.resolve(processCategoryData(records))
+      Promise.resolve(reportService.processIncomeReportData(records)),
+      Promise.resolve(reportService.processExpenseReportData(records)),
+      Promise.resolve(reportService.processProfitReportData(records)),
+      Promise.resolve(reportService.processCategoryReportData(records))
     ])
 
     reportDataCache.value = {
@@ -533,7 +483,7 @@ const loadReportData = async (showLoading = true) => {
     lastLoadedRange.value = rangeKey
 
     currentDisplayData.value = reportDataCache.value[reportType.value] || []
-    calculateSummary(records)
+    summary.value = reportService.calculateReportSummary(records)
 
     saveCacheToStorage()
   } catch (error) {
@@ -546,174 +496,25 @@ const loadReportData = async (showLoading = true) => {
   }
 }
 
-// 处理收入数据
-const processIncomeData = (records) => {
-  const grouped = {}
-  let total = 0
-
-  records.forEach(record => {
-    if (record.businessType !== 'business') return
-
-    const channel = record.channel || record.source || '其他'
-    if (!grouped[channel]) {
-      grouped[channel] = { name: channel, amount: 0, count: 0 }
-    }
-    grouped[channel].amount += record.amount || 0
-    grouped[channel].count++
-    total += record.amount || 0
-  })
-
-  return Object.values(grouped)
-      .map(item => ({
-        ...item,
-        percentage: total > 0 ? (item.amount / total) * 100 : 0
-      }))
-      .sort((a, b) => b.amount - a.amount)
-}
-
-// 处理支出数据
-const processExpenseData = (records) => {
-  const grouped = {}
-  let total = 0
-
-  records.forEach(record => {
-    if (record.businessType !== 'business') return
-
-    const category = record.category || '其他'
-    const subtype = record.subtype || '其他'
-    const key = `${category}-${subtype}`
-
-    if (!grouped[key]) {
-      grouped[key] = { category, subtype, amount: 0, count: 0 }
-    }
-    grouped[key].amount += record.amount || 0
-    grouped[key].count++
-    total += record.amount || 0
-  })
-
-  return Object.values(grouped)
-      .map(item => ({
-        ...item,
-        percentage: total > 0 ? (item.amount / total) * 100 : 0
-      }))
-      .sort((a, b) => b.amount - a.amount)
-}
-
-// 处理利润数据
-const processProfitData = (records) => {
-  const dailyData = {}
-
-  records.forEach(record => {
-    if (record.businessType !== 'business') return
-
-    const date = record.date
-    if (!dailyData[date]) {
-      dailyData[date] = { date, income: 0, expense: 0, profit: 0, count: 0 }
-    }
-
-    if (record.type === '收入') {
-      dailyData[date].income += record.amount || 0
-    } else {
-      dailyData[date].expense += record.amount || 0
-    }
-    dailyData[date].profit = dailyData[date].income - dailyData[date].expense
-    dailyData[date].count++
-  })
-
-  return Object.values(dailyData).sort((a, b) => b.date.localeCompare(a.date))
-}
-
-// 处理分类数据
-const processCategoryData = (records) => {
-  const categoryStats = {}
-
-  records.forEach(record => {
-    if (record.businessType !== 'business') return
-
-    let category = record.category || '其他'
-
-    if (!categoryStats[category]) {
-      categoryStats[category] = { category, income: 0, expense: 0, profit: 0, count: 0 }
-    }
-
-    if (record.type === '收入') {
-      categoryStats[category].income += record.amount || 0
-    } else {
-      categoryStats[category].expense += record.amount || 0
-    }
-    categoryStats[category].profit = categoryStats[category].income - categoryStats[category].expense
-    categoryStats[category].count++
-  })
-
-  return Object.values(categoryStats).sort((a, b) => b.profit - a.profit)
-}
-
-// 计算汇总数据
-const calculateSummary = (records) => {
-  let totalIncome = 0
-  let totalExpense = 0
-  let count = 0
-
-  records.forEach(record => {
-    if (record.businessType !== 'business') return
-
-    if (record.type === '收入') {
-      totalIncome += record.amount || 0
-    } else {
-      totalExpense += record.amount || 0
-    }
-    count++
-  })
-
-  summary.value = {
-    totalIncome,
-    totalExpense,
-    totalProfit: totalIncome - totalExpense,
-    transactionCount: count
-  }
-}
-
 // 导出报表
 const exportReport = async () => {
   try {
     const range = getDateRange()
-    const records = await businessDataService.getBusinessRecords(range)
+    const records = await reportService.getBusinessRecords(range)
 
     if (!records || records.length === 0) {
-      notificationService.showNotification('当前时间段没有数据可导出', 'error')
+      notificationService.showNotification('当前时间段没有数据可导出', 'warning')
       return
     }
 
+    const exportData = reportService.prepareExportData(reportType.value, records, range)
     await reportExportService.exportReport(reportType.value, records, range)
-    emit('export', { type: reportType.value, range, records })
+    emit('export', exportData)
+    notificationService.showNotification('导出成功', 'success')
   } catch (error) {
     console.error('导出失败:', error)
     notificationService.showNotification('导出失败，请重试', 'error')
   }
-}
-
-// 格式化数字
-const formatNumber = (num) => {
-  if (num === undefined || num === null) return '0.00'
-  const value = typeof num === 'number' ? num : parseFloat(num) || 0
-  return value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-// 格式化日期
-const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  return `${month}.${day}`
-}
-
-// 设置默认日期
-const setDefaultDates = () => {
-  const today = new Date()
-  customEndDate.value = today.toISOString().split('T')[0]
-  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
-  customStartDate.value = firstDay.toISOString().split('T')[0]
 }
 
 // 关闭模态框
@@ -727,7 +528,15 @@ const closeOnOverlay = (event) => {
   }
 }
 
-// 监听报表类型变化
+// 设置默认日期
+const setDefaultDates = () => {
+  const defaultRange = reportService.getDefaultDateRange()
+  customStartDate.value = defaultRange.start
+  customEndDate.value = defaultRange.end
+}
+
+// ==================== 监听器 ====================
+
 watch(reportType, (newType) => {
   if (reportDataCache.value[newType]) {
     nextTick(() => {
@@ -736,7 +545,6 @@ watch(reportType, (newType) => {
   }
 }, { immediate: true })
 
-// 监听日期范围变化
 watch([dateRange, customStartDate, customEndDate], () => {
   if (props.visible) {
     const range = getDateRange()
@@ -750,7 +558,6 @@ watch([dateRange, customStartDate, customEndDate], () => {
   }
 })
 
-// 数据加载完成后预加载其他类型
 watch(reportDataCache, () => {
   if (hasValidCache()) {
     return
@@ -760,7 +567,6 @@ watch(reportDataCache, () => {
   }, 500)
 }, { deep: true })
 
-// 监听模态框显示状态
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     setDefaultDates()
@@ -770,7 +576,7 @@ watch(() => props.visible, (newVal) => {
   }
 })
 
-// 初始化
+// ==================== 初始化 ====================
 onMounted(() => {
   setDefaultDates()
   if (props.visible) {

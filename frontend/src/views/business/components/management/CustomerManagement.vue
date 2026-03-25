@@ -19,7 +19,7 @@
                   v-model="searchKeyword"
                   type="text"
                   class="search-input"
-                  placeholder="搜索客户名称、电话、类型..."
+                  :placeholder="`搜索客户名称、电话、类型...`"
                   @input="searchCustomers"
               >
             </div>
@@ -35,46 +35,13 @@
           <!-- 客户类型筛选 -->
           <div class="filter-section">
             <div
+                v-for="type in customerTypes"
+                :key="type"
                 class="filter-chip"
-                :class="{ active: selectedType === '全部' }"
-                @click="selectedType = '全部'"
+                :class="{ active: selectedType === type }"
+                @click="selectedType = type"
             >
-              全部
-            </div>
-            <div
-                class="filter-chip"
-                :class="{ active: selectedType === '零售客户' }"
-                @click="selectedType = '零售客户'"
-            >
-              零售客户
-            </div>
-            <div
-                class="filter-chip"
-                :class="{ active: selectedType === '批发客户' }"
-                @click="selectedType = '批发客户'"
-            >
-              批发客户
-            </div>
-            <div
-                class="filter-chip"
-                :class="{ active: selectedType === '长期客户' }"
-                @click="selectedType = '长期客户'"
-            >
-              长期客户
-            </div>
-            <div
-                class="filter-chip"
-                :class="{ active: selectedType === '单位客户' }"
-                @click="selectedType = '单位客户'"
-            >
-              单位客户
-            </div>
-            <div
-                class="filter-chip"
-                :class="{ active: selectedType === '有赊账' }"
-                @click="selectedType = '有赊账'"
-            >
-              有赊账
+              {{ type }}
             </div>
           </div>
 
@@ -129,7 +96,7 @@
                     </span>
                   </div>
 
-                  <!-- 交易统计 - 动态显示 -->
+                  <!-- 交易统计 -->
                   <div class="detail-item stats-info">
                     <span class="detail-label">交易：</span>
                     <span class="detail-value">{{ customer.stats?.transactionCount || 0 }}次</span>
@@ -475,11 +442,11 @@
 </template>
 
 <script setup>
-import {ref, reactive, computed, onMounted, watch} from 'vue'
-import userDataService from '@/services/user-data.service.js'
-import businessDataService from '@/services/business-data.service.js'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import dateHelper from '@/services/utils/date-helper.service.js'
-import {notificationService} from "@/services/index.js";
+import { notificationService } from "@/services/index.js"
+import customerService from "@/services/api/business/customer.service.js";
+import baseService from "@/services/api/business/base.service.js";
 
 const props = defineProps({
   visible: {
@@ -496,6 +463,7 @@ const filteredCustomers = ref([])
 const searchKeyword = ref('')
 const selectedType = ref('全部')
 const loading = ref(false)
+const customerTypes = ref([])
 
 // 新增/编辑相关
 const addEditModalVisible = ref(false)
@@ -533,86 +501,17 @@ const deleteConfirmVisible = ref(false)
 const deleteConfirmMessage = ref('')
 const deleteConfirmCustomer = ref(null)
 
-// 按客户ID分组的交易记录
-const transactionsByCustomer = ref({})
-
 // ==================== 方法 ====================
-
-// 加载所有客户的交易记录
-const loadAllCustomerTransactions = async () => {
-  try {
-    // 获取所有收入记录
-    const allIncomeRecords = await businessDataService.getIncomeRecords()
-
-    // 按客户ID分组
-    const grouped = {}
-    allIncomeRecords.forEach(record => {
-      if (record.customerId) {
-        if (!grouped[record.customerId]) {
-          grouped[record.customerId] = []
-        }
-        grouped[record.customerId].push({
-          id: record.id,
-          type: '收入',
-          description: record.productName || record.category || '交易',
-          amount: record.amount,
-          date: record.date,
-          paymentMethod: record.paymentMethod,
-          note: record.note,
-          productName: record.productName,
-          quantity: record.quantity,
-          unit: record.unit,
-          price: record.price
-        })
-      }
-    })
-
-    transactionsByCustomer.value = grouped
-
-    // 更新客户的统计信息
-    customers.value = customers.value.map(customer => {
-      const customerTransactions = grouped[customer.id] || []
-
-      // 计算交易次数
-      const transactionCount = customerTransactions.length
-
-      // 计算累计金额
-      const totalAmount = customerTransactions.reduce((sum, t) => sum + (t.amount || 0), 0)
-
-      // 获取最近交易日期
-      let lastTransactionDate = null
-      if (customerTransactions.length > 0) {
-        const sorted = [...customerTransactions].sort((a, b) => new Date(b.date) - new Date(a.date))
-        lastTransactionDate = sorted[0].date
-      }
-
-      return {
-        ...customer,
-        stats: {
-          transactionCount,
-          totalAmount,
-          lastTransactionDate
-        }
-      }
-    })
-
-  } catch (error) {
-    console.error('加载客户交易记录失败:', error)
-  }
-}
 
 // 加载客户数据
 const loadCustomers = async () => {
   loading.value = true
   try {
-    customers.value = userDataService.getCustomers() || []
-
-    // 加载所有交易记录并更新统计
-    await loadAllCustomerTransactions()
-
+    customers.value = await customerService.getAllCustomers()
     filterCustomers()
   } catch (error) {
     console.error('加载客户失败:', error)
+    notificationService.showNotification('加载客户失败', 'error')
   } finally {
     loading.value = false
   }
@@ -620,37 +519,14 @@ const loadCustomers = async () => {
 
 // 筛选客户
 const filterCustomers = () => {
-  let filtered = [...customers.value]
-
-  if (selectedType.value !== '全部') {
-    if (selectedType.value === '有赊账') {
-      filtered = filtered.filter(c => c.creditInfo?.hasCredit && c.creditInfo?.balance > 0)
-    } else {
-      filtered = filtered.filter(c => c.type === selectedType.value)
-    }
-  }
-
-  if (searchKeyword.value.trim()) {
-    const keyword = searchKeyword.value.toLowerCase().trim()
-    filtered = filtered.filter(c =>
-        c.name.toLowerCase().includes(keyword) ||
-        (c.phone && c.phone.includes(keyword)) ||
-        (c.type && c.type.toLowerCase().includes(keyword))
-    )
-  }
-
-  filteredCustomers.value = filtered
+  filteredCustomers.value = customerService.filterCustomers(customers.value, {
+    type: selectedType.value,
+    keyword: searchKeyword.value
+  })
 }
 
 // 搜索客户
 const searchCustomers = () => {
-  filterCustomers()
-}
-
-// 重置筛选
-const resetFilter = () => {
-  selectedType.value = '全部'
-  searchKeyword.value = ''
   filterCustomers()
 }
 
@@ -692,56 +568,20 @@ const saveCustomer = async () => {
   }
 
   try {
-    // 获取现有客户的交易统计（如果有）
-    let existingStats = {transactionCount: 0, totalAmount: 0, lastTransactionDate: null}
     if (editingCustomerId.value) {
-      const existing = customers.value.find(c => c.id === editingCustomerId.value)
-      if (existing && existing.stats) {
-        existingStats = existing.stats
-      }
-    }
-
-    const customerData = {
-      id: editingCustomerId.value || Date.now().toString(),
-      name: customerForm.name,
-      type: customerForm.type,
-      phone: customerForm.phone || null,
-      address: customerForm.address || null,
-      creditInfo: customerForm.hasCredit ? {
-        hasCredit: true,
-        creditLimit: customerForm.creditLimit ? parseFloat(customerForm.creditLimit) : null,
-        settlementDays: customerForm.settlementDays ? parseInt(customerForm.settlementDays) : null,
-        note: customerForm.creditNote || '',
-        balance: editingCustomerId.value ?
-            (customers.value.find(c => c.id === editingCustomerId.value)?.creditInfo?.balance || 0) : 0,
-        lastRepayDate: editingCustomerId.value ?
-            (customers.value.find(c => c.id === editingCustomerId.value)?.creditInfo?.lastRepayDate || null) : null
-      } : {hasCredit: false},
-      stats: existingStats,
-      note: customerForm.note || null,
-      createTime: editingCustomerId.value ?
-          (customers.value.find(c => c.id === editingCustomerId.value)?.createTime || new Date().toISOString()) :
-          new Date().toISOString(),
-      updateTime: new Date().toISOString()
-    }
-
-    if (editingCustomerId.value) {
-      const index = customers.value.findIndex(c => c.id === editingCustomerId.value)
-      if (index !== -1) {
-        customers.value[index] = customerData
-      }
+      await customerService.updateCustomer(editingCustomerId.value, customerForm)
+      notificationService.showNotification('客户信息更新成功', 'success')
     } else {
-      customers.value.push(customerData)
+      await customerService.addCustomer(customerForm)
+      notificationService.showNotification('客户添加成功', 'success')
     }
 
-    userDataService.saveCustomers(customers.value)
-    await loadCustomers() // 重新加载以更新统计
+    await loadCustomers()
     emit('update')
     closeAddEditModal()
-    notificationService.showNotification(editingCustomerId.value ? '客户信息更新成功' : '客户添加成功', 'success')
   } catch (error) {
     console.error('保存客户失败:', error)
-    notificationService.showNotification('保存客户失败', 'error')
+    notificationService.showNotification(error.message || '保存客户失败', 'error')
   }
 }
 
@@ -757,17 +597,13 @@ const confirmDelete = async () => {
   if (!deleteConfirmCustomer.value) return
 
   try {
-    const index = customers.value.findIndex(c => c.id === deleteConfirmCustomer.value.id)
-    if (index !== -1) {
-      customers.value.splice(index, 1)
-      userDataService.saveCustomers(customers.value)
-      await loadCustomers()
-      emit('update')
-      notificationService.showNotification('客户删除成功', 'success')
-    }
+    await customerService.deleteCustomer(deleteConfirmCustomer.value.id)
+    await loadCustomers()
+    emit('update')
+    notificationService.showNotification('客户删除成功', 'success')
   } catch (error) {
     console.error('删除客户失败:', error)
-    notificationService.showNotification('删除客户失败', 'error')
+    notificationService.showNotification(error.message || '删除客户失败', 'error')
   } finally {
     deleteConfirmVisible.value = false
     deleteConfirmCustomer.value = null
@@ -783,34 +619,18 @@ const quickRecordIncome = (customer) => {
 // 查看交易记录
 const viewTransactions = async (customer) => {
   selectedCustomer.value = customer
-  await loadCustomerTransactions(customer)
+  await loadCustomerTransactions(customer.id)
   transactionModalVisible.value = true
 }
 
 // 加载客户交易记录
-const loadCustomerTransactions = async (customer) => {
+const loadCustomerTransactions = async (customerId) => {
   loadingTransactions.value = true
   try {
-    let records = transactionsByCustomer.value[customer.id] || []
-
-    // 根据日期范围筛选
-    const now = new Date()
-    const today = dateHelper.getTodayString()
-
-    if (transactionDateRange.value === 'month') {
-      const monthAgo = dateHelper.addDays(today, -30)
-      records = records.filter(r => r.date >= monthAgo)
-    } else if (transactionDateRange.value === 'quarter') {
-      const quarterAgo = dateHelper.addDays(today, -90)
-      records = records.filter(r => r.date >= quarterAgo)
-    } else if (transactionDateRange.value === 'year') {
-      const yearAgo = dateHelper.addDays(today, -365)
-      records = records.filter(r => r.date >= yearAgo)
-    }
-
-    transactions.value = records.sort((a, b) => new Date(b.date) - new Date(a.date))
+    transactions.value = await customerService.getCustomerTransactions(customerId, transactionDateRange.value)
   } catch (error) {
     console.error('加载客户交易记录失败:', error)
+    notificationService.showNotification('加载交易记录失败', 'error')
   } finally {
     loadingTransactions.value = false
   }
@@ -819,7 +639,7 @@ const loadCustomerTransactions = async (customer) => {
 // 筛选交易记录
 const filterTransactions = () => {
   if (selectedCustomer.value) {
-    loadCustomerTransactions(selectedCustomer.value)
+    loadCustomerTransactions(selectedCustomer.value.id)
   }
 }
 
@@ -846,77 +666,20 @@ const submitRepayment = async () => {
   }
 
   try {
-    const amount = parseFloat(repaymentForm.amount)
-    const index = customers.value.findIndex(c => c.id === selectedCustomer.value.id)
+    await customerService.recordCustomerRepayment(selectedCustomer.value.id, {
+      amount: repaymentForm.amount,
+      date: repaymentForm.date,
+      paymentMethod: repaymentForm.paymentMethod,
+      note: repaymentForm.note
+    })
 
-    if (index !== -1) {
-      // 1. 更新客户欠款余额
-      customers.value[index].creditInfo.balance -= amount
-      customers.value[index].creditInfo.lastRepayDate = repaymentForm.date
-      userDataService.saveCustomers(customers.value)
-
-      // 2. 查找并更新该客户的收入记录（赊账记录）
-      const incomeRecords = await businessDataService.getIncomeRecords()
-      const customerCreditRecords = incomeRecords.filter(r =>
-          r.customerId === selectedCustomer.value.id &&
-          r.paymentMethod === '赊账' &&
-          !r.isPaid
-      )
-
-      // 按时间排序，优先还最早的欠款
-      customerCreditRecords.sort((a, b) => new Date(a.date) - new Date(b.date))
-
-      let remainingAmount = amount
-
-      for (const record of customerCreditRecords) {
-        if (remainingAmount <= 0) break
-
-        const recordAmount = record.amount
-        if (remainingAmount >= recordAmount) {
-          // 完全还清这笔记录
-          await businessDataService.updateIncomeRecord(record.id, {
-            ...record,
-            amount: 0,
-            isPaid: true,
-            repayDate: repaymentForm.date,
-            repayMethod: repaymentForm.paymentMethod,
-            repayNote: repaymentForm.note
-          })
-          remainingAmount -= recordAmount
-        } else {
-          // 部分还款
-          await businessDataService.updateIncomeRecord(record.id, {
-            ...record,
-            amount: recordAmount - remainingAmount,
-            isPaid: false,
-            partialRepay: true,
-            lastRepayDate: repaymentForm.date,
-            lastRepayAmount: remainingAmount
-          })
-          remainingAmount = 0
-        }
-      }
-
-      // 3. 记录还款历史
-      const repayments = userDataService.getUserData(`customer_repayments_${selectedCustomer.value.id}`, [])
-      repayments.push({
-        id: Date.now(),
-        amount: amount,
-        date: repaymentForm.date,
-        paymentMethod: repaymentForm.paymentMethod,
-        note: repaymentForm.note,
-        timestamp: new Date().toISOString()
-      })
-      userDataService.setUserData(`customer_repayments_${selectedCustomer.value.id}`, repayments)
-
-      await loadCustomers()
-      emit('update')
-      repaymentModalVisible.value = false
-      notificationService.showNotification('还款记录成功，赊账记录已同步', 'success')
-    }
+    await loadCustomers()
+    emit('update')
+    repaymentModalVisible.value = false
+    notificationService.showNotification('还款记录成功', 'success')
   } catch (error) {
     console.error('记录还款失败:', error)
-    notificationService.showNotification('记录还款失败', 'error')
+    notificationService.showNotification(error.message || '记录还款失败', 'error')
   }
 }
 
@@ -930,7 +693,6 @@ const closeAddEditModal = () => {
   editingCustomerId.value = ''
 }
 
-// 点击遮罩层关闭
 const closeOnOverlay = (event) => {
   if (event.target.classList.contains('modal')) {
     close()
@@ -961,11 +723,10 @@ const closeConfirmOnOverlay = (event) => {
   }
 }
 
-// 格式化函数
+// ==================== 辅助函数 ====================
+
 const formatNumber = (num) => {
-  if (num === undefined || num === null) return '0.00'
-  const value = typeof num === 'number' ? num : parseFloat(num) || 0
-  return value.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+  return baseService.formatNumber(num)
 }
 
 const formatDate = (dateStr) => {
@@ -977,27 +738,29 @@ const formatDate = (dateStr) => {
   return `${year}.${month}.${day}`
 }
 
-// 监听 visible 变化
+// ==================== 监听器 ====================
+
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     loadCustomers()
   }
 })
 
-// 监听筛选条件变化
 watch([selectedType, searchKeyword], () => {
   filterCustomers()
 })
 
-// 监听日期范围变化
 watch(transactionDateRange, () => {
   if (transactionModalVisible.value && selectedCustomer.value) {
-    loadCustomerTransactions(selectedCustomer.value)
+    loadCustomerTransactions(selectedCustomer.value.id)
   }
 })
 
-// 初始化
-onMounted(() => {
+// ==================== 初始化 ====================
+onMounted(async () => {
+  // 获取客户类型列表
+  customerTypes.value = customerService.getCustomerTypes()
+
   if (props.visible) {
     loadCustomers()
   }

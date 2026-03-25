@@ -1,5 +1,5 @@
 // data_migration/import.js
-import businessDataService from '@/services/business-data.service.js'
+import businessDataService from '@/services/cache/business-cache.service.js'
 import { personalSavingCache, groupSavingCache, savingService } from '@/services'
 import notificationService from '@/services/utils/notification.service.js'
 import indexedDBService from '@/services/db/indexed-db.service.js'

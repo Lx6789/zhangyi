@@ -619,11 +619,12 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
-import userDataService from '@/services/user-data.service.js'
 import dateHelper from '@/services/utils/date-helper.service.js'
 import QuickAddProductModal from '../modals/QuickAddProductModal.vue'
-import {notificationService} from "@/services/index.js";
+import { notificationService } from "@/services/index.js"
+import inventoryService from "@/services/api/business/inventory.service.js";
+import baseService from "@/services/api/business/base.service.js";
+import businessCacheService from "@/services/cache/business-cache.service.js";
 
 const props = defineProps({
   visible: {
@@ -722,25 +723,19 @@ const categoryNames = computed(() => {
   return props.categories.map(c => c.name).sort()
 })
 
-// 库存统计
+// 库存统计 - 使用业务服务
 const inventoryStats = computed(() => {
-  const items = inventory.value
-  return {
-    total: items.length,
-    lowStock: items.filter(item => isLowStock(item)).length,
-    expiring: items.filter(item => isExpiring(item.expiryDate)).length,
-    expired: items.filter(item => isExpired(item.expiryDate)).length
-  }
+  return inventoryService.getInventoryStats(inventory.value)
 })
 
-// 唯一供应商列表
+// 唯一供应商列表 - 使用业务服务
 const uniqueSuppliers = computed(() => {
-  return [...new Set(inventory.value.map(i => i.supplier).filter(Boolean))]
+  return inventoryService.getUniqueSuppliers(inventory.value)
 })
 
-// 唯一存放位置列表
+// 唯一存放位置列表 - 使用业务服务
 const uniqueLocations = computed(() => {
-  return [...new Set(inventory.value.map(i => i.location).filter(Boolean))]
+  return inventoryService.getUniqueLocations(inventory.value)
 })
 
 // 分页数据
@@ -755,17 +750,11 @@ const totalPages = computed(() => {
   return Math.ceil(filteredInventory.value.length / pageSize.value)
 })
 
-// ==================== 新增计算属性 ====================
-
 // 计算属性：判断提交按钮是否禁用
 const isAdjustSubmitDisabled = computed(() => {
-  // 如果没有选择商品
   if (!selectedItem.value) return true
-
-  // 如果没有输入数量
   if (!adjustForm.quantity || parseFloat(adjustForm.quantity) <= 0) return true
 
-  // 出库时检查数量是否超过当前库存
   if (adjustType.value === 'out') {
     const currentQuantity = selectedItem.value.quantity || 0
     const adjustQuantity = parseFloat(adjustForm.quantity) || 0
@@ -775,66 +764,62 @@ const isAdjustSubmitDisabled = computed(() => {
   return false
 })
 
+// ==================== 辅助函数（使用业务服务） ====================
+
+const isLowStock = (item) => {
+  return inventoryService.isLowStock(item)
+}
+
+const isExpiring = (expiryDate) => {
+  return inventoryService.isExpiring(expiryDate)
+}
+
+const isExpired = (expiryDate) => {
+  return inventoryService.isExpired(expiryDate)
+}
+
+const formatNumber = (num) => {
+  return baseService.formatNumber(num)
+}
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const year = date.getFullYear()
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const day = date.getDate().toString().padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const formatDateTime = (dateStr) => {
+  return baseService.formatDateTime(dateStr)
+}
+
 // ==================== 方法 ====================
 
 // 加载库存数据
 const loadInventory = async () => {
   loading.value = true
   try {
-    inventory.value = await businessDataService.getAllInventory()
+    inventory.value = await inventoryService.getAllInventory()
     applyFilters()
   } catch (error) {
     console.error('加载库存失败:', error)
+    notificationService.showNotification('加载库存失败', 'error')
   } finally {
     loading.value = false
   }
 }
 
-// 应用筛选条件
+// 应用筛选条件 - 使用业务服务
 const applyFilters = () => {
-  let filtered = [...inventory.value]
-
-  // 关键词搜索
-  if (searchKeyword.value.trim()) {
-    const keyword = searchKeyword.value.toLowerCase().trim()
-    filtered = filtered.filter(item =>
-        item.productName.toLowerCase().includes(keyword) ||
-        item.category.toLowerCase().includes(keyword) ||
-        (item.supplier && item.supplier.toLowerCase().includes(keyword))
-    )
-  }
-
-  // 分类筛选
-  if (filters.category) {
-    filtered = filtered.filter(item => item.category === filters.category)
-  }
-
-  // 供应商筛选
-  if (filters.supplier) {
-    filtered = filtered.filter(item => item.supplier === filters.supplier)
-  }
-
-  // 位置筛选
-  if (filters.location) {
-    filtered = filtered.filter(item => item.location === filters.location)
-  }
-
-  // 状态筛选
-  if (filters.status !== 'all') {
-    switch (filters.status) {
-      case 'low':
-        filtered = filtered.filter(item => isLowStock(item))
-        break
-      case 'expiring':
-        filtered = filtered.filter(item => isExpiring(item.expiryDate))
-        break
-      case 'expired':
-        filtered = filtered.filter(item => isExpired(item.expiryDate))
-        break
-    }
-  }
-
-  filteredInventory.value = filtered
+  filteredInventory.value = inventoryService.filterInventory(inventory.value, {
+    keyword: searchKeyword.value,
+    category: filters.category,
+    supplier: filters.supplier,
+    location: filters.location,
+    status: filters.status
+  })
   currentPage.value = 1
 }
 
@@ -872,11 +857,8 @@ const openQuickAddProduct = () => {
 // 快速新增商品成功
 const handleQuickAddProductSuccess = async () => {
   quickAddProductVisible.value = false
-  // 通知父组件刷新商品数据
   emit('update')
-  // 等待数据更新
   await new Promise(resolve => setTimeout(resolve, 500))
-  // 如果当前有选中的分类，自动选择新商品
   if (form.selectedCategory && filteredProductsByCategory.value.length > 0) {
     form.productId = filteredProductsByCategory.value[filteredProductsByCategory.value.length - 1].id
     onProductSelected()
@@ -908,9 +890,7 @@ const onProductSelected = () => {
     form.unit = product.unit || '斤'
     form.sellingPrice = product.defaultPrice || null
 
-    // 如果是在编辑模式下，不覆盖已有数据
     if (!editingId.value) {
-      // 如果是新增模式，可以从现有库存获取参考成本价
       const existingInventory = inventory.value.find(i => i.productId === product.id)
       if (existingInventory) {
         form.costPrice = existingInventory.costPrice
@@ -946,10 +926,7 @@ const resetForm = () => {
 // 编辑库存
 const editInventory = (item) => {
   editingId.value = item.id
-
-  // 找到商品对应的分类
   const product = props.products.find(p => p.id === item.productId)
-
   form.selectedCategory = product?.category || item.category
   form.productId = item.productId
   form.productName = item.productName
@@ -963,11 +940,10 @@ const editInventory = (item) => {
   form.minStock = item.minStock
   form.expiryDate = item.expiryDate
   form.note = item.note
-
   addEditModalVisible.value = true
 }
 
-// 保存库存
+// 保存库存 - 使用业务服务
 const saveInventory = async () => {
   if (!form.selectedCategory) {
     notificationService.showNotification('请选择商品分类', 'error')
@@ -1001,10 +977,10 @@ const saveInventory = async () => {
     }
 
     if (editingId.value) {
-      await businessDataService.updateInventoryItem(editingId.value, inventoryData)
+      await businessCacheService.updateInventoryItem(editingId.value, inventoryData)
       notificationService.showNotification('库存更新成功', 'success')
     } else {
-      await businessDataService.addInventoryItem(inventoryData)
+      await inventoryService.addInventoryItem(inventoryData)
       notificationService.showNotification('库存添加成功', 'success')
     }
 
@@ -1013,7 +989,7 @@ const saveInventory = async () => {
     closeAddEditModal()
   } catch (error) {
     console.error('保存库存失败:', error)
-    notificationService.showNotification('保存库存失败', 'error')
+    notificationService.showNotification(error.message || '保存库存失败', 'error')
   }
 }
 
@@ -1028,95 +1004,54 @@ const adjustStock = (item, type) => {
   adjustModalVisible.value = true
 }
 
-// 修改提交库存调整方法 - 添加出库数量检查
+// 提交库存调整 - 使用业务服务
 const submitAdjust = async () => {
-  if (!adjustForm.quantity || parseFloat(adjustForm.quantity) <= 0) {
-    notificationService.showNotification('请输入有效的数量', 'error')
+  if (!selectedItem.value) return
+
+  const validation = inventoryService.validateAdjustQuantity(
+      selectedItem.value,
+      adjustType.value,
+      adjustForm.quantity
+  )
+
+  if (!validation.valid) {
+    notificationService.showNotification(validation.message, 'error')
     return
   }
 
-  // 出库时检查数量是否超过当前库存
-  if (adjustType.value === 'out') {
-    const currentQuantity = selectedItem.value.quantity || 0
-    const adjustQuantity = parseFloat(adjustForm.quantity)
-
-    if (adjustQuantity > currentQuantity) {
-      notificationService.showNotification(
-          `出库数量不能大于当前库存（当前库存：${currentQuantity} ${selectedItem.value.unit}）`,
-          'error'
-      )
-      return
-    }
-  }
-
   try {
-    const quantity = parseFloat(adjustForm.quantity)
-    const item = selectedItem.value
-    const beforeQuantity = item.quantity
-    const afterQuantity = adjustType.value === 'in'
-        ? beforeQuantity + quantity
-        : beforeQuantity - quantity
-
-    // 确保出库后数量不会为负数（理论上不会，因为前面已经检查过）
-    if (afterQuantity < 0) {
-      notificationService.showNotification('库存不能为负数', 'error')
-      return
-    }
-
-    // 更新库存
-    await businessDataService.updateStockQuantity(
-        item.id,
-        quantity,
-        adjustType.value === 'in' ? 'add' : 'subtract'
+    await inventoryService.adjustInventory(
+        selectedItem.value,
+        adjustType.value,
+        adjustForm.quantity,
+        {
+          adjustType: adjustForm.type,
+          date: adjustForm.date,
+          note: adjustForm.note
+        }
     )
-
-    // 记录调整历史
-    await recordHistory(item.id, {
-      type: adjustType.value,
-      adjustType: adjustForm.type,
-      quantity: quantity,
-      beforeQuantity: beforeQuantity,
-      afterQuantity: afterQuantity,
-      date: adjustForm.date,
-      note: adjustForm.note
-    })
 
     await loadInventory()
     adjustModalVisible.value = false
     notificationService.showNotification('库存调整成功', 'success')
   } catch (error) {
     console.error('库存调整失败:', error)
-    notificationService.showNotification('库存调整失败', 'error')
+    notificationService.showNotification(error.message || '库存调整失败', 'error')
   }
 }
 
-// 查看历史记录
+// 查看历史记录 - 使用业务服务
 const viewHistory = async (item) => {
   selectedItem.value = item
   historyLoading.value = true
   try {
-    const records = userDataService.getUserData(`inventory_history_${item.id}`, [])
-    history.value = records.sort((a, b) => new Date(b.date) - new Date(a.date))
+    history.value = await inventoryService.getInventoryHistory(item.id)
     historyModalVisible.value = true
   } catch (error) {
     console.error('加载历史记录失败:', error)
+    notificationService.showNotification('加载历史记录失败', 'error')
   } finally {
     historyLoading.value = false
-  }
-}
-
-// 记录库存历史
-const recordHistory = async (inventoryId, record) => {
-  try {
-    const history = userDataService.getUserData(`inventory_history_${inventoryId}`, [])
-    history.push({
-      id: Date.now(),
-      ...record,
-      timestamp: new Date().toISOString()
-    })
-    userDataService.setUserData(`inventory_history_${inventoryId}`, history)
-  } catch (error) {
-    console.error('记录历史失败:', error)
   }
 }
 
@@ -1127,12 +1062,12 @@ const confirmDeleteInventory = (item) => {
   deleteConfirmVisible.value = true
 }
 
-// 执行删除
+// 执行删除 - 使用业务服务
 const confirmDelete = async () => {
   if (!deleteConfirmItem.value) return
 
   try {
-    await businessDataService.deleteInventoryItem(deleteConfirmItem.value.id)
+    await businessCacheService.deleteInventoryItem(deleteConfirmItem.value.id)
     await loadInventory()
     emit('update')
     notificationService.showNotification('删除成功', 'success')
@@ -1145,27 +1080,15 @@ const confirmDelete = async () => {
   }
 }
 
-// 导出库存数据
+// 导出库存数据 - 使用业务服务
 const exportInventoryData = () => {
   try {
-    const data = filteredInventory.value.map(item => ({
-      商品名称: item.productName,
-      分类: item.category,
-      库存量: `${item.quantity} ${item.unit}`,
-      最低库存: item.minStock ? `${item.minStock} ${item.unit}` : '-',
-      成本价: item.costPrice ? `¥${item.costPrice.toFixed(2)}` : '-',
-      售价: item.sellingPrice ? `¥${item.sellingPrice.toFixed(2)}` : '-',
-      供应商: item.supplier || '-',
-      存放位置: item.location || '-',
-      保质期: item.expiryDate || '-',
-      状态: isExpired(item.expiryDate) ? '已过期' :
-          isExpiring(item.expiryDate) ? '即将过期' :
-              isLowStock(item) ? '低库存' : '正常',
-      备注: item.note || '-'
-    }))
+    const csvContent = inventoryService.exportInventoryToCSV(filteredInventory.value)
 
-    const headers = Object.keys(data[0] || {})
-    const csvContent = convertToCSV(data, headers)
+    if (!csvContent) {
+      notificationService.showNotification('没有可导出的数据', 'warning')
+      return
+    }
 
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
@@ -1176,78 +1099,12 @@ const exportInventoryData = () => {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
+
+    notificationService.showNotification('导出成功', 'success')
   } catch (error) {
     console.error('导出失败:', error)
     notificationService.showNotification('导出失败', 'error')
   }
-}
-
-// 转换为CSV
-const convertToCSV = (data, headers) => {
-  if (!data || data.length === 0) return ''
-
-  const headerRow = headers.join(',')
-  const rows = data.map(item => {
-    return headers.map(header => {
-      let value = item[header] || ''
-      if (typeof value === 'string' && value.includes(',')) {
-        value = `"${value}"`
-      }
-      return value
-    }).join(',')
-  }).join('\n')
-
-  return `${headerRow}\n${rows}`
-}
-
-// 辅助函数
-const isLowStock = (item) => {
-  const minStock = item.minStock || 10
-  return item.quantity <= minStock
-}
-
-const isExpiring = (expiryDate) => {
-  if (!expiryDate) return false
-  const expiry = new Date(expiryDate)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const future = new Date()
-  future.setDate(today.getDate() + 7)
-  future.setHours(23, 59, 59, 999)
-  return expiry >= today && expiry <= future
-}
-
-const isExpired = (expiryDate) => {
-  if (!expiryDate) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return new Date(expiryDate) < today
-}
-
-const formatNumber = (num) => {
-  if (num === undefined || num === null) return '0.00'
-  const value = typeof num === 'number' ? num : parseFloat(num) || 0
-  return value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const formatDateTime = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  const hours = date.getHours().toString().padStart(2, '0')
-  const minutes = date.getMinutes().toString().padStart(2, '0')
-  return `${year}-${month}-${day} ${hours}:${minutes}`
 }
 
 // 关闭模态框
@@ -1261,7 +1118,6 @@ const closeAddEditModal = () => {
   resetForm()
 }
 
-// 点击遮罩层关闭
 const closeOnOverlay = (event) => {
   if (event.target.classList.contains('modal')) {
     close()
@@ -1292,7 +1148,8 @@ const closeConfirmOnOverlay = (event) => {
   }
 }
 
-// 监听 visible 变化
+// ==================== 监听器 ====================
+
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     loadInventory()
@@ -1300,28 +1157,25 @@ watch(() => props.visible, (newVal) => {
   }
 })
 
-// 监听筛选条件变化
 watch([filters, searchKeyword], () => {
   applyFilters()
 })
 
-// 监听分页变化
 watch(currentPage, () => {
   const grid = document.querySelector('.inventory-grid')
   if (grid) grid.scrollTop = 0
 })
 
-// 初始化
+watch(() => props.categories, (newVal) => {
+  console.log('InventoryManagement 接收到分类:', newVal)
+}, { immediate: true, deep: true })
+
+// ==================== 初始化 ====================
 onMounted(() => {
   if (props.visible) {
     loadInventory()
   }
 })
-
-// 在 watch 中查看 categories 数据
-watch(() => props.categories, (newVal) => {
-  console.log('InventoryManagement 接收到分类:', newVal)
-}, { immediate: true, deep: true })
 </script>
 
 <style scoped>

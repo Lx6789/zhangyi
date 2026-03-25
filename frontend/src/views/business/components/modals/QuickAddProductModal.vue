@@ -24,7 +24,7 @@
                   v-model="form.name"
                   type="text"
                   class="form-input"
-                  placeholder="例如：大白菜、西红柿"
+                  :placeholder="formConfig.name.placeholder"
                   required
                   autofocus
               >
@@ -40,9 +40,10 @@
             </label>
             <div class="category-select-wrapper">
               <select v-model="form.category" class="form-select" required>
-                <option value="" disabled selected>选择分类</option>
-                <option v-for="category in categories" :key="category.id" :value="category.name">
+                <option value="" disabled selected>{{ formConfig.category.placeholder }}</option>
+                <option v-for="category in categoryOptions" :key="category.id" :value="category.name">
                   {{ category.name }}
+                  <span v-if="category.isDefault" class="default-badge">默认</span>
                 </option>
               </select>
               <button
@@ -68,16 +69,10 @@
               <span>单位 <span class="required">*</span></span>
             </label>
             <select v-model="form.unit" class="form-select" required>
-              <option value="" disabled selected>选择单位</option>
-              <option value="斤">斤</option>
-              <option value="公斤">公斤</option>
-              <option value="个">个</option>
-              <option value="份">份</option>
-              <option value="箱">箱</option>
-              <option value="袋">袋</option>
-              <option value="瓶">瓶</option>
-              <option value="包">包</option>
-              <option value="盒">盒</option>
+              <option value="" disabled selected>{{ formConfig.unit.placeholder }}</option>
+              <option v-for="unit in unitOptions" :key="unit.value" :value="unit.value">
+                {{ unit.label }}
+              </option>
             </select>
           </div>
 
@@ -85,7 +80,7 @@
           <div class="form-group">
             <label>
               <i class="fas fa-yen-sign"></i>
-              <span>参考售价 (元)</span>
+              <span>{{ formConfig.defaultPrice.label }}</span>
             </label>
             <div class="input-wrapper with-prefix">
               <span class="input-prefix">¥</span>
@@ -93,14 +88,14 @@
                   v-model="form.defaultPrice"
                   type="number"
                   class="form-input with-prefix-input"
-                  placeholder="例如：5.00"
+                  :placeholder="formConfig.defaultPrice.placeholder"
                   min="0"
                   step="0.01"
               >
               <div class="input-focus-effect"></div>
             </div>
-            <div class="field-hint">
-              <i class="fas fa-lightbulb"></i> 可选，可在商品管理中修改
+            <div class="field-hint" v-if="formConfig.defaultPrice.hint">
+              <i class="fas fa-lightbulb"></i> {{ formConfig.defaultPrice.hint }}
             </div>
           </div>
 
@@ -108,13 +103,13 @@
           <div class="form-group">
             <label>
               <i class="fas fa-align-left"></i>
-              <span>描述/备注</span>
+              <span>{{ formConfig.description.label }}</span>
             </label>
             <div class="textarea-wrapper">
               <textarea
                   v-model="form.description"
                   class="form-input form-textarea"
-                  placeholder="例如：产地、规格等"
+                  :placeholder="formConfig.description.placeholder"
                   rows="2"
               ></textarea>
               <div class="textarea-focus-effect"></div>
@@ -139,9 +134,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
-import {notificationService} from "@/services/index.js";
+import { ref, reactive, computed, watch } from 'vue'
+import productService from '@/services/api/business/product.service.js'
+import { notificationService } from "@/services/index.js"
 
 const props = defineProps({
   visible: {
@@ -156,10 +151,32 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'success', 'open-category'])
 
-// 状态
+// ==================== 状态 ====================
 const saving = ref(false)
 
-// 表单数据
+// ==================== 计算属性 ====================
+
+// 获取表单配置
+const formConfig = computed(() => {
+  return productService.getQuickProductFormConfig()
+})
+
+// 获取分类选项（使用 productService）
+const categoryOptions = computed(() => {
+  return productService.getProductCategoryOptions(props.categories)
+})
+
+// 获取单位选项（使用 productService）
+const unitOptions = computed(() => {
+  return productService.getUnitOptions()
+})
+
+// 获取快速添加按钮提示（使用 productService）
+const addButtonHint = computed(() => {
+  return productService.getQuickAddButtonHint(props.categories)
+})
+
+// ==================== 表单数据 ====================
 const form = reactive({
   name: '',
   category: '',
@@ -168,45 +185,51 @@ const form = reactive({
   description: ''
 })
 
+// ==================== 方法 ====================
+
 // 重置表单
 const resetForm = () => {
-  form.name = ''
-  form.category = ''
-  form.unit = ''
-  form.defaultPrice = ''
-  form.description = ''
+  const defaultForm = productService.getQuickProductFormDefault()
+  form.name = defaultForm.name
+  form.category = defaultForm.category
+  form.unit = defaultForm.unit
+  form.defaultPrice = defaultForm.defaultPrice
+  form.description = defaultForm.description
 }
 
 // 保存商品
 const saveProduct = async () => {
-  if (!form.name || !form.category || !form.unit) {
-    notificationService.showNotification('请填写商品名称、分类和单位！', 'error')
+  // 验证表单（使用 productService）
+  const validation = productService.validateQuickProductForm(form)
+  if (!validation.valid) {
+    notificationService.showNotification(validation.errors.join('，'), 'error')
+    return
+  }
+
+  // 检查商品名称是否重复
+  const existingProducts = await productService.getAllProducts()
+  if (productService.isProductNameDuplicate(existingProducts, form.name)) {
+    notificationService.showNotification(`商品 "${form.name.trim()}" 已存在，请勿重复添加`, 'error')
     return
   }
 
   saving.value = true
   try {
-    // 创建商品数据
-    const productData = {
-      name: form.name.trim(),
-      category: form.category,
-      unit: form.unit,
-      defaultPrice: form.defaultPrice ? parseFloat(form.defaultPrice) : null,
-      description: form.description ? form.description.trim() : '',
-      createTime: new Date().toISOString(),
-      updateTime: new Date().toISOString()
-    }
+    // 创建商品数据（使用 productService）
+    const productData = productService.createQuickProduct(form)
 
-    // 添加商品
-    await businessDataService.addProduct(productData)
+    // 添加商品 - 直接调用 productService 的 addProduct 方法
+    await productService.addProduct(productData)
 
     emit('success')
     close()
 
-    notificationService.showNotification(`商品 "${form.name}" 添加成功！`, 'success')
+    const successMsg = productService.getQuickProductSuccessMessage(form.name)
+    notificationService.showNotification(successMsg, 'success')
   } catch (error) {
     console.error('添加商品失败:', error)
-    notificationService.showNotification(error.message || '添加商品失败，请重试', 'error')
+    const errorMsg = productService.getQuickProductErrorMessage(error.message)
+    notificationService.showNotification(errorMsg, 'error')
   } finally {
     saving.value = false
   }
@@ -229,6 +252,8 @@ const closeOnOverlay = (event) => {
   }
 }
 
+// ==================== 监听器 ====================
+
 // 监听 visible 变化
 watch(() => props.visible, (newVal) => {
   if (newVal) {
@@ -240,6 +265,16 @@ watch(() => props.visible, (newVal) => {
     }, 100)
   }
 })
+
+// 监听分类变化，当有新的分类时自动选中
+watch(() => props.categories, (newCategories, oldCategories) => {
+  if (newCategories.length > 0 && !form.category && newCategories.length !== (oldCategories?.length || 0)) {
+    const newestCategory = newCategories[newCategories.length - 1]
+    if (newestCategory) {
+      form.category = newestCategory.name
+    }
+  }
+}, { deep: true })
 </script>
 
 <style scoped>
@@ -257,6 +292,16 @@ watch(() => props.visible, (newVal) => {
   opacity: 0;
   visibility: hidden;
   transition: all 0.3s;
+}
+
+/* 添加默认分类徽章样式 */
+.default-badge {
+  font-size: 10px;
+  background: rgba(128, 164, 146, 0.2);
+  padding: 2px 6px;
+  border-radius: 12px;
+  margin-left: 6px;
+  color: #80A492;
 }
 
 .modal.active {
@@ -316,6 +361,7 @@ watch(() => props.visible, (newVal) => {
   font-weight: 600;
   color: #80A492;
   flex: 1;
+  margin: 0;
 }
 
 .modal-close {

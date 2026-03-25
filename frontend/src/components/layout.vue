@@ -147,7 +147,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authHelperService } from '@/services/index.js'
-import businessDataService from '@/services/business-data.service.js'
+import businessDataService from '@/services/cache/business-cache.service.js'
 import notificationService from "@/services/utils/notification.service.js";
 import friendsCacheService from '@/services/cache/friends-cache.service.js'
 import indexedDBService from '@/services/db/indexed-db.service.js'

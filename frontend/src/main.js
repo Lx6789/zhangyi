@@ -3,7 +3,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import './assets/css/global.css'
-import businessDataService from './services/business-data.service'
+import businessDataService from './services/cache/business-cache.service.js'
 import authHelperService from './services/utils/auth-helper.service' // 导入
 import indexedDBService from '@/services/db/indexed-db.service.js'
 

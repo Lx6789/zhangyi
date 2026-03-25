@@ -158,15 +158,9 @@
             <label><i class="fas fa-balance-scale"></i> 单位 <span class="required">*</span></label>
             <select v-model="productForm.unit" class="form-select" required>
               <option value="">选择单位</option>
-              <option value="斤">斤</option>
-              <option value="公斤">公斤</option>
-              <option value="个">个</option>
-              <option value="份">份</option>
-              <option value="箱">箱</option>
-              <option value="袋">袋</option>
-              <option value="瓶">瓶</option>
-              <option value="包">包</option>
-              <option value="盒">盒</option>
+              <option v-for="unit in productUnits" :key="unit" :value="unit">
+                {{ unit }}
+              </option>
             </select>
           </div>
 
@@ -235,8 +229,9 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
-import {notificationService} from "@/services/index.js";
+import { notificationService } from "@/services/index.js"
+import productService from "@/services/api/business/product.service.js";
+import baseService from "@/services/api/business/base.service.js";
 
 const props = defineProps({
   visible: {
@@ -275,12 +270,20 @@ const deleteConfirmMessage = ref('')
 const deleteConfirmProduct = ref(null)
 
 // ==================== 计算属性 ====================
+
+// 分类名称列表（从props获取）
 const categoryNames = computed(() => {
   return props.categories.map(c => c.name).sort()
 })
 
+// 筛选分类列表（用于分类筛选器）
 const filterCategories = computed(() => {
   return props.categories.map(c => c.name).sort()
+})
+
+// 商品单位列表（使用业务服务）
+const productUnits = computed(() => {
+  return productService.getProductUnits()
 })
 
 // ==================== 方法 ====================
@@ -289,33 +292,22 @@ const filterCategories = computed(() => {
 const loadProducts = async () => {
   loading.value = true
   try {
-    products.value = await businessDataService.getAllProducts()
+    products.value = await productService.getAllProducts()
     filterProducts()
   } catch (error) {
     console.error('加载商品失败:', error)
+    notificationService.showNotification('加载商品失败', 'error')
   } finally {
     loading.value = false
   }
 }
 
-// 筛选商品
+// 筛选商品 - 使用业务服务
 const filterProducts = () => {
-  let filtered = [...products.value]
-
-  if (selectedFilterCategory.value !== '全部') {
-    filtered = filtered.filter(p => p.category === selectedFilterCategory.value)
-  }
-
-  if (searchKeyword.value.trim()) {
-    const keyword = searchKeyword.value.toLowerCase().trim()
-    filtered = filtered.filter(p =>
-        p.name.toLowerCase().includes(keyword) ||
-        p.category.toLowerCase().includes(keyword) ||
-        (p.description && p.description.toLowerCase().includes(keyword))
-    )
-  }
-
-  filteredProducts.value = filtered
+  filteredProducts.value = productService.filterProducts(products.value, {
+    keyword: searchKeyword.value,
+    category: selectedFilterCategory.value
+  })
 }
 
 // 搜索商品
@@ -331,11 +323,12 @@ const openCategoryManagement = () => {
 // 打开新增商品模态框
 const openAddProductModal = () => {
   editingProductId.value = ''
-  productForm.name = ''
-  productForm.category = ''
-  productForm.unit = ''
-  productForm.defaultPrice = null
-  productForm.description = ''
+  const defaultForm = productService.getProductFormDefault()
+  productForm.name = defaultForm.name
+  productForm.category = defaultForm.category
+  productForm.unit = defaultForm.unit
+  productForm.defaultPrice = defaultForm.defaultPrice
+  productForm.description = defaultForm.description
   addEditModalVisible.value = true
 }
 
@@ -350,28 +343,30 @@ const editProduct = (product) => {
   addEditModalVisible.value = true
 }
 
-// 保存商品
+// 保存商品 - 使用业务服务进行验证
 const saveProduct = async () => {
-  if (!productForm.name || !productForm.category || !productForm.unit) {
-    notificationService.showNotification('请填写商品名称、分类和单位！', 'error')
+  // 验证表单
+  const validation = productService.validateProductForm(productForm)
+  if (!validation.valid) {
+    notificationService.showNotification(validation.errors.join('，'), 'error')
     return
   }
 
   try {
     const productData = {
-      name: productForm.name,
+      name: productForm.name.trim(),
       category: productForm.category,
       unit: productForm.unit,
       defaultPrice: productForm.defaultPrice ? parseFloat(productForm.defaultPrice) : null,
-      description: productForm.description,
+      description: productForm.description || '',
       updateTime: new Date().toISOString()
     }
 
     if (editingProductId.value) {
-      await businessDataService.updateProduct(editingProductId.value, productData)
+      await productService.updateProduct(editingProductId.value, productData)
       notificationService.showNotification('商品更新成功！', 'success')
     } else {
-      await businessDataService.addProduct(productData)
+      await productService.addProduct(productData)
       notificationService.showNotification('商品添加成功！', 'success')
     }
 
@@ -380,7 +375,7 @@ const saveProduct = async () => {
     closeAddEditModal()
   } catch (error) {
     console.error('保存商品失败:', error)
-    notificationService.showNotification('保存商品失败', 'error')
+    notificationService.showNotification(error.message || '保存商品失败', 'error')
   }
 }
 
@@ -391,18 +386,18 @@ const confirmDeleteProduct = (product) => {
   deleteConfirmVisible.value = true
 }
 
-// 执行删除
+// 执行删除 - 使用业务服务
 const confirmDelete = async () => {
   if (!deleteConfirmProduct.value) return
 
   try {
-    await businessDataService.deleteProduct(deleteConfirmProduct.value.id)
+    await productService.deleteProduct(deleteConfirmProduct.value.id)
     await loadProducts()
     emit('update')
     notificationService.showNotification('商品删除成功！', 'success')
   } catch (error) {
     console.error('删除商品失败:', error)
-    notificationService.showNotification('删除商品失败', 'error')
+    notificationService.showNotification(error.message || '删除商品失败', 'error')
   } finally {
     deleteConfirmVisible.value = false
     deleteConfirmProduct.value = null
@@ -439,14 +434,13 @@ const closeConfirmOnOverlay = (event) => {
   }
 }
 
-// 格式化数字
+// 格式化数字 - 使用业务服务
 const formatNumber = (num) => {
-  if (num === undefined || num === null) return '0.00'
-  const value = typeof num === 'number' ? num : parseFloat(num) || 0
-  return value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return baseService.formatNumber(num)
 }
 
-// 监听 visible 变化
+// ==================== 监听器 ====================
+
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     loadProducts()
@@ -458,7 +452,12 @@ watch([selectedFilterCategory, searchKeyword], () => {
   filterProducts()
 })
 
-// 初始化
+// 监听分类变化，当分类更新时刷新筛选列表
+watch(() => props.categories, () => {
+  filterProducts()
+}, { deep: true })
+
+// ==================== 初始化 ====================
 onMounted(() => {
   if (props.visible) {
     loadProducts()

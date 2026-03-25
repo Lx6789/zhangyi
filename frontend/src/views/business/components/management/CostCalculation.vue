@@ -64,11 +64,11 @@
               </div>
               <div class="stat-info">
                 <span class="stat-label">总毛利</span>
-                <span class="stat-value">¥{{ formatNumber(totalProfit) }}</span>
+                <span class="stat-value">¥{{ formatNumber(overallStats.totalProfit) }}</span>
               </div>
-              <div class="stat-trend" :class="{ positive: profitMargin > 0 }">
-                <i class="fas" :class="profitMargin > 0 ? 'fa-arrow-up' : 'fa-arrow-down'"></i>
-                <span>{{ formatPercent(profitMargin) }}</span>
+              <div class="stat-trend" :class="{ positive: overallStats.profitMargin > 0 }">
+                <i class="fas" :class="overallStats.profitMargin > 0 ? 'fa-arrow-up' : 'fa-arrow-down'"></i>
+                <span>{{ formatPercent(overallStats.profitMargin) }}</span>
               </div>
             </div>
 
@@ -78,7 +78,7 @@
               </div>
               <div class="stat-info">
                 <span class="stat-label">总收入</span>
-                <span class="stat-value">¥{{ formatNumber(totalRevenue) }}</span>
+                <span class="stat-value">¥{{ formatNumber(overallStats.totalRevenue) }}</span>
               </div>
             </div>
 
@@ -88,7 +88,7 @@
               </div>
               <div class="stat-info">
                 <span class="stat-label">总成本</span>
-                <span class="stat-value">¥{{ formatNumber(totalCost) }}</span>
+                <span class="stat-value">¥{{ formatNumber(overallStats.totalCost) }}</span>
               </div>
             </div>
 
@@ -98,7 +98,7 @@
               </div>
               <div class="stat-info">
                 <span class="stat-label">销售数量</span>
-                <span class="stat-value">{{ totalSoldQuantity }}</span>
+                <span class="stat-value">{{ overallStats.totalSoldQuantity }}</span>
               </div>
             </div>
           </div>
@@ -121,13 +121,13 @@
                 <p>加载中...</p>
               </div>
 
-              <div v-else-if="categoryStats.length === 0" class="empty-state">
+              <div v-else-if="categoryCostStats.length === 0" class="empty-state">
                 <i class="fas fa-chart-pie"></i>
                 <p>暂无数据</p>
               </div>
 
               <div v-else class="category-list">
-                <div v-for="(item, index) in categoryStats" :key="item.category" class="category-item">
+                <div v-for="(item, index) in categoryCostStats" :key="item.category" class="category-item">
                   <div class="category-info">
                     <span class="category-name">
                       <span class="color-dot" :style="{ backgroundColor: getCategoryColor(index) }"></span>
@@ -139,12 +139,12 @@
                     <div
                         class="progress-fill"
                         :style="{
-                          width: `${(item.cost / totalCost) * 100}%`,
+                          width: `${(item.cost / overallStats.totalCost) * 100}%`,
                           backgroundColor: getCategoryColor(index)
                         }"
                     ></div>
                   </div>
-                  <div class="category-percent">{{ formatPercent(item.cost / totalCost) }}</div>
+                  <div class="category-percent">{{ formatPercent(item.cost / overallStats.totalCost) }}</div>
                 </div>
               </div>
             </div>
@@ -173,7 +173,7 @@
                 </thead>
                 <tbody>
                 <tr v-for="record in recentTransactions" :key="record.id">
-                  <td>{{ formatDate(record.date) }}</td>
+                  <td>{{ formatDisplayDate(record.date) }}</td>
                   <td>{{ record.productName || '-' }}</td>
                   <td>
                       <span class="badge" :class="record.type === '收入' ? 'badge-income' : 'badge-expense'">
@@ -437,24 +437,24 @@
               <div class="progress-section">
                 <div class="progress-label">
                   <span>当前销售额</span>
-                  <span>¥{{ formatNumber(totalRevenue) }}</span>
+                  <span>¥{{ formatNumber(overallStats.totalRevenue) }}</span>
                 </div>
                 <div class="progress-track">
                   <div
                       class="progress-fill"
                       :style="{
-                        width: `${Math.min((totalRevenue / breakEvenRevenue) * 100, 100)}%`,
-                        backgroundColor: totalRevenue >= breakEvenRevenue ? '#2ecc71' : '#80A492'
+                        width: `${Math.min((overallStats.totalRevenue / breakEvenRevenue) * 100, 100)}%`,
+                        backgroundColor: overallStats.totalRevenue >= breakEvenRevenue ? '#2ecc71' : '#80A492'
                       }"
                   ></div>
                 </div>
-                <div class="progress-status" :class="{ success: totalRevenue >= breakEvenRevenue }">
-                  <i class="fas" :class="totalRevenue >= breakEvenRevenue ? 'fa-check-circle' : 'fa-info-circle'"></i>
-                  <span v-if="totalRevenue >= breakEvenRevenue">
-                    已达成盈亏平衡，超出 ¥{{ formatNumber(totalRevenue - breakEvenRevenue) }}
+                <div class="progress-status" :class="{ success: overallStats.totalRevenue >= breakEvenRevenue }">
+                  <i class="fas" :class="overallStats.totalRevenue >= breakEvenRevenue ? 'fa-check-circle' : 'fa-info-circle'"></i>
+                  <span v-if="overallStats.totalRevenue >= breakEvenRevenue">
+                    已达成盈亏平衡，超出 ¥{{ formatNumber(overallStats.totalRevenue - breakEvenRevenue) }}
                   </span>
                   <span v-else>
-                    距离盈亏平衡还差 ¥{{ formatNumber(breakEvenRevenue - totalRevenue) }}
+                    距离盈亏平衡还差 ¥{{ formatNumber(breakEvenRevenue - overallStats.totalRevenue) }}
                   </span>
                 </div>
               </div>
@@ -468,9 +468,9 @@
               <span>经营建议</span>
             </div>
             <ul class="advice-list">
-              <li v-for="(advice, index) in getAdvice()" :key="index">
-                <i class="fas fa-check-circle"></i>
-                {{ advice }}
+              <li v-for="(advice, index) in businessAdvice" :key="index">
+                <i class="fas fa-check-circle" :class="getAdviceIconClass(advice.type)"></i>
+                {{ advice.message }}
               </li>
             </ul>
           </div>
@@ -559,11 +559,11 @@
               </thead>
               <tbody>
               <tr v-for="record in productTransactions" :key="record.id">
-                <td>{{ formatDate(record.date) }}</td>
+                <td>{{ formatDisplayDate(record.date) }}</td>
                 <td>
-                    <span class="badge" :class="record.type === '收入' ? 'badge-income' : 'badge-expense'">
-                      {{ record.type }}
-                    </span>
+                  <span class="badge" :class="record.type === '收入' ? 'badge-income' : 'badge-expense'">
+                    {{ record.type }}
+                  </span>
                 </td>
                 <td>{{ record.quantity }} {{ record.unit }}</td>
                 <td>¥{{ formatNumber(record.price) }}</td>
@@ -581,9 +581,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
-import dateHelper from '@/services/utils/date-helper.service.js'
+import { ref, computed, onMounted, watch } from 'vue'
+import costService from "@/services/api/business/cost.service.js";
+import baseService from "@/services/api/business/base.service.js";
 
 const props = defineProps({
   visible: {
@@ -614,11 +614,20 @@ const categoryFilter = ref('all')
 const selectedTimeRange = ref('month')
 const fixedCost = ref(5000)
 
-// 数据
+// 数据存储
 const products = ref([])
 const incomeRecords = ref([])
 const expenseRecords = ref([])
 const productStats = ref([])
+const categoryCostStats = ref([])
+const overallStats = ref({
+  totalRevenue: 0,
+  totalCost: 0,
+  totalProfit: 0,
+  profitMargin: 0,
+  totalSoldQuantity: 0
+})
+const profitTrend = ref([])
 
 // 时间范围选项
 const timeRanges = [
@@ -637,60 +646,7 @@ const categoryNames = computed(() => {
 
 // 日期范围文本
 const dateRangeText = computed(() => {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
-  return `${year}年${month}月`
-})
-
-// 总收入
-const totalRevenue = computed(() => {
-  return incomeRecords.value.reduce((sum, r) => sum + (r.amount || 0), 0)
-})
-
-// 总成本
-const totalCost = computed(() => {
-  return expenseRecords.value.reduce((sum, r) => sum + (r.amount || 0), 0)
-})
-
-// 总毛利
-const totalProfit = computed(() => totalRevenue.value - totalCost.value)
-
-// 毛利率
-const profitMargin = computed(() => {
-  if (totalRevenue.value === 0) return 0
-  return totalProfit.value / totalRevenue.value
-})
-
-// 总销售数量
-const totalSoldQuantity = computed(() => {
-  return incomeRecords.value.reduce((sum, r) => sum + (r.quantity || 0), 0)
-})
-
-// 分类统计
-const categoryStats = computed(() => {
-  const stats = {}
-  expenseRecords.value.forEach(record => {
-    const category = record.category || '未分类'
-    if (!stats[category]) {
-      stats[category] = 0
-    }
-    stats[category] += record.amount || 0
-  })
-
-  return Object.entries(stats).map(([category, cost]) => ({
-    category,
-    cost
-  })).sort((a, b) => b.cost - a.cost)
-})
-
-// 最近交易
-const recentTransactions = computed(() => {
-  const all = [
-    ...incomeRecords.value.map(r => ({ ...r, type: '收入' })),
-    ...expenseRecords.value.map(r => ({ ...r, type: '支出' }))
-  ]
-  return all.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10)
+  return costService.getDateRangeText(selectedTimeRange.value)
 })
 
 // 筛选后的商品
@@ -709,58 +665,7 @@ const filteredProducts = computed(() => {
   return filtered
 })
 
-// 毛利趋势
-const profitTrend = computed(() => {
-  const now = new Date()
-  const data = []
-
-  if (selectedTimeRange.value === 'week') {
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(now)
-      date.setDate(date.getDate() - i)
-      const dateStr = dateHelper.formatDate(date)
-      const dayIncome = incomeRecords.value
-          .filter(r => r.date === dateStr)
-          .reduce((sum, r) => sum + (r.amount || 0), 0)
-      const dayExpense = expenseRecords.value
-          .filter(r => r.date === dateStr)
-          .reduce((sum, r) => sum + (r.amount || 0), 0)
-
-      data.push({
-        period: `${date.getMonth() + 1}/${date.getDate()}`,
-        profit: dayIncome - dayExpense
-      })
-    }
-  } else if (selectedTimeRange.value === 'month') {
-    const weeks = [0, 0, 0, 0]
-    incomeRecords.value.forEach(r => {
-      const daysAgo = Math.floor((now - new Date(r.date)) / (1000 * 60 * 60 * 24))
-      if (daysAgo < 7) weeks[0] += r.amount || 0
-      else if (daysAgo < 14) weeks[1] += r.amount || 0
-      else if (daysAgo < 21) weeks[2] += r.amount || 0
-      else if (daysAgo < 30) weeks[3] += r.amount || 0
-    })
-
-    expenseRecords.value.forEach(r => {
-      const daysAgo = Math.floor((now - new Date(r.date)) / (1000 * 60 * 60 * 24))
-      if (daysAgo < 7) weeks[0] -= r.amount || 0
-      else if (daysAgo < 14) weeks[1] -= r.amount || 0
-      else if (daysAgo < 21) weeks[2] -= r.amount || 0
-      else if (daysAgo < 30) weeks[3] -= r.amount || 0
-    })
-
-    data.push(
-        { period: '第1周', profit: weeks[0] },
-        { period: '第2周', profit: weeks[1] },
-        { period: '第3周', profit: weeks[2] },
-        { period: '第4周', profit: weeks[3] }
-    )
-  }
-
-  return data
-})
-
-// 最大利润值
+// 最大利润值（用于图表缩放）
 const maxProfit = computed(() => {
   const profits = profitTrend.value.map(p => Math.abs(p.profit))
   return Math.max(...profits, 1)
@@ -768,15 +673,12 @@ const maxProfit = computed(() => {
 
 // 高毛利商品Top 5
 const topProfitProducts = computed(() => {
-  return [...productStats.value]
-      .filter(p => p.profit > 0)
-      .sort((a, b) => b.profit - a.profit)
-      .slice(0, 5)
+  return costService.getTopProfitProducts(productStats.value, 5)
 })
 
 // 亏损商品
 const lossProducts = computed(() => {
-  return productStats.value.filter(p => p.profit < 0)
+  return costService.getLossProducts(productStats.value)
 })
 
 // 平均毛利率
@@ -788,24 +690,39 @@ const averageMargin = computed(() => {
 
 // 盈亏平衡销售额
 const breakEvenRevenue = computed(() => {
-  if (averageMargin.value === 0) return Infinity
-  return fixedCost.value / averageMargin.value
+  const breakEven = costService.calculateBreakEven(fixedCost.value, productStats.value)
+  return breakEven.breakEvenRevenue
+})
+
+// 最近交易
+const recentTransactions = computed(() => {
+  return costService.getRecentTransactions(
+      incomeRecords.value,
+      expenseRecords.value,
+      10,
+      products.value
+  )
+})
+
+// 经营建议
+const businessAdvice = computed(() => {
+  const breakEvenData = costService.calculateBreakEven(fixedCost.value, productStats.value)
+  return costService.generateBusinessAdvice({
+    productStats: productStats.value,
+    overallStats: overallStats.value,
+    breakEvenData,
+    lossProducts: lossProducts.value
+  })
 })
 
 // 商品交易记录
 const productTransactions = computed(() => {
   if (!selectedProduct.value) return []
-
-  const all = [
-    ...incomeRecords.value
-        .filter(r => r.productId === selectedProduct.value.id)
-        .map(r => ({ ...r, type: '收入' })),
-    ...expenseRecords.value
-        .filter(r => r.productId === selectedProduct.value.id)
-        .map(r => ({ ...r, type: '支出' }))
-  ]
-
-  return all.sort((a, b) => new Date(b.date) - new Date(a.date))
+  return costService.getProductTransactions(
+      selectedProduct.value.id,
+      incomeRecords.value,
+      expenseRecords.value
+  )
 })
 
 // ==================== 方法 ====================
@@ -814,14 +731,18 @@ const productTransactions = computed(() => {
 const loadData = async () => {
   loading.value = true
   try {
-    products.value = props.products.length > 0
-        ? props.products
-        : await businessDataService.getAllProducts()
+    // 使用业务服务获取成本分析数据
+    const analysisData = await costService.getCostAnalysisData()
 
-    incomeRecords.value = await businessDataService.getIncomeRecords()
-    expenseRecords.value = await businessDataService.getExpenseRecords()
+    products.value = analysisData.products
+    incomeRecords.value = analysisData.incomeRecords
+    expenseRecords.value = analysisData.expenseRecords
+    productStats.value = analysisData.productStats
+    categoryCostStats.value = analysisData.categoryCostStats
+    overallStats.value = analysisData.overallStats
 
-    calculateProductStats()
+    // 根据选中的时间范围重新计算趋势
+    updateProfitTrend()
   } catch (error) {
     console.error('加载数据失败:', error)
   } finally {
@@ -829,57 +750,30 @@ const loadData = async () => {
   }
 }
 
-// 计算商品统计
-const calculateProductStats = () => {
-  const stats = {}
-
-  products.value.forEach(p => {
-    stats[p.id] = {
-      id: p.id,
-      name: p.name,
-      category: p.category,
-      unit: p.unit || '个',
-      soldQuantity: 0,
-      revenue: 0,
-      cost: 0
-    }
-  })
-
-  incomeRecords.value.forEach(record => {
-    if (record.productId && stats[record.productId]) {
-      stats[record.productId].soldQuantity += record.quantity || 0
-      stats[record.productId].revenue += record.amount || 0
-    }
-  })
-
-  expenseRecords.value.forEach(record => {
-    if (record.productId && stats[record.productId]) {
-      stats[record.productId].cost += record.amount || 0
-    }
-  })
-
-  productStats.value = Object.values(stats).map(p => {
-    const profit = p.revenue - p.cost
-    const margin = p.revenue > 0 ? profit / p.revenue : 0
-    const avgPrice = p.soldQuantity > 0 ? p.revenue / p.soldQuantity : 0
-    const avgCost = p.soldQuantity > 0 ? p.cost / p.soldQuantity : 0
-    const unitProfit = avgPrice - avgCost
-
-    return {
-      ...p,
-      profit,
-      margin,
-      avgPrice,
-      avgCost,
-      unitProfit
-    }
-  })
+// 更新毛利趋势
+const updateProfitTrend = () => {
+  profitTrend.value = costService.calculateProfitTrend(
+      incomeRecords.value,
+      expenseRecords.value,
+      selectedTimeRange.value
+  )
 }
 
 // 获取分类颜色
 const getCategoryColor = (index) => {
   const colors = ['#80A492', '#99BCAC', '#B1D5C8', '#D5EBE1', '#2ecc71', '#3498db']
   return colors[index % colors.length]
+}
+
+// 获取建议图标样式
+const getAdviceIconClass = (type) => {
+  const iconMap = {
+    success: 'fa-check-circle',
+    warning: 'fa-exclamation-triangle',
+    danger: 'fa-times-circle',
+    info: 'fa-info-circle'
+  }
+  return iconMap[type] || 'fa-check-circle'
 }
 
 // 显示商品详情
@@ -895,33 +789,6 @@ const closeDetailOnOverlay = (event) => {
   }
 }
 
-// 获取建议
-const getAdvice = () => {
-  const advice = []
-
-  if (lossProducts.value.length > 0) {
-    advice.push(`有 ${lossProducts.value.length} 种商品亏损，建议调整定价或采购策略`)
-  }
-
-  if (profitMargin.value < 0.2) {
-    advice.push('当前毛利率较低，考虑优化成本结构或提高售价')
-  } else if (profitMargin.value > 0.5) {
-    advice.push('毛利率良好，可考虑扩大销售规模')
-  }
-
-  if (totalRevenue.value < breakEvenRevenue.value) {
-    advice.push(`距离盈亏平衡还差 ¥${formatNumber(breakEvenRevenue.value - totalRevenue.value)}，需提升销售额`)
-  } else {
-    advice.push('已达成盈亏平衡，继续保持！')
-  }
-
-  if (topProfitProducts.value.length > 0) {
-    advice.push(`高毛利商品 "${topProfitProducts.value[0].name}" 表现优异，可重点推广`)
-  }
-
-  return advice
-}
-
 // 关闭模态框
 const close = () => {
   emit('update:visible', false)
@@ -933,27 +800,18 @@ const closeOnOverlay = (event) => {
   }
 }
 
-// ==================== 辅助函数 ====================
+// ==================== 辅助函数（委托给业务服务） ====================
 
 const formatNumber = (num) => {
-  if (num === undefined || num === null) return '0.00'
-  const value = typeof num === 'number' ? num : parseFloat(num) || 0
-  return value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return baseService.formatNumber(num)
 }
 
 const formatPercent = (num) => {
-  if (num === undefined || num === null) return '0%'
-  const value = typeof num === 'number' ? num : parseFloat(num) || 0
-  return (value * 100).toFixed(1) + '%'
+  return baseService.formatPercent(num)
 }
 
-const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  return `${year}.${month}.${day}`
+const formatDisplayDate = (dateStr) => {
+  return baseService.formatDisplayDate(dateStr)
 }
 
 // ==================== 监听器 ====================
@@ -965,7 +823,7 @@ watch(() => props.visible, (newVal) => {
 })
 
 watch(selectedTimeRange, () => {
-  // 触发趋势图更新
+  updateProfitTrend()
 })
 
 // ==================== 初始化 ====================

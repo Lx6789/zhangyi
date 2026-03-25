@@ -379,10 +379,14 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import dateHelper from '@/services/utils/date-helper.service.js'
-import businessDataService from '@/services/business-data.service.js'
+import businessDataService from '@/services/cache/business-cache.service.js'
 import userDataService from '@/services/user-data.service.js'
 import QuickAddProductModal from './QuickAddProductModal.vue'
-import {notificationService} from "@/services/index.js";
+import { notificationService } from "@/services/index.js"
+import IncomeService from "@/services/api/business/income.service.js";
+import baseService from "@/services/api/business/base.service.js";
+import inventoryService from "@/services/api/business/inventory.service.js";
+import incomeService from "@/services/api/business/income.service.js";
 
 const props = defineProps({
   visible: {
@@ -405,13 +409,18 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'success', 'open-customer', 'open-category', 'refresh-products'])
 
+// ==================== 常量 ====================
+const paymentMethods = IncomeService.getPaymentMethods()
+const productUnits = IncomeService.getProductUnits()
+const salesChannels = IncomeService.getSalesChannels()
+
 // ==================== 状态 ====================
 const showQuickAddCustomer = ref(false)
 const quickAddModalVisible = ref(false)
 const previousProductsLength = ref(0)
-const autoUpdateInventory = ref(true) // 默认自动扣减库存
-const purchaseSuggestionVisible = ref(false) // 采购建议模态框
-const inventoryData = ref([]) // 库存数据
+const autoUpdateInventory = ref(true)
+const purchaseSuggestionVisible = ref(false)
+const inventoryData = ref([])
 
 const quickCustomer = reactive({
   name: '',
@@ -432,19 +441,14 @@ const form = reactive({
   date: dateHelper.getTodayString(),
   note: '',
   expectedRepayDate: dateHelper.addDays(dateHelper.getTodayString(), 30),
-  creditNote: ''
+  creditNote: '',
+  autoUpdateInventory: true
 })
 
 const selectedProduct = ref(null)
-const paymentMethods = [
-  { value: '现金', label: '现金' },
-  { value: '微信', label: '微信' },
-  { value: '支付宝', label: '支付宝' },
-  { value: '银行卡', label: '银行卡' },
-  { value: '赊账', label: '赊账' }
-]
 
 // ==================== 计算属性 ====================
+
 const categoryNames = computed(() => {
   return props.categories.map(c => c.name).sort()
 })
@@ -460,53 +464,16 @@ const selectedCustomer = computed(() => {
   return props.customers.find(c => c.id === form.customerId)
 })
 
-// 根据客户是否允许赊账过滤支付方式
-const filteredPaymentMethods = computed(() => {
-  const methods = [...paymentMethods]
-
-  // 如果选中了客户且客户不允许赊账，禁用赊账选项
-  if (selectedCustomer.value && !selectedCustomer.value.creditInfo?.hasCredit) {
-    const creditMethod = methods.find(m => m.value === '赊账')
-    if (creditMethod) {
-      creditMethod.disabled = true
-    }
-  } else {
-    // 确保赊账选项可用
-    const creditMethod = methods.find(m => m.value === '赊账')
-    if (creditMethod) {
-      creditMethod.disabled = false
-    }
-  }
-
-  return methods
-})
-
 // 获取当前选中商品的库存信息
 const currentInventory = computed(() => {
   if (!selectedProduct.value) return null
+  return inventoryData.value.find(item => item.productId === selectedProduct.value.id)
+})
 
-  // 查找该商品的库存记录
-  const inventory = inventoryData.value.find(item =>
-      item.productId === selectedProduct.value.id
-  )
-
-  // 如果没有库存记录，创建一个模拟对象
-  if (!inventory) {
-    return {
-      productId: selectedProduct.value.id,
-      productName: selectedProduct.value.name,
-      quantity: 0,
-      unit: selectedProduct.value.unit || '斤',
-      minStock: 10,
-      costPrice: selectedProduct.value.defaultPrice || 0,
-      sellingPrice: selectedProduct.value.defaultPrice || 0,
-      supplier: null,
-      location: null,
-      expiryDate: null
-    }
-  }
-
-  return inventory
+// 获取库存状态
+const inventoryStatus = computed(() => {
+  if (!currentInventory.value) return 'no-stock'
+  return inventoryService.getInventoryStatusClass(currentInventory.value)
 })
 
 // 是否库存紧张
@@ -516,16 +483,20 @@ const isLowStock = computed(() => {
   return currentInventory.value.quantity <= minStock
 })
 
-// 是否即将过期（7天内）
+// 获取保质期状态
+const expiryStatus = computed(() => {
+  if (!currentInventory.value?.expiryDate) return null
+  return inventoryService.getExpiryStatus(currentInventory.value.expiryDate)
+})
+
+// 是否即将过期
 const isExpiringSoon = computed(() => {
-  if (!currentInventory.value?.expiryDate) return false
-  return isExpiring(currentInventory.value.expiryDate)
+  return expiryStatus.value?.status === 'expiring'
 })
 
 // 是否已过期
 const isExpired = computed(() => {
-  if (!currentInventory.value?.expiryDate) return false
-  return isExpiredDate(currentInventory.value.expiryDate)
+  return expiryStatus.value?.status === 'expired'
 })
 
 // 获取过期状态类名
@@ -537,9 +508,7 @@ const getExpiryStatusClass = computed(() => {
 
 // 获取过期图标
 const getExpiryIcon = computed(() => {
-  if (isExpired.value) return 'fa-times-circle'
-  if (isExpiringSoon.value) return 'fa-exclamation-circle'
-  return 'fa-check-circle'
+  return expiryStatus.value?.icon || 'fa-check-circle'
 })
 
 // 计算库存缺口
@@ -551,11 +520,29 @@ const calculateStockGap = computed(() => {
 
 // 提交按钮是否禁用
 const isSubmitDisabled = computed(() => {
-  // 批发模式下，如果销售数量超过库存，禁用提交按钮
   if (form.channel === '批发' && currentInventory.value && form.quantity) {
-    return parseFloat(form.quantity) > currentInventory.value.quantity
+    return !incomeService.isValidSaleQuantity(form.quantity, currentInventory.value)
   }
   return false
+})
+
+// 根据客户是否允许赊账过滤支付方式
+const filteredPaymentMethods = computed(() => {
+  const methods = [...paymentMethods]
+  const canCredit = incomeService.canCustomerUseCredit(selectedCustomer.value)
+
+  methods.forEach(method => {
+    if (method.value === '赊账') {
+      method.disabled = !canCredit
+    }
+  })
+
+  return methods
+})
+
+// 客户信用信息
+const customerCreditInfo = computed(() => {
+  return incomeService.getCustomerCreditInfo(selectedCustomer.value)
 })
 
 // ==================== 方法 ====================
@@ -572,10 +559,7 @@ const loadInventoryData = async () => {
 // 渠道变更处理
 const onChannelChange = () => {
   if (form.channel === '批发') {
-    // 批发模式下，自动加载库存数据
     loadInventoryData()
-
-    // 如果已经选择了商品，检查库存
     if (selectedProduct.value) {
       validateQuantity()
     }
@@ -596,13 +580,13 @@ const selectPaymentMethod = (method) => {
 
   form.paymentMethod = method.value
 
-  // 如果不是赊账，清空赊账相关字段
   if (method.value !== '赊账') {
     form.expectedRepayDate = dateHelper.addDays(dateHelper.getTodayString(), 30)
     form.creditNote = ''
   }
 }
 
+// 商品选择
 const onProductSelected = () => {
   if (!form.productId) {
     selectedProduct.value = null
@@ -614,10 +598,10 @@ const onProductSelected = () => {
   const product = props.products.find(p => p.id === form.productId)
   if (product) {
     selectedProduct.value = product
-    form.price = product.defaultPrice || ''
+    const suggestedPrice = incomeService.getSuggestedPrice(product, currentInventory.value)
+    form.price = suggestedPrice || ''
     form.unit = product.unit || '斤'
 
-    // 如果当前是批发模式，加载库存信息
     if (form.channel === '批发') {
       loadInventoryData()
     }
@@ -627,9 +611,9 @@ const onProductSelected = () => {
 // 验证数量
 const validateQuantity = () => {
   if (form.channel === '批发' && currentInventory.value && form.quantity) {
-    const quantity = parseFloat(form.quantity)
-    if (quantity > currentInventory.value.quantity) {
-      console.warn(`销售数量超过库存！库存: ${currentInventory.value.quantity}, 销售: ${quantity}`)
+    const result = IncomeService.validateWholesaleStock(currentInventory.value, form.quantity)
+    if (!result.valid && result.warning) {
+      console.warn(result.message)
     }
   }
 }
@@ -637,9 +621,11 @@ const validateQuantity = () => {
 // 检查和调整库存
 const checkAndAdjustStock = () => {
   if (currentInventory.value && form.quantity) {
-    const quantity = parseFloat(form.quantity)
-    if (quantity <= currentInventory.value.quantity) {
-      notificationService.showNotification(`库存充足，可销售。当前库存: ${currentInventory.value.quantity} ${currentInventory.value.unit}`, 'info')
+    if (inventoryService.isStockSufficient(currentInventory.value, form.quantity)) {
+      notificationService.showNotification(
+          `库存充足，可销售。当前库存: ${currentInventory.value.quantity} ${currentInventory.value.unit}`,
+          'info'
+      )
     }
   }
 }
@@ -652,13 +638,14 @@ const suggestPurchase = () => {
 // 打开采购模态框
 const openPurchaseModal = () => {
   purchaseSuggestionVisible.value = false
-  // 触发父组件的采购管理模态框
-  // 这里可以通过事件总线或直接调用父组件方法
-  // 暂时先关闭模态框并提示
   notificationService.showNotification('即将跳转到采购管理页面...', 'info')
-  // 实际项目中可以 emit 一个事件让父组件打开采购管理
-  // emit('open-purchase')
 }
+
+// 获取采购建议
+const purchaseSuggestion = computed(() => {
+  if (!currentInventory.value || !form.quantity) return null
+  return incomeService.getPurchaseSuggestion(currentInventory.value, form.quantity)
+})
 
 // 格式化数量
 const formatQuantity = (quantity) => {
@@ -666,44 +653,29 @@ const formatQuantity = (quantity) => {
   return quantity.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
-// 判断是否即将过期
-const isExpiring = (expiryDate) => {
-  if (!expiryDate) return false
-  const expiry = new Date(expiryDate)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const future = new Date()
-  future.setDate(today.getDate() + 7)
-  future.setHours(23, 59, 59, 999)
-  return expiry >= today && expiry <= future
-}
-
-// 判断是否已过期
-const isExpiredDate = (expiryDate) => {
-  if (!expiryDate) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return new Date(expiryDate) < today
-}
-
+// 打开分类管理
 const openCategoryManagement = () => {
   emit('open-category')
 }
 
+// 打开客户管理
 const openCustomerManagement = () => {
   emit('open-customer')
 }
 
+// 打开快速新增商品
 const openQuickAddProduct = () => {
   previousProductsLength.value = props.products.length
   quickAddModalVisible.value = true
 }
 
+// 快速新增商品成功
 const handleQuickAddProductSuccess = () => {
   quickAddModalVisible.value = false
   emit('refresh-products')
 }
 
+// 取消快速添加客户
 const cancelQuickAddCustomer = () => {
   showQuickAddCustomer.value = false
   quickCustomer.name = ''
@@ -711,26 +683,14 @@ const cancelQuickAddCustomer = () => {
   quickCustomer.phone = ''
 }
 
+// 保存快速添加客户
 const saveQuickCustomer = () => {
   if (!quickCustomer.name) {
     notificationService.showNotification('请输入客户名称', 'error')
     return
   }
 
-  const newCustomer = {
-    id: Date.now().toString(),
-    name: quickCustomer.name,
-    type: quickCustomer.type,
-    phone: quickCustomer.phone || null,
-    creditInfo: { hasCredit: false },
-    stats: {
-      transactionCount: 0,
-      totalAmount: 0,
-      lastTransactionDate: null
-    },
-    createTime: new Date().toISOString()
-  }
-
+  const newCustomer = incomeService.createNewCustomer(quickCustomer)
   const customers = [...props.customers, newCustomer]
   userDataService.saveCustomers(customers)
   form.customerId = newCustomer.id
@@ -743,121 +703,80 @@ const saveQuickCustomer = () => {
   notificationService.showNotification('客户添加成功', 'success')
 }
 
+// 提交表单
 const submitForm = async () => {
-  // 验证
-  let productName = ''
-  let productCategory = form.category
-
-  if (!form.productId) {
-    notificationService.showNotification('请选择商品', 'error')
-    return
-  }
-
-  if (!selectedProduct.value) {
-    notificationService.showNotification('请选择有效商品', 'error')
-    return
-  }
-
-  productName = selectedProduct.value.name
-  productCategory = selectedProduct.value.category
-
-  if (!form.channel || !form.quantity || !form.price || !form.date) {
-    notificationService.showNotification('请填写所有必填项！', 'error')
-    return
-  }
-
-  // 检查支付方式是否可用
-  if (form.paymentMethod === '赊账' && selectedCustomer.value && !selectedCustomer.value.creditInfo?.hasCredit) {
-    notificationService.showNotification('该客户不允许赊账，请选择其他收款方式', 'error')
+  // 验证表单
+  const validation = incomeService.validateIncomeForm(form, selectedProduct.value, selectedCustomer.value)
+  if (!validation.valid) {
+    notificationService.showNotification(validation.errors.join('，'), 'error')
     return
   }
 
   // 批发模式下检查库存
-  if (form.channel === '批发' && currentInventory.value) {
-    const quantity = parseFloat(form.quantity)
-    if (quantity > currentInventory.value.quantity) {
-      const confirm = window.confirm(`销售数量 (${quantity}) 超过当前库存 (${currentInventory.value.quantity} ${currentInventory.value.unit})！确定要继续吗？`)
+  if (form.channel === '批发') {
+    const stockCheck = IncomeService.validateWholesaleStock(currentInventory.value, form.quantity)
+    if (!stockCheck.valid) {
+      const confirm = window.confirm(`${stockCheck.message}！确定要继续吗？`)
       if (!confirm) return
     }
   }
 
-  const totalAmount = parseFloat(form.quantity) * parseFloat(form.price)
+  const totalAmount = IncomeService.calculateIncomeTotal(form.quantity, form.price)
 
-  // 处理客户信息
-  let customerName = '散客'
-  let customerId = null
-  if (form.customerId) {
-    const customer = props.customers.find(c => c.id === form.customerId)
-    if (customer) {
-      customerName = customer.name
-      customerId = customer.id
-
-      if (form.paymentMethod === '赊账') {
-        const customers = [...props.customers]
-        const index = customers.findIndex(c => c.id === customer.id)
-        if (index !== -1) {
-          if (!customers[index].creditInfo) {
-            customers[index].creditInfo = { hasCredit: true, balance: 0 }
-          }
-          customers[index].creditInfo.balance = (customers[index].creditInfo.balance || 0) + totalAmount
-          userDataService.saveCustomers(customers)
-        }
+  // 处理客户赊账
+  let updatedCustomer = null
+  if (form.paymentMethod === '赊账' && selectedCustomer.value) {
+    updatedCustomer = IncomeService.updateCustomerCreditBalance(selectedCustomer.value, totalAmount)
+    if (updatedCustomer) {
+      const customers = [...props.customers]
+      const index = customers.findIndex(c => c.id === selectedCustomer.value.id)
+      if (index !== -1) {
+        customers[index] = updatedCustomer
+        userDataService.saveCustomers(customers)
       }
     }
   }
 
   // 创建记录
-  const record = {
-    id: Date.now().toString(),
-    type: '收入',
-    category: productCategory,
-    source: form.channel,
-    amount: totalAmount,
-    date: form.date,
-    paymentMethod: form.paymentMethod,
-    note: `${productName} ${form.quantity}${form.unit} ${form.note}`.trim(),
-    businessType: 'business',
-    productId: selectedProduct.value?.id,
-    productName: productName,
-    channel: form.channel,
-    customer: customerName,
-    customerId: customerId,
-    quantity: parseFloat(form.quantity),
-    price: parseFloat(form.price),
-    unit: form.unit,
-    isPaid: form.paymentMethod !== '赊账',
-    expectedRepayDate: form.paymentMethod === '赊账' ? form.expectedRepayDate : null,
-    creditNote: form.paymentMethod === '赊账' ? form.creditNote : null,
-    // 批发模式特有字段
-    isWholesale: form.channel === '批发',
-    autoUpdateInventory: autoUpdateInventory.value
-  }
+  const record = IncomeService.createIncomeRecord(
+      { ...form, autoUpdateInventory: autoUpdateInventory.value },
+      selectedProduct.value,
+      updatedCustomer || selectedCustomer.value,
+      totalAmount
+  )
 
   try {
     await businessDataService.addIncomeRecord(record)
 
-    // 批发模式下，如果勾选了自动更新库存，更新库存
+    // 批发模式下更新库存
     if (form.channel === '批发' && autoUpdateInventory.value && selectedProduct.value) {
       const inventoryItems = await businessDataService.getInventoryByProductId(selectedProduct.value.id)
       if (inventoryItems.length > 0) {
-        await businessDataService.updateStockQuantity(
-            inventoryItems[0].id,
-            parseFloat(form.quantity),
-            'subtract'
-        )
-        console.log(`库存已更新: 减少 ${form.quantity} ${form.unit}`)
+        const updateData = IncomeService.processWholesaleStockUpdate(inventoryItems[0], form.quantity)
+        if (!updateData.error) {
+          await businessDataService.updateInventoryItem(updateData.id, updateData)
+          console.log(`库存已更新: 减少 ${form.quantity} ${form.unit}`)
+        }
       }
     }
 
     emit('success')
     close()
-    notificationService.showNotification(`收入记录成功：${productName} ¥${totalAmount.toFixed(2)}`, 'success')
+
+    const successMsg = IncomeService.formatIncomeSuccessMessage(
+        selectedProduct.value.name,
+        totalAmount,
+        selectedCustomer.value?.name,
+        form.paymentMethod === '赊账'
+    )
+    notificationService.showNotification(successMsg, 'success')
   } catch (error) {
     console.error('保存收入记录失败:', error)
     notificationService.showNotification('保存收入记录失败，请重试', 'error')
   }
 }
 
+// 重置表单
 const resetForm = () => {
   form.category = ''
   form.productId = ''
@@ -877,6 +796,7 @@ const resetForm = () => {
   autoUpdateInventory.value = true
 }
 
+// 关闭模态框
 const close = () => {
   resetForm()
   emit('update:visible', false)
@@ -894,9 +814,9 @@ const closePurchaseSuggestionOnOverlay = (event) => {
   }
 }
 
+// 格式化函数
 const formatNumber = (num) => {
-  if (!num) return '0.00'
-  return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return baseService.formatNumber(num)
 }
 
 const formatDate = (dateStr) => {
@@ -909,7 +829,8 @@ const formatDate = (dateStr) => {
 }
 
 // ==================== 监听器 ====================
-// 监听 products 变化，当有新商品时自动选择
+
+// 监听 products 变化
 watch(() => props.products, (newProducts, oldProducts) => {
   if (newProducts.length > oldProducts.length && !quickAddModalVisible.value) {
     const newProduct = newProducts[newProducts.length - 1]
@@ -926,13 +847,13 @@ watch(() => props.products, (newProducts, oldProducts) => {
   }
 }, { deep: true })
 
-// 监听分类变化，重置商品选择
+// 监听分类变化
 watch(() => form.category, () => {
   form.productId = ''
   selectedProduct.value = null
 })
 
-// 监听客户变化，检查支付方式
+// 监听客户变化
 watch(() => form.customerId, (newVal) => {
   if (newVal === '__new__') {
     showQuickAddCustomer.value = true
@@ -940,8 +861,7 @@ watch(() => form.customerId, (newVal) => {
     return
   }
 
-  const customer = props.customers.find(c => c.id === newVal)
-  if (customer && !customer.creditInfo?.hasCredit && form.paymentMethod === '赊账') {
+  if (!IncomeService.canCustomerUseCredit(selectedCustomer.value) && form.paymentMethod === '赊账') {
     form.paymentMethod = '现金'
     form.expectedRepayDate = dateHelper.addDays(dateHelper.getTodayString(), 30)
     form.creditNote = ''
@@ -951,7 +871,6 @@ watch(() => form.customerId, (newVal) => {
 // 监听模态框显示
 watch(() => props.visible, (newVal) => {
   if (newVal) {
-    // 每次打开模态框时加载库存数据
     loadInventoryData()
   }
 })

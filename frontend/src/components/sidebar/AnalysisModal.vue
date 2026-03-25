@@ -225,7 +225,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
+import businessDataService from '@/services/cache/business-cache.service.js'
 
 const props = defineProps({
   visible: {

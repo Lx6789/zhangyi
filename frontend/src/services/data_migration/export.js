@@ -1,6 +1,6 @@
 // data_migration/export.js
 import * as XLSX from 'xlsx'
-import businessDataService from '@/services/business-data.service.js'
+import businessDataService from '@/services/cache/business-cache.service.js'
 import { personalSavingCache, groupSavingCache, savingService } from '@/services'
 import authHelperService from '@/services/utils/auth-helper.service.js'
 

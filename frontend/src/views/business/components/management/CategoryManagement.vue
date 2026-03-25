@@ -103,9 +103,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
-import {notificationService} from "@/services/index.js";
+import {ref, computed, onMounted, watch, nextTick} from 'vue'
+import {notificationService} from "@/services/index.js"
+import categoryService from "@/services/api/business/category.service.js";
 
 const props = defineProps({
   visible: {
@@ -141,51 +141,51 @@ const sortedCategories = computed(() => {
 
 // ==================== 方法 ====================
 
-// 加载分类数据
+/**
+ * 加载分类数据 - 调用业务服务
+ */
 const loadCategories = async () => {
   loading.value = true
   try {
-    categories.value = await businessDataService.getAllCategories()
+    // 使用业务服务获取所有分类
+    categories.value = await categoryService.getAllCategories()
     console.log('分类加载成功:', categories.value.length)
   } catch (error) {
     console.error('加载分类失败:', error)
-    notificationService.showNotification('加载分类失败', 'error')
+    notificationService.showNotification(error.message || '加载分类失败', 'error')
   } finally {
     loading.value = false
   }
 }
 
-// 添加分类
+/**
+ * 添加分类 - 调用业务服务
+ */
 const addCategory = async () => {
-  if (!newCategoryName.value.trim()) {
+  const categoryName = newCategoryName.value.trim()
+
+  if (!categoryName) {
     notificationService.showNotification('请输入分类名称', 'error')
-    return
-  }
-
-  // 检查是否已存在（忽略大小写）
-  const exists = categories.value.some(
-      c => c.name.toLowerCase() === newCategoryName.value.trim().toLowerCase()
-  )
-
-  if (exists) {
-    notificationService.showNotification('该分类已存在', 'error')
     return
   }
 
   saving.value = true
   try {
-    const newCategory = {
-      name: newCategoryName.value.trim(),
-      icon: 'fas fa-tag',
-      sortOrder: categories.value.filter(c => !c.isDefault).length + 1,
-      isDefault: false
-    }
+    // 使用业务服务添加分类
+    await categoryService.addCategory({
+      name: categoryName,
+      icon: 'fas fa-tag'
+    })
 
-    await businessDataService.addCategory(newCategory)
+    // 重新加载分类列表
     await loadCategories()
+
+    // 通知父组件更新
     emit('update')
 
+    // 清空输入框
     newCategoryName.value = ''
+
     notificationService.showNotification('分类添加成功', 'success')
   } catch (error) {
     console.error('添加分类失败:', error)
@@ -195,71 +195,90 @@ const addCategory = async () => {
   }
 }
 
-// 开始编辑
+/**
+ * 开始编辑
+ */
 const startEdit = (category) => {
   editingId.value = category.id
   editingName.value = category.name
   nextTick(() => {
+    // 使用 ref 或 querySelector 聚焦输入框
     const input = document.querySelector('.category-edit input')
     if (input) input.focus()
   })
 }
 
-// 取消编辑
+/**
+ * 取消编辑
+ */
 const cancelEdit = () => {
   editingId.value = ''
   editingName.value = ''
 }
 
-// 更新分类
+/**
+ * 更新分类 - 调用业务服务
+ */
 const updateCategory = async (categoryId) => {
-  if (!editingName.value.trim()) {
+  const updatedName = editingName.value.trim()
+
+  if (!updatedName) {
     notificationService.showNotification('分类名称不能为空', 'error')
-    return
-  }
-
-  // 检查是否已存在（排除自己）
-  const exists = categories.value.some(
-      c => c.id !== categoryId &&
-          c.name.toLowerCase() === editingName.value.trim().toLowerCase()
-  )
-
-  if (exists) {
-    notificationService.showNotification('该分类名称已存在', 'error')
     return
   }
 
   saving.value = true
   try {
-    await businessDataService.updateCategory(categoryId, {
-      name: editingName.value.trim()
+    // 使用业务服务更新分类
+    await categoryService.updateCategory(categoryId, {
+      name: updatedName
     })
 
+    // 重新加载分类列表
     await loadCategories()
+
+    // 通知父组件更新
     emit('update')
 
+    // 清空编辑状态
     editingId.value = ''
     editingName.value = ''
+
     notificationService.showNotification('分类更新成功', 'success')
   } catch (error) {
     console.error('更新分类失败:', error)
-    notificationService.showNotification(error.message || '更新分类失败', error)
+    notificationService.showNotification(error.message || '更新分类失败', 'error')
   } finally {
     saving.value = false
   }
 }
 
-// 删除分类
+/**
+ * 删除分类 - 调用业务服务
+ */
 const deleteCategory = async (category) => {
-  if (!confirm(`确定要删除分类 "${category.name}" 吗？`)) {
+  // 确认删除
+  const confirmed = await new Promise((resolve) => {
+    // 使用自定义确认对话框或原生 confirm
+    const result = confirm(`确定要删除分类 "${category.name}" 吗？\n删除后，该分类下的商品将变为"未分类"。`)
+    resolve(result)
+  })
+
+  if (!confirmed) {
     return
   }
 
   saving.value = true
   try {
-    await businessDataService.deleteCategory(category.id)
+    // 使用业务服务删除分类
+    await categoryService.deleteCategory(category.id)
+
+    // 重新加载分类列表
     await loadCategories()
+
+    // 通知父组件更新
     emit('update')
+
     notificationService.showNotification('分类删除成功', 'success')
   } catch (error) {
     console.error('删除分类失败:', error)
@@ -269,23 +288,40 @@ const deleteCategory = async (category) => {
   }
 }
 
-// 关闭模态框
+/**
+ * 关闭模态框
+ */
 const close = () => {
   emit('update:visible', false)
   // 发出返回事件，告诉父组件返回上一个页面
   emit('back')
 }
 
+/**
+ * 点击遮罩层关闭
+ */
 const closeOnOverlay = (event) => {
   if (event.target.classList.contains('modal')) {
     close()
   }
 }
 
+/**
+ * 初始化默认分类 - 调用业务服务
+ */
+const initDefaultCategories = async () => {
+  try {
+    await categoryService.initDefaultCategories()
+    console.log('默认分类初始化完成')
+  } catch (error) {
+    console.error('初始化默认分类失败:', error)
+  }
+}
+
 // 监听 visible 变化
-watch(() => props.visible, (newVal) => {
+watch(() => props.visible, async (newVal) => {
   if (newVal) {
-    loadCategories()
+    await loadCategories()
     // 重置状态
     newCategoryName.value = ''
     editingId.value = ''
@@ -293,10 +329,11 @@ watch(() => props.visible, (newVal) => {
   }
 })
 
-// 初始化
-onMounted(() => {
+// 组件挂载时初始化
+onMounted(async () => {
+  // 如果模态框可见，加载分类
   if (props.visible) {
-    loadCategories()
+    await loadCategories()
   }
 })
 </script>
@@ -309,7 +346,7 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   background-color: rgba(0, 0, 0, 0.5);
-  z-index: 2000;
+  z-index: 2100;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -353,6 +390,7 @@ onMounted(() => {
   font-weight: 600;
   color: #80A492;
   flex: 1;
+  margin: 0;
 }
 
 .modal-close {
@@ -576,10 +614,6 @@ onMounted(() => {
 
 .empty-categories p {
   font-size: 14px;
-}
-
-.modal {
-  z-index: 2100; /* 从 2000 改为 2100 */
 }
 
 /* 加载状态 */

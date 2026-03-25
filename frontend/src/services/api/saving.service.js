@@ -2,7 +2,7 @@
 
 import * as savingApi from '@/api/saving'
 import {authHelperService, notificationService} from '@/services'
-import businessDataService from '@/services/business-data.service'
+import businessDataService from '@/services/cache/business-cache.service.js'
 import groupSavingCacheService from "@/services/cache/group-saving-cache.service";
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import {personalSavingCache} from "@/services";

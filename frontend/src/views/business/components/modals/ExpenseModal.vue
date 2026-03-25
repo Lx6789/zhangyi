@@ -333,9 +333,12 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import dateHelper from '@/services/utils/date-helper.service.js'
-import businessDataService from '@/services/business-data.service.js'
+import businessDataService from '@/services/cache/business-cache.service.js'
 import QuickAddProductModal from './QuickAddProductModal.vue'
-import {notificationService} from "@/services/index.js";
+import { notificationService } from "@/services/index.js"
+import expenseService from "@/services/api/business/expense.service.js";
+import inventoryService from "@/services/api/business/inventory.service.js";
+import baseService from "@/services/api/business/base.service.js";
 
 const props = defineProps({
   visible: {
@@ -354,27 +357,9 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'success', 'refresh-products', 'open-category'])
 
-// 支出子类型映射（扩展）
-const expenseSubtypesMap = {
-  '租金水电': ['店铺租金', '仓库租金', '电费', '水费', '物业费', '网络费'],
-  '员工工资': ['基本工资', '提成', '奖金', '社保', '福利', '加班费'],
-  '设备工具': ['收银设备', '冷藏设备', '称重设备', '货架货柜', '维修工具', '办公设备'],
-  '包装物料': ['塑料袋', '包装盒', '保鲜膜', '标签纸', '胶带', '泡沫箱'],
-  '运输费用': ['油费', '停车费', '过路费', '车辆保养', '维修费', '快递费', '搬运费'],
-  '平台费用': ['美团佣金', '饿了么佣金', '抖音费用', '微信费率', '支付宝费率', '推广费'],
-  '税费杂费': ['增值税', '个人所得税', '工商管理费', '卫生费', '垃圾处理费', '其他杂费'],
-  '库存损耗': ['自然损耗', '过期损耗', '损坏损耗', '盘点差异', '其他损耗'],
-  '退货退款': ['质量退货', '客户退货', '供应商退货', '其他退货'],
-  '其他支出': ['办公用品', '招待费', '捐款', '培训费', '其他']
-}
-
-const paymentMethods = [
-  { value: '现金', label: '现金' },
-  { value: '微信', label: '微信' },
-  { value: '支付宝', label: '支付宝' },
-  { value: '银行卡', label: '银行卡' },
-  { value: '赊账', label: '赊账' }
-]
+// ==================== 常量（使用业务服务） ====================
+const expenseSubtypesMap = expenseService.getExpenseSubtypesMap()
+const paymentMethods = expenseService.getPaymentMethods()
 
 // 表单数据
 const form = reactive({
@@ -385,7 +370,7 @@ const form = reactive({
   supplier: '',
   paymentMethod: '现金',
   note: '',
-  productType: '', // 商品类型
+  productType: '',
   inventoryProductId: '',
   quantity: '',
   unit: '斤',
@@ -398,45 +383,12 @@ const form = reactive({
 // 状态
 const loadingProductTypes = ref(false)
 const loadingProductsByType = ref(false)
-const productTypes = ref([]) // 从数据库查询的商品类型
+const productTypes = ref([])
 const supplierHistory = ref([])
 const quickAddProductVisible = ref(false)
 const subtypesList = ref([])
 const selectedProduct = ref(null)
-const isRefreshing = ref(false) // 防止重复刷新
-
-// ==================== 数据库查询方法 ====================
-
-// 从数据库查询商品类型
-const loadProductTypes = async () => {
-  loadingProductTypes.value = true
-  try {
-    // 从数据库查询所有商品分类
-    productTypes.value = await businessDataService.getAllCategories()
-    console.log('从数据库加载商品类型:', productTypes.value)
-  } catch (error) {
-    console.error('加载商品类型失败:', error)
-    productTypes.value = []
-  } finally {
-    loadingProductTypes.value = false
-  }
-}
-
-// 根据商品类型查询商品
-const loadProductsByType = async (type) => {
-  if (!type) return
-
-  loadingProductsByType.value = true
-  try {
-    // 这里我们使用父组件传入的 products，确保它是从数据库来的
-    console.log(`加载类型为 ${type} 的商品，当前商品总数:`, props.products.length)
-    console.log('当前类型下的商品:', filteredProductsByType.value)
-  } catch (error) {
-    console.error('加载商品失败:', error)
-  } finally {
-    loadingProductsByType.value = false
-  }
-}
+const isRefreshing = ref(false)
 
 // ==================== 计算属性 ====================
 
@@ -454,83 +406,88 @@ const currentInventoryItem = computed(() => {
 
 // 是否显示库存相关字段
 const showInventoryFields = computed(() => {
-  return ['进货采购', '库存损耗', '退货退款'].includes(form.type)
+  return expenseService.isInventoryAffectingExpense(form.type)
 })
 
 // 库存状态样式
 const getStockStatusClass = computed(() => {
-  if (!currentInventoryItem.value) return 'warning'
-  const minStock = currentInventoryItem.value.minStock || 10
-  if (currentInventoryItem.value.quantity <= 0) return 'danger'
-  if (currentInventoryItem.value.quantity <= minStock) return 'warning'
-  return 'normal'
+  return  inventoryService.getStockStatusClass(currentInventoryItem.value)
 })
 
 // 更新库存文本
 const updateInventoryText = computed(() => {
-  switch (form.type) {
-    case '进货采购': return '自动更新库存 (增加库存)'
-    case '库存损耗': return '自动更新库存 (减少库存)'
-    case '退货退款': return '自动更新库存 (减少库存)'
-    default: return '自动更新库存'
-  }
+  return expenseService.getUpdateInventoryText(form.type)
 })
 
 // 供应商占位符
 const supplierPlaceholder = computed(() => {
-  switch (form.type) {
-    case '进货采购': return '例如：XX批发市场'
-    case '库存损耗': return '损耗责任人 (可选)'
-    case '退货退款': return '退货给 (供应商/客户)'
-    default: return '输入供应商或收款方名称'
-  }
+  return expenseService.getSupplierPlaceholder(form.type)
 })
 
 // 备注占位符
 const notePlaceholder = computed(() => {
-  switch (form.type) {
-    case '进货采购': return '记录批次号、备注信息等'
-    case '库存损耗': return '记录损耗原因、处理方式等'
-    case '退货退款': return '记录退货原因、处理结果等'
-    default: return '记录更多细节...'
-  }
+  return expenseService.getNotePlaceholder(form.type)
 })
 
 // 库存预警
 const showInventoryWarning = computed(() => {
   if (!currentInventoryItem.value || !form.quantity) return false
   if (form.type === '库存损耗' || form.type === '退货退款') {
-    const newQuantity = currentInventoryItem.value.quantity - parseFloat(form.quantity)
-    if (newQuantity < 0) return true
-    if (newQuantity <= (currentInventoryItem.value.minStock || 10)) return true
+    const checkResult = expenseService.checkStockSufficiency(
+        currentInventoryItem.value.quantity,
+        parseFloat(form.quantity),
+        currentInventoryItem.value.minStock || 10
+    )
+    return checkResult.warning
   }
   return false
 })
 
 const inventoryWarningMessage = computed(() => {
   if (!currentInventoryItem.value || !form.quantity) return ''
-  const quantity = parseFloat(form.quantity)
-  const currentQty = currentInventoryItem.value.quantity
-  const newQty = currentQty - quantity
-  const minStock = currentInventoryItem.value.minStock || 10
-
-  if (newQty < 0) {
-    return `库存不足！当前库存 ${currentQty} ${form.unit}，出库 ${quantity} ${form.unit} 后库存将为负数`
-  }
-  if (newQty <= minStock) {
-    return `警告：出库后库存将低于最低库存预警 (${minStock} ${form.unit})`
-  }
-  return ''
+  const checkResult = expenseService.checkStockSufficiency(
+      currentInventoryItem.value.quantity,
+      parseFloat(form.quantity),
+      currentInventoryItem.value.minStock || 10
+  )
+  return checkResult.message || ''
 })
 
 // ==================== 方法 ====================
+
+// 从数据库查询商品类型
+const loadProductTypes = async () => {
+  loadingProductTypes.value = true
+  try {
+    productTypes.value = await businessDataService.getAllCategories()
+    console.log('从数据库加载商品类型:', productTypes.value)
+  } catch (error) {
+    console.error('加载商品类型失败:', error)
+    productTypes.value = []
+  } finally {
+    loadingProductTypes.value = false
+  }
+}
+
+// 根据商品类型查询商品
+const loadProductsByType = async (type) => {
+  if (!type) return
+  loadingProductsByType.value = true
+  try {
+    console.log(`加载类型为 ${type} 的商品，当前商品总数:`, props.products.length)
+    // 计算属性会自动处理
+  } catch (error) {
+    console.error('加载商品失败:', error)
+  } finally {
+    loadingProductsByType.value = false
+  }
+}
 
 // 处理支出类型变化
 const handleTypeChange = () => {
   updateSubtypes()
   resetInventoryFields()
 
-  // 如果是进货采购，加载商品类型
   if (form.type === '进货采购') {
     loadProductTypes()
   }
@@ -538,21 +495,15 @@ const handleTypeChange = () => {
 
 // 更新子类型列表
 const updateSubtypes = () => {
-  if (form.type && expenseSubtypesMap[form.type]) {
-    subtypesList.value = expenseSubtypesMap[form.type]
-  } else {
-    subtypesList.value = []
-  }
+  subtypesList.value = expenseService.getExpenseSubtypes(form.type)
   form.subtype = ''
 }
 
 // 选择商品类型
 const selectProductType = (type) => {
   form.productType = type
-  // 重置商品选择
   form.inventoryProductId = ''
   selectedProduct.value = null
-  // 加载该类型下的商品
   loadProductsByType(type)
 }
 
@@ -582,7 +533,6 @@ const onProductSelected = () => {
     form.unit = product.unit || '斤'
     console.log('已选择商品:', product.name)
 
-    // 如果是进货采购，自动填充参考价格
     if (form.type === '进货采购' && currentInventoryItem.value) {
       form.unitPrice = currentInventoryItem.value.costPrice || ''
     }
@@ -591,7 +541,7 @@ const onProductSelected = () => {
   }
 }
 
-// 根据金额计算（用于进货采购）
+// 根据金额计算
 const calculateFromAmount = () => {
   if (form.type === '进货采购' && form.quantity && form.amount) {
     form.unitPrice = parseFloat(form.amount) / parseFloat(form.quantity)
@@ -601,17 +551,16 @@ const calculateFromAmount = () => {
 // 根据数量计算
 const calculateFromQuantity = () => {
   if (form.type === '进货采购' && form.unitPrice && form.quantity) {
-    form.amount = parseFloat(form.unitPrice) * parseFloat(form.quantity)
+    form.amount = expenseService.calculatePurchaseTotal(form.unitPrice, form.quantity)
   } else if ((form.type === '库存损耗' || form.type === '退货退款') && currentInventoryItem.value?.costPrice && form.quantity) {
-    // 估算损耗金额
-    form.amount = currentInventoryItem.value.costPrice * parseFloat(form.quantity)
+    form.amount = expenseService.calculateLossAmount(form.quantity, currentInventoryItem.value.costPrice)
   }
 }
 
 // 根据单价计算
 const calculateFromPrice = () => {
   if (form.type === '进货采购' && form.quantity && form.unitPrice) {
-    form.amount = parseFloat(form.unitPrice) * parseFloat(form.quantity)
+    form.amount = expenseService.calculatePurchaseTotal(form.unitPrice, form.quantity)
   }
 }
 
@@ -630,11 +579,8 @@ const refreshProductsList = async () => {
   try {
     console.log('手动刷新商品列表...')
     emit('refresh-products')
-
-    // 等待父组件数据更新
     await new Promise(resolve => setTimeout(resolve, 300))
 
-    // 重新加载当前类型的商品
     if (form.productType) {
       await loadProductsByType(form.productType)
     }
@@ -654,40 +600,26 @@ const refreshProductsList = async () => {
 // 快速新增商品成功
 const handleQuickAddProductSuccess = async () => {
   quickAddProductVisible.value = false
-
-  // 显示加载状态
   loadingProductsByType.value = true
 
   try {
     console.log('快速添加商品成功，开始刷新商品列表...')
-
-    // 1. 先通知父组件刷新商品列表
     emit('refresh-products')
-
-    // 2. 重新加载商品类型（可能新增了分类）
     await loadProductTypes()
-
-    // 3. 等待父组件数据更新
     await new Promise(resolve => setTimeout(resolve, 500))
 
-    // 4. 如果当前有选中的商品类型，重新加载该类型的商品
     if (form.productType) {
       await loadProductsByType(form.productType)
 
-      // 5. 如果有新商品，自动选择最新添加的商品
       if (filteredProductsByType.value.length > 0) {
-        // 获取最新添加的商品（假设是按时间排序的）
         const products = [...filteredProductsByType.value]
         const newProduct = products[products.length - 1]
 
-        // 如果当前没有选中任何商品，或者想自动选中新商品
         if (!form.inventoryProductId) {
           form.inventoryProductId = newProduct.id
           onProductSelected()
-
           notificationService.showNotification(`已添加新商品: ${newProduct.name}`, 'success')
         } else {
-          // 可选：提示用户新商品已添加
           notificationService.showNotification(`新商品 "${newProduct.name}" 已添加到列表`, 'info')
         }
       }
@@ -729,136 +661,77 @@ const resetForm = () => {
 
 // 提交表单
 const submitForm = async () => {
-  if (!form.type || !form.amount || !form.date) {
-    notificationService.showNotification('请填写所有必填项！', 'error')
+  // 验证表单
+  const validation = expenseService.validateExpenseForm(form, form.type !== '进货采购')
+  if (!validation.valid) {
+    notificationService.showNotification(validation.errors.join('，'), 'error')
     return
   }
 
-  // 非进货采购类型需要验证具体项目
-  if (form.type !== '进货采购' && !form.subtype) {
-    notificationService.showNotification('请选择具体项目', 'error')
-    return
-  }
-
-  // 进货采购需要验证商品类型和商品
-  if (form.type === '进货采购') {
-    if (!form.productType) {
-      notificationService.showNotification('请选择商品类型', 'error')
-      return
-    }
-    if (!form.inventoryProductId) {
-      notificationService.showNotification('请选择商品', 'error')
-      return
-    }
-  }
-
+  // 验证库存字段
   if (showInventoryFields.value) {
-    if (!form.inventoryProductId) {
-      notificationService.showNotification('请选择商品', 'error')
-      return
-    }
-    if (!form.quantity || parseFloat(form.quantity) <= 0) {
-      notificationService.showNotification('请输入有效的数量', 'error')
+    const inventoryValidation = expenseService.validateInventoryFields(form)
+    if (!inventoryValidation.valid) {
+      notificationService.showNotification(inventoryValidation.errors.join('，'), 'error')
       return
     }
   }
 
   try {
-    const record = {
-      id: Date.now().toString(),
-      type: '支出',
-      category: form.type,
-      subtype: form.subtype || form.type,
-      amount: parseFloat(form.amount),
-      date: form.date,
-      supplier: form.supplier || '无',
-      paymentMethod: form.paymentMethod,
-      note: form.note,
-      businessType: 'business'
-    }
-
-    // 添加库存相关信息
-    if (showInventoryFields.value && selectedProduct.value) {
-      Object.assign(record, {
-        inventoryProductId: selectedProduct.value.id,
-        inventoryProductName: selectedProduct.value.name,
-        inventoryCategory: selectedProduct.value.category,
-        quantity: parseFloat(form.quantity),
-        unit: form.unit,
-        unitPrice: form.unitPrice ? parseFloat(form.unitPrice) : null
-      })
-
-      // 添加特定类型字段
-      if (form.type === '库存损耗') {
-        record.lossReason = form.lossReason || '其他'
-      }
-      if (form.type === '退货退款') {
-        record.returnReason = form.returnReason || '其他'
-      }
-    }
+    // 创建记录
+    const record = expenseService.createExpenseRecord({
+      ...form,
+      selectedProduct: selectedProduct.value
+    })
 
     await businessDataService.addExpenseRecord(record)
+
+    let inventoryUpdated = false
 
     // 更新库存
     if (showInventoryFields.value && form.updateInventory && selectedProduct.value) {
       const quantity = parseFloat(form.quantity)
 
-      if (currentInventoryItem.value) {
-        // 更新现有库存
-        const item = currentInventoryItem.value
-        let newQuantity = item.quantity
+      if (form.type === '进货采购') {
+        const updateData = expenseService.processPurchaseInventoryUpdate(
+            currentInventoryItem.value,
+            selectedProduct.value,
+            quantity,
+            parseFloat(form.unitPrice),
+            form.supplier
+        )
 
-        if (form.type === '进货采购') {
-          newQuantity = (item.quantity || 0) + quantity
-
-          // 更新成本价（加权平均）
-          if (form.unitPrice) {
-            const totalCost = (item.costPrice || 0) * (item.quantity || 0) + parseFloat(form.unitPrice) * quantity
-            const newCostPrice = totalCost / newQuantity
-            item.costPrice = newCostPrice
-          }
+        if (updateData.exists) {
+          await businessDataService.updateInventoryItem(updateData.id, updateData)
         } else {
-          // 损耗或退货：减少库存
-          newQuantity = Math.max(0, (item.quantity || 0) - quantity)
+          await businessDataService.addInventoryItem(updateData)
+        }
+        inventoryUpdated = true
+      } else if (form.type === '库存损耗' || form.type === '退货退款') {
+        const updateData = expenseService.processLossInventoryUpdate(
+            currentInventoryItem.value,
+            quantity
+        )
+
+        if (updateData.error) {
+          notificationService.showNotification(updateData.error, 'error')
+          return
         }
 
-        await businessDataService.updateInventoryItem(item.id, {
-          ...item,
-          quantity: newQuantity,
-          supplier: form.supplier || item.supplier,
-          updateTime: new Date().toISOString()
-        })
-      } else if (form.type === '进货采购') {
-        // 创建新库存
-        await businessDataService.addInventoryItem({
-          productId: selectedProduct.value.id,
-          productName: selectedProduct.value.name,
-          category: selectedProduct.value.category,
-          quantity: quantity,
-          unit: form.unit,
-          costPrice: form.unitPrice ? parseFloat(form.unitPrice) : (parseFloat(form.amount) / quantity),
-          sellingPrice: selectedProduct.value.defaultPrice || null,
-          supplier: form.supplier || null,
-          location: '',
-          minStock: 10,
-          expiryDate: '',
-          note: `首次采购入库 - ${form.subtype || form.type}`
-        })
+        if (updateData.exists) {
+          await businessDataService.updateInventoryItem(updateData.id, updateData)
+          inventoryUpdated = true
+        }
       }
 
       // 更新供应商历史
-      if (form.supplier && !supplierHistory.value.includes(form.supplier)) {
-        supplierHistory.value.push(form.supplier)
-      }
+      supplierHistory.value = expenseService.updateSupplierHistory(supplierHistory.value, form.supplier)
     }
 
     emit('success')
     close()
 
-    let successMsg = `支出记录成功：${form.subtype || form.type} ¥${parseFloat(form.amount).toFixed(2)}`
-    if (showInventoryFields.value && form.updateInventory) {
-      successMsg += `，库存已更新`
-    }
+    const successMsg = expenseService.formatExpenseSuccessMessage(form, inventoryUpdated)
     notificationService.showNotification(successMsg, 'success')
   } catch (error) {
     console.error('保存支出记录失败:', error)
@@ -868,8 +741,7 @@ const submitForm = async () => {
 
 // 辅助函数
 const formatNumber = (num) => {
-  if (num === undefined || num === null) return '0.00'
-  return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return baseService.formatNumber(num)
 }
 
 const formatDate = (dateStr) => {
@@ -882,23 +754,15 @@ const formatDate = (dateStr) => {
 }
 
 const isExpiring = (expiryDate) => {
-  if (!expiryDate) return false
-  const expiry = new Date(expiryDate)
-  const today = new Date()
-  const future = new Date()
-  future.setDate(today.getDate() + 7)
-  return expiry >= today && expiry <= future
+  return inventoryService.isExpiring(expiryDate)
 }
 
 const isExpired = (expiryDate) => {
-  if (!expiryDate) return false
-  return new Date(expiryDate) < new Date()
+  return inventoryService.isExpired(expiryDate)
 }
 
 const getExpiryStatusClass = (expiryDate) => {
-  if (isExpired(expiryDate)) return 'expired'
-  if (isExpiring(expiryDate)) return 'expiring'
-  return ''
+  return inventoryService.getExpiryStatusClass(expiryDate)
 }
 
 const close = () => {
@@ -919,13 +783,11 @@ watch(() => props.visible, (newVal) => {
   }
 })
 
-// 监听 products 变化，自动检测新商品
+// 监听 products 变化
 watch(() => props.products, (newProducts, oldProducts) => {
   console.log('商品列表已更新，新数量:', newProducts.length, '旧数量:', oldProducts?.length)
 
-  // 如果有新商品添加，并且当前有选中的商品类型
   if (form.productType && newProducts.length > (oldProducts?.length || 0)) {
-    // 查找新添加的商品
     const newProduct = newProducts.find(p =>
         !oldProducts?.some(oldP => oldP.id === p.id)
     )
@@ -933,11 +795,9 @@ watch(() => props.products, (newProducts, oldProducts) => {
     if (newProduct && newProduct.category === form.productType) {
       console.log('检测到新商品:', newProduct.name)
 
-      // 如果当前没有选中任何商品，自动选中新商品
       if (!form.inventoryProductId) {
         form.inventoryProductId = newProduct.id
         onProductSelected()
-
         notificationService.showNotification(`新商品 "${newProduct.name}" 已自动选中`, 'success')
       }
     }

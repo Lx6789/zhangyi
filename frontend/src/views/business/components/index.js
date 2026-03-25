@@ -3,7 +3,7 @@
 // 模态框组件
 export { default as IncomeModal } from './modals/IncomeModal.vue'
 export { default as ExpenseModal } from './modals/ExpenseModal.vue'
-export { default as ModulePlaceholder } from './modals/ModulePlaceholder.vue'
+export { default as QuickAddProductModal } from './modals/QuickAddProductModal.vue'
 
 // 管理功能组件
 export { default as ProductManagement } from './management/ProductManagement.vue'

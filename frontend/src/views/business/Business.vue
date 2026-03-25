@@ -200,7 +200,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import businessDataService from '@/services/business-data.service.js'
+import businessDataService from '@/services/cache/business-cache.service.js'
 import userDataService from '@/services/user-data.service.js'
 import { authHelperService } from '@/services/index.js'
 import dateHelper from '@/services/utils/date-helper.service.js'
@@ -215,10 +215,11 @@ import {
   InventoryManagement,
   ReportAnalysis,
   CategoryManagement,
-  ModulePlaceholder,
   PurchaseManagement,
   CostCalculation
 } from './components'
+import reportService from "@/services/api/business/report.service.js";
+import costService from "@/services/api/business/cost.service.js";
 
 const router = useRouter()
 
@@ -342,7 +343,7 @@ const loadOverviewData = async () => {
     const now = new Date()
     const year = now.getFullYear()
     const month = now.getMonth() + 1
-    const stats = await businessDataService.getBusinessMonthlyStats(year, month)
+    const stats = await costService.getBusinessMonthlyStats(year, month)
 
     monthlyIncome.value = stats.income
     monthlyExpense.value = stats.expense
@@ -355,7 +356,7 @@ const loadOverviewData = async () => {
 // 加载最近记录
 const loadRecentRecords = async () => {
   try {
-    const records = await businessDataService.getBusinessRecords()
+    const records = await reportService.getBusinessRecords()
     recentRecords.value = records.slice(0, 10).map(r => ({
       id: r.id,
       type: r.type,
@@ -501,13 +502,6 @@ onMounted(async () => {
     userDataService.setCurrentUser(currentUser)
     await businessDataService.init(currentUser.id)
   }
-
-  // 初始化默认数据
-  await Promise.all([
-    businessDataService.initDefaultProducts(),
-    businessDataService.initDefaultCategories(),
-    businessDataService.initDefaultInventory?.()
-  ])
 
   // 加载所有数据
   await Promise.all([

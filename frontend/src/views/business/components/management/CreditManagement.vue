@@ -21,21 +21,21 @@
             <!-- 统计卡片 -->
             <div class="credit-stats">
               <div class="stat-card total-card">
-                <div class="stat-value">¥{{ formatNumber(totalCredit) }}</div>
+                <div class="stat-value">¥{{ formatNumber(creditStats.totalCredit) }}</div>
                 <div class="stat-label">总赊账金额</div>
               </div>
               <div class="stat-card payable-card">
-                <div class="stat-value">¥{{ formatNumber(payableCredit) }}</div>
+                <div class="stat-value">¥{{ formatNumber(creditStats.totalPayable) }}</div>
                 <div class="stat-label">应付账款</div>
                 <div class="stat-sub-label">支出赊账 (欠别人)</div>
               </div>
               <div class="stat-card receivable-card">
-                <div class="stat-value">¥{{ formatNumber(receivableCredit) }}</div>
+                <div class="stat-value">¥{{ formatNumber(creditStats.totalReceivable) }}</div>
                 <div class="stat-label">应收账款</div>
                 <div class="stat-sub-label">收入赊账 (别人欠)</div>
               </div>
               <div class="stat-card overdue-card">
-                <div class="stat-value">{{ overdueCount }}</div>
+                <div class="stat-value">{{ creditStats.overdueCount }}</div>
                 <div class="stat-label">逾期笔数</div>
               </div>
             </div>
@@ -80,7 +80,7 @@
                     v-model="searchKeyword"
                     type="text"
                     class="search-input"
-                    :placeholder="getSearchPlaceholder"
+                    :placeholder="searchPlaceholder"
                     @input="searchCredits"
                 >
               </div>
@@ -399,10 +399,10 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
-import businessDataService from '@/services/business-data.service.js'
-import userDataService from '@/services/user-data.service.js'  // 添加这个导入
 import dateHelper from '@/services/utils/date-helper.service.js'
-import {notificationService} from "@/services/index.js";
+import { notificationService } from "@/services/index.js"
+import creditService from "@/services/api/business/credit.service.js";
+import baseService from "@/services/api/business/base.service.js";
 
 const props = defineProps({
   visible: {
@@ -415,16 +415,22 @@ const emit = defineEmits(['update:visible', 'update'])
 
 // ==================== 状态 ====================
 const loading = ref(false)
-const payableCredits = ref([]) // 应付账款 - 支出记账选择赊账（欠别人）
-const receivableCredits = ref([]) // 应收账款 - 收入记账选择赊账（别人欠）
+const payableCredits = ref([]) // 应付账款
+const receivableCredits = ref([]) // 应收账款
+const creditStats = ref({
+  totalPayable: 0,
+  totalReceivable: 0,
+  totalCredit: 0,
+  overdueCount: 0
+})
 const activeTab = ref('all')
 const searchKeyword = ref('')
 
-const selectedPayable = ref(null) // 选中的应付账款
-const selectedReceivable = ref(null) // 选中的应收账款
+const selectedPayable = ref(null)
+const selectedReceivable = ref(null)
 
-const repaymentModalVisible = ref(false) // 还款模态框（应付账款 - 我还给别人）
-const collectionModalVisible = ref(false) // 收款模态框（应收账款 - 别人还给我）
+const repaymentModalVisible = ref(false)
+const collectionModalVisible = ref(false)
 
 const repaymentForm = reactive({
   amount: '',
@@ -440,92 +446,26 @@ const collectionForm = reactive({
   note: ''
 })
 
-// ==================== 从数据库加载数据 ====================
-const loadData = async () => {
-  loading.value = true
-  try {
-    // 从数据库获取所有支出记录
-    const expenseRecords = await businessDataService.getExpenseRecords()
-
-    // 从数据库获取所有收入记录
-    const incomeRecords = await businessDataService.getIncomeRecords()
-
-    console.log('从数据库加载支出记录:', expenseRecords.length)
-    console.log('从数据库加载收入记录:', incomeRecords.length)
-
-    // 应付账款：支出记录中支付方式为"赊账"且未还清
-    payableCredits.value = expenseRecords
-        .filter(record => record.paymentMethod === '赊账' && !record.isPaid)
-        .map(record => ({
-          ...record,
-          type: 'expense', // 标记为支出类型
-          sourceTable: 'expense_records' // 记录来源表
-        }))
-
-    // 应收账款：收入记录中支付方式为"赊账"且未收清
-    receivableCredits.value = incomeRecords
-        .filter(record => record.paymentMethod === '赊账' && !record.isPaid)
-        .map(record => ({
-          ...record,
-          type: 'income', // 标记为收入类型
-          sourceTable: 'income_records' // 记录来源表
-        }))
-
-    console.log('处理后的应付账款:', payableCredits.value)
-    console.log('处理后的应收账款:', receivableCredits.value)
-  } catch (error) {
-    console.error('加载赊账数据失败:', error)
-    payableCredits.value = []
-    receivableCredits.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
 // ==================== 计算属性 ====================
-const totalCredit = computed(() => {
-  return payableCredits.value.reduce((sum, c) => sum + (c.amount || 0), 0) +
-      receivableCredits.value.reduce((sum, c) => sum + (c.amount || 0), 0)
+
+const searchPlaceholder = computed(() => {
+  return creditService.getCreditSearchPlaceholder(activeTab.value)
 })
 
-const payableCredit = computed(() => {
-  return payableCredits.value.reduce((sum, c) => sum + (c.amount || 0), 0)
-})
-
-const receivableCredit = computed(() => {
-  return receivableCredits.value.reduce((sum, c) => sum + (c.amount || 0), 0)
-})
-
-const overdueCount = computed(() => {
-  const payableOverdue = payableCredits.value.filter(c => isOverdue(c.expectedRepayDate)).length
-  const receivableOverdue = receivableCredits.value.filter(c => isOverdue(c.expectedRepayDate)).length
-  return payableOverdue + receivableOverdue
-})
-
-const getSearchPlaceholder = computed(() => {
-  if (activeTab.value === 'payable') return '搜索支出类型、供应商、备注...'
-  if (activeTab.value === 'receivable') return '搜索商品、客户、备注...'
-  return '搜索商品、客户、供应商、备注...'
-})
-
-// 过滤后的应付账款（支出赊账）
+// 过滤后的应付账款
 const filteredPayableCredits = computed(() => {
   let filtered = [...payableCredits.value]
 
+  // 根据标签页过滤
   if (activeTab.value === 'overdue') {
-    filtered = filtered.filter(c => isOverdue(c.expectedRepayDate))
-  } else if (activeTab.value === 'receivable') {
-    return []
+    filtered = filtered.filter(c => creditService.isCreditOverdue(c.expectedRepayDate))
   }
 
+  // 关键词搜索
   if (searchKeyword.value.trim()) {
-    const keyword = searchKeyword.value.toLowerCase().trim()
-    filtered = filtered.filter(c =>
-        (c.category && c.category.toLowerCase().includes(keyword)) ||
-        (c.subtype && c.subtype.toLowerCase().includes(keyword)) ||
-        (c.supplier && c.supplier.toLowerCase().includes(keyword)) ||
-        (c.note && c.note.toLowerCase().includes(keyword))
-    )
+    filtered = creditService.filterCreditRecords(filtered, {
+      keyword: searchKeyword.value
+    })
   }
 
   return filtered.sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -535,24 +475,20 @@ const filteredPayableTotal = computed(() => {
   return filteredPayableCredits.value.reduce((sum, c) => sum + (c.amount || 0), 0)
 })
 
-// 过滤后的应收账款（收入赊账）
+// 过滤后的应收账款
 const filteredReceivableCredits = computed(() => {
   let filtered = [...receivableCredits.value]
 
+  // 根据标签页过滤
   if (activeTab.value === 'overdue') {
-    filtered = filtered.filter(c => isOverdue(c.expectedRepayDate))
-  } else if (activeTab.value === 'payable') {
-    return []
+    filtered = filtered.filter(c => creditService.isCreditOverdue(c.expectedRepayDate))
   }
 
+  // 关键词搜索
   if (searchKeyword.value.trim()) {
-    const keyword = searchKeyword.value.toLowerCase().trim()
-    filtered = filtered.filter(c =>
-        (c.productName && c.productName.toLowerCase().includes(keyword)) ||
-        (c.category && c.category.toLowerCase().includes(keyword)) ||
-        (c.customer && c.customer.toLowerCase().includes(keyword)) ||
-        (c.note && c.note.toLowerCase().includes(keyword))
-    )
+    filtered = creditService.filterCreditRecords(filtered, {
+      keyword: searchKeyword.value
+    })
   }
 
   return filtered.sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -564,49 +500,61 @@ const filteredReceivableTotal = computed(() => {
 
 // ==================== 方法 ====================
 
+// 加载数据
+const loadData = async () => {
+  loading.value = true
+  try {
+    // 获取所有赊账记录
+    const creditData = await creditService.getAllCreditRecords()
+
+    payableCredits.value = creditData.payableCredits
+    receivableCredits.value = creditData.receivableCredits
+
+    // 获取统计数据
+    creditStats.value = await creditService.getCreditStats()
+
+    console.log('应付账款:', payableCredits.value.length)
+    console.log('应收账款:', receivableCredits.value.length)
+  } catch (error) {
+    console.error('加载赊账数据失败:', error)
+    notificationService.showNotification('加载赊账数据失败', 'error')
+    payableCredits.value = []
+    receivableCredits.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
 // 逾期判断
 const isOverdue = (expectedDate) => {
-  if (!expectedDate) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const dueDate = new Date(expectedDate)
-  dueDate.setHours(0, 0, 0, 0)
-  return dueDate < today
+  return creditService.isCreditOverdue(expectedDate)
 }
 
 // 应付账款标签样式
 const getPayableBadgeClass = (credit) => {
-  if (credit.isPaid) return 'badge-paid'
-  if (isOverdue(credit.expectedRepayDate)) return 'badge-overdue'
-  return 'badge-pending'
+  return creditService.getPayableBadgeClass(credit)
 }
 
 // 应付账款标签文本
 const getPayableBadgeText = (credit) => {
-  if (credit.isPaid) return '已还清'
-  if (isOverdue(credit.expectedRepayDate)) return '逾期未还'
-  return '待还款'
+  return creditService.getPayableBadgeText(credit)
 }
 
 // 应收账款标签样式
 const getReceivableBadgeClass = (credit) => {
-  if (credit.isPaid) return 'badge-paid'
-  if (isOverdue(credit.expectedRepayDate)) return 'badge-overdue'
-  return 'badge-pending'
+  return creditService.getReceivableBadgeClass(credit)
 }
 
 // 应收账款标签文本
 const getReceivableBadgeText = (credit) => {
-  if (credit.isPaid) return '已收清'
-  if (isOverdue(credit.expectedRepayDate)) return '逾期未收'
-  return '待收款'
+  return creditService.getReceivableBadgeText(credit)
 }
 
 const searchCredits = () => {
   // 计算属性会自动更新
 }
 
-// 打开还款模态框（应付账款 - 我还给别人）
+// 打开还款模态框
 const openRepaymentModal = (credit) => {
   selectedPayable.value = credit
   repaymentForm.amount = ''
@@ -616,7 +564,7 @@ const openRepaymentModal = (credit) => {
   repaymentModalVisible.value = true
 }
 
-// 打开收款模态框（应收账款 - 别人还给我）
+// 打开收款模态框
 const openCollectionModal = (credit) => {
   selectedReceivable.value = credit
   collectionForm.amount = ''
@@ -627,16 +575,38 @@ const openCollectionModal = (credit) => {
 }
 
 // 查看应付账款详情
-const viewPayableDetail = (credit) => {
-  notificationService.showNotification(`应付账款详情\n\n支出类型: ${credit.category} - ${credit.subtype}\n供应商: ${credit.supplier || '未知'}\n金额: ¥${formatNumber(credit.amount)}\n支出日期: ${formatDate(credit.date)}\n应还日期: ${formatDate(credit.expectedRepayDate)}\n支付方式: ${credit.paymentMethod}\n备注: ${credit.note || '无'}`, 'info')
+const viewPayableDetail = async (credit) => {
+  try {
+    const detail = await creditService.getCreditDetail(credit.id, 'expense')
+    if (detail) {
+      notificationService.showNotification(
+          `应付账款详情\n\n支出类型: ${detail.category} - ${detail.subtype}\n供应商: ${detail.supplier || '未知'}\n金额: ¥${formatNumber(detail.amount)}\n支出日期: ${formatDate(detail.date)}\n应还日期: ${formatDate(detail.expectedRepayDate)}\n支付方式: ${detail.paymentMethod}\n备注: ${detail.note || '无'}`,
+          'info'
+      )
+    }
+  } catch (error) {
+    console.error('获取详情失败:', error)
+    notificationService.showNotification('获取详情失败', 'error')
+  }
 }
 
 // 查看应收账款详情
-const viewReceivableDetail = (credit) => {
-  notificationService.showNotification(`应收账款详情\n\n商品: ${credit.productName || credit.category}\n客户: ${credit.customer || '散客'}\n金额: ¥${formatNumber(credit.amount)}\n数量: ${credit.quantity || 1} ${credit.unit || ''}\n收入日期: ${formatDate(credit.date)}\n预计收款: ${formatDate(credit.expectedRepayDate)}\n备注: ${credit.note || '无'}`, 'info')
+const viewReceivableDetail = async (credit) => {
+  try {
+    const detail = await creditService.getCreditDetail(credit.id, 'income')
+    if (detail) {
+      notificationService.showNotification(
+          `应收账款详情\n\n商品: ${detail.productName || detail.category}\n客户: ${detail.customer || '散客'}\n金额: ¥${formatNumber(detail.amount)}\n数量: ${detail.quantity || 1} ${detail.unit || ''}\n收入日期: ${formatDate(detail.date)}\n预计收款: ${formatDate(detail.expectedRepayDate)}\n备注: ${detail.note || '无'}`,
+          'info'
+      )
+    }
+  } catch (error) {
+    console.error('获取详情失败:', error)
+    notificationService.showNotification('获取详情失败', 'error')
+  }
 }
 
-// 提交还款（应付账款 - 我还给别人）
+// 提交还款
 const submitRepayment = async () => {
   if (!repaymentForm.amount || parseFloat(repaymentForm.amount) <= 0) {
     notificationService.showNotification('请输入有效的还款金额', 'error')
@@ -649,21 +619,12 @@ const submitRepayment = async () => {
   }
 
   try {
-    const amount = parseFloat(repaymentForm.amount)
-    const remainingAmount = selectedPayable.value.amount - amount
-
-    // 1. 更新支出记录
-    await businessDataService.updateExpenseRecord(selectedPayable.value.id, {
-      ...selectedPayable.value,
-      amount: remainingAmount,
-      isPaid: remainingAmount <= 0,
-      repayDate: repaymentForm.date,
-      repayMethod: repaymentForm.paymentMethod,
-      repayNote: repaymentForm.note
+    await creditService.recordPayableRepayment(selectedPayable.value.id, {
+      amount: repaymentForm.amount,
+      date: repaymentForm.date,
+      paymentMethod: repaymentForm.paymentMethod,
+      note: repaymentForm.note
     })
-
-    // 2. 如果是应付账款（支出赊账），更新供应商信息（如果有供应商管理）
-    // 这里可以根据需要添加供应商管理的更新逻辑
 
     await loadData()
     emit('update')
@@ -671,11 +632,11 @@ const submitRepayment = async () => {
     notificationService.showNotification('还款记录成功', 'success')
   } catch (error) {
     console.error('提交还款失败:', error)
-    notificationService.showNotification('提交还款失败', 'error')
+    notificationService.showNotification(error.message || '提交还款失败', 'error')
   }
 }
 
-// 提交收款（应收账款 - 别人还给我）
+// 提交收款
 const submitCollection = async () => {
   if (!collectionForm.amount || parseFloat(collectionForm.amount) <= 0) {
     notificationService.showNotification('请输入有效的收款金额', 'error')
@@ -688,43 +649,12 @@ const submitCollection = async () => {
   }
 
   try {
-    const amount = parseFloat(collectionForm.amount)
-    const remainingAmount = selectedReceivable.value.amount - amount
-
-    // 1. 更新收入记录
-    await businessDataService.updateIncomeRecord(selectedReceivable.value.id, {
-      ...selectedReceivable.value,
-      amount: remainingAmount,
-      isPaid: remainingAmount <= 0,
-      repayDate: collectionForm.date,
-      repayMethod: collectionForm.paymentMethod,
-      repayNote: collectionForm.note
+    await creditService.recordReceivableCollection(selectedReceivable.value.id, {
+      amount: collectionForm.amount,
+      date: collectionForm.date,
+      paymentMethod: collectionForm.paymentMethod,
+      note: collectionForm.note
     })
-
-    // 2. 更新客户信息（如果有关联客户）
-    if (selectedReceivable.value.customerId) {
-      const customers = userDataService.getCustomers()
-      const customerIndex = customers.findIndex(c => c.id === selectedReceivable.value.customerId)
-
-      if (customerIndex !== -1) {
-        // 更新客户的赊账余额
-        if (!customers[customerIndex].creditInfo) {
-          customers[customerIndex].creditInfo = { hasCredit: true, balance: 0 }
-        }
-
-        // 减去已收款金额
-        customers[customerIndex].creditInfo.balance =
-            (customers[customerIndex].creditInfo.balance || 0) - amount
-
-        // 如果余额为0，可以标记为已还清
-        if (customers[customerIndex].creditInfo.balance <= 0) {
-          customers[customerIndex].creditInfo.balance = 0
-          customers[customerIndex].creditInfo.lastRepayDate = collectionForm.date
-        }
-
-        userDataService.saveCustomers(customers)
-      }
-    }
 
     await loadData()
     emit('update')
@@ -732,7 +662,7 @@ const submitCollection = async () => {
     notificationService.showNotification('收款记录成功', 'success')
   } catch (error) {
     console.error('提交收款失败:', error)
-    notificationService.showNotification('提交收款失败', 'error')
+    notificationService.showNotification(error.message || '提交收款失败', 'error')
   }
 }
 
@@ -758,10 +688,10 @@ const closeCollectionOnOverlay = (event) => {
   }
 }
 
+// ==================== 辅助函数 ====================
+
 const formatNumber = (num) => {
-  if (num === undefined || num === null) return '0.00'
-  const value = typeof num === 'number' ? num : parseFloat(num) || 0
-  return value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return baseService.formatNumber(num)
 }
 
 const formatDate = (dateStr) => {
@@ -773,13 +703,15 @@ const formatDate = (dateStr) => {
   return `${year}.${month}.${day}`
 }
 
-// 监听 visible 变化
+// ==================== 监听器 ====================
+
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     loadData()
   }
 })
 
+// ==================== 初始化 ====================
 onMounted(() => {
   if (props.visible) {
     loadData()
