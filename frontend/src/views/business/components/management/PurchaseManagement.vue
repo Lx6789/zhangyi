@@ -74,10 +74,9 @@
                     type="text"
                     class="search-input"
                     placeholder="搜索订单号、供应商..."
-                    @input="filterOrders"
                 >
               </div>
-              <select v-model="orderStatusFilter" class="filter-select" @change="filterOrders">
+              <select v-model="orderStatusFilter" class="filter-select">
                 <option value="all">全部状态</option>
                 <option value="pending">待处理</option>
                 <option value="completed">已完成</option>
@@ -106,7 +105,7 @@
                     <div class="order-title">
                       <h4>订单号: {{ order.orderNo }}</h4>
                       <span class="order-status" :class="order.status">
-                        {{ getOrderStatusText(order.status) }}
+                        {{ purchaseService.getOrderStatusText(order.status) }}
                       </span>
                     </div>
                     <div class="order-actions">
@@ -130,9 +129,9 @@
                     </div>
                     <div class="info-row">
                       <span class="info-label">预计送达：</span>
-                      <span class="info-value" :class="{ 'warning-text': isOrderDelayed(order.expectedDate) }">
+                      <span class="info-value" :class="{ 'warning-text': purchaseService.isOrderDelayed(order.expectedDate) }">
                         {{ formatDate(order.expectedDate) }}
-                        <span v-if="isOrderDelayed(order.expectedDate)" class="delayed-tag">已延迟</span>
+                        <span v-if="purchaseService.isOrderDelayed(order.expectedDate)" class="delayed-tag">已延迟</span>
                       </span>
                     </div>
                     <div class="info-row">
@@ -206,7 +205,6 @@
                     type="text"
                     class="search-input"
                     placeholder="搜索供应商名称、联系人、电话..."
-                    @input="filterSuppliers"
                 >
               </div>
             </div>
@@ -303,10 +301,9 @@
                     type="text"
                     class="search-input"
                     placeholder="搜索商品名称、供应商..."
-                    @input="filterHistory"
                 >
               </div>
-              <select v-model="historySupplierFilter" class="filter-select" @change="filterHistory">
+              <select v-model="historySupplierFilter" class="filter-select">
                 <option value="all">全部供应商</option>
                 <option v-for="s in suppliers" :key="s.id" :value="s.id">
                   {{ s.name }}
@@ -320,14 +317,12 @@
                   v-model="historyStartDate"
                   type="date"
                   class="date-input"
-                  @change="filterHistory"
               >
               <span>至</span>
               <input
                   v-model="historyEndDate"
                   type="date"
                   class="date-input"
-                  @change="filterHistory"
               >
             </div>
 
@@ -826,7 +821,7 @@
               </div>
               <div class="detail-item">
                 <span class="label">预计送达：</span>
-                <span class="value" :class="{ 'warning-text': isOrderDelayed(selectedOrder.expectedDate) }">
+                <span class="value" :class="{ 'warning-text': purchaseService.isOrderDelayed(selectedOrder.expectedDate) }">
                   {{ formatDate(selectedOrder.expectedDate) }}
                 </span>
               </div>
@@ -834,7 +829,7 @@
                 <span class="label">订单状态：</span>
                 <span class="value">
                   <span class="order-status" :class="selectedOrder.status">
-                    {{ getOrderStatusText(selectedOrder.status) }}
+                    {{ purchaseService.getOrderStatusText(selectedOrder.status) }}
                   </span>
                 </span>
               </div>
@@ -945,9 +940,10 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import dateHelper from '@/services/utils/date-helper.service.js'
 import { notificationService } from "@/services/index.js"
-import purchaseService from "@/services/api/business/purchase.service.js";
-import baseService from "@/services/api/business/base.service.js";
-import supplierService from "@/services/api/business/supplier.service.js";
+import purchaseService from "@/services/api/business/purchase.service.js"
+import baseService from "@/services/api/business/base.service.js"
+import supplierService from "@/services/api/business/supplier.service.js"
+import expenseService from "@/services/api/business/expense.service.js"
 
 const props = defineProps({
   visible: {
@@ -1037,7 +1033,7 @@ const supplierForm = reactive({
 
 // ==================== 计算属性 ====================
 
-// 统计数据
+// 统计数据（使用 service 方法）
 const stats = computed(() => {
   return purchaseService.getPurchaseOrderStats(orders.value)
 })
@@ -1054,7 +1050,7 @@ const totalOrderPages = computed(() => {
   return Math.ceil(filteredOrders.value.length / pageSize.value)
 })
 
-// 计算订单总额
+// 计算订单总额（使用 service 方法）
 const calculateOrderTotal = computed(() => {
   return purchaseService.calculateOrderTotal(orderForm.items)
 })
@@ -1066,19 +1062,19 @@ const calculateTotalQuantity = computed(() => {
   }, 0)
 })
 
-// 供应商类别选项
+// 供应商类别选项（使用 service 方法）
 const supplierCategories = computed(() => {
   return supplierService.getSupplierCategories()
 })
 
-// 结算方式选项
+// 结算方式选项（使用 service 方法）
 const paymentTerms = computed(() => {
   return purchaseService.getPaymentTerms()
 })
 
 // ==================== 辅助方法 ====================
 
-// 重置订单表单
+// 重置订单表单（使用 service 方法）
 const resetOrderForm = () => {
   orderForm.orderNo = purchaseService.generateOrderNo()
   orderForm.supplierId = ''
@@ -1108,7 +1104,7 @@ const resetSupplierForm = () => {
   })
 }
 
-// 添加订单商品项
+// 添加订单商品项（使用 service 方法）
 const addOrderItem = () => {
   orderForm.items.push(purchaseService.createEmptyOrderItem())
 }
@@ -1137,32 +1133,18 @@ const getMainUnit = () => {
   return firstItem?.unit || ''
 }
 
-// 获取供应商名称
+// 获取供应商名称（使用 service 方法）
 const getSupplierName = (supplierId) => {
   return purchaseService.getSupplierName(suppliers.value, supplierId)
 }
 
-// 获取订单状态文本
-const getOrderStatusText = (status) => {
-  return purchaseService.getOrderStatusText(status)
-}
-
-// 判断订单是否延迟
-const isOrderDelayed = (expectedDate) => {
-  return purchaseService.isOrderDelayed(expectedDate)
-}
-
-// 格式化日期
+// 格式化日期（使用 dateHelper）
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  return `${year}.${month}.${day}`
+  return dateHelper.formatDate(dateStr)
 }
 
-// 格式化数字
+// 格式化数字（使用 baseService）
 const formatNumber = (num) => {
   return baseService.formatNumber(num)
 }
@@ -1178,7 +1160,7 @@ const loadAllData = async () => {
   ])
 }
 
-// 加载供应商列表
+// 加载供应商列表（使用 supplierService）
 const loadSuppliers = async () => {
   loading.value.suppliers = true
   try {
@@ -1192,7 +1174,7 @@ const loadSuppliers = async () => {
   }
 }
 
-// 加载采购订单
+// 加载采购订单（使用 purchaseService）
 const loadOrders = async () => {
   loading.value.orders = true
   try {
@@ -1206,7 +1188,7 @@ const loadOrders = async () => {
   }
 }
 
-// 加载采购历史
+// 加载采购历史（使用 purchaseService）
 const loadPurchaseHistory = async () => {
   loading.value.history = true
   try {
@@ -1222,12 +1204,12 @@ const loadPurchaseHistory = async () => {
 
 // ==================== 筛选方法 ====================
 
-// 筛选供应商
+// 筛选供应商（使用 supplierService）
 const filterSuppliers = () => {
   filteredSuppliers.value = supplierService.filterSuppliers(suppliers.value, supplierSearchKeyword.value)
 }
 
-// 筛选订单
+// 筛选订单（使用 purchaseService）
 const filterOrders = () => {
   filteredOrders.value = purchaseService.filterPurchaseOrders(
       orders.value,
@@ -1240,7 +1222,7 @@ const filterOrders = () => {
   orderPage.value = 1
 }
 
-// 筛选历史记录
+// 筛选历史记录（使用 purchaseService）
 const filterHistory = () => {
   filteredHistory.value = purchaseService.filterPurchaseHistory(
       purchaseHistory.value,
@@ -1285,7 +1267,7 @@ const editOrder = (order) => {
   orderModalVisible.value = true
 }
 
-// 保存订单
+// 保存订单（使用 purchaseService）
 const saveOrder = async () => {
   const validation = purchaseService.validateOrderForm(orderForm)
   if (!validation.valid) {
@@ -1338,10 +1320,15 @@ const confirmReceive = async () => {
   if (!selectedOrder.value) return
 
   try {
-    await purchaseService.receivePurchaseOrder(
+    // 传入支出记录创建回调
+    const result = await purchaseService.receivePurchaseOrder(
         selectedOrder.value,
         props.products,
-        suppliers.value
+        suppliers.value,
+        async (expenseData) => {
+          // 创建支出记录
+          await expenseService.addExpenseRecord(expenseData)
+        }
     )
 
     await Promise.all([
@@ -1351,7 +1338,10 @@ const confirmReceive = async () => {
     ])
 
     receiveModalVisible.value = false
-    notificationService.showNotification('收货成功，库存已更新', 'success')
+    notificationService.showNotification(
+        `收货成功，已更新 ${result.inventoryUpdated.length} 种商品库存，创建 ${result.expenseRecords.length} 条支出记录`,
+        'success'
+    )
   } catch (error) {
     console.error('收货失败:', error)
     notificationService.showNotification(error.message || '收货失败', 'error')
@@ -1412,7 +1402,7 @@ const editSupplier = (supplier) => {
   supplierModalVisible.value = true
 }
 
-// 保存供应商
+// 保存供应商（使用 supplierService）
 const saveSupplier = async () => {
   const validation = supplierService.validateSupplierForm(supplierForm)
   if (!validation.valid) {
@@ -1583,6 +1573,46 @@ watch([historySearchKeyword, historySupplierFilter, historyStartDate, historyEnd
 onMounted(() => {
   if (props.visible) {
     loadAllData()
+
+    // 检查是否有从支出记账传来的采购数据
+    const pendingData = localStorage.getItem('pending_purchase_data')
+    if (pendingData) {
+      try {
+        const data = JSON.parse(pendingData)
+        setTimeout(() => {
+          openAddOrderModal()
+
+          if (data.supplier) {
+            const supplier = suppliers.value.find(s => s.name === data.supplier || s.id === data.supplier)
+            if (supplier) {
+              orderForm.supplierId = supplier.id
+            }
+          }
+
+          if (data.productId && data.productName) {
+            orderForm.items = [{
+              productId: data.productId,
+              productName: data.productName,
+              quantity: data.quantity || '',
+              price: data.unitPrice || '',
+              unit: data.unit || '斤',
+              category: ''
+            }]
+            onProductSelected(0)
+          }
+
+          if (data.date) {
+            orderForm.orderDate = data.date
+            orderForm.expectedDate = dateHelper.addDays(data.date, 7)
+          }
+
+          localStorage.removeItem('pending_purchase_data')
+        }, 200)
+      } catch (error) {
+        console.error('解析采购数据失败:', error)
+        localStorage.removeItem('pending_purchase_data')
+      }
+    }
   }
 })
 </script>

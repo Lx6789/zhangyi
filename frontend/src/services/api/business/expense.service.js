@@ -2,6 +2,8 @@
 import businessDataService from '@/services/cache/business-cache.service.js'
 import baseService from './base.service.js'
 import inventoryService from './inventory.service.js'
+import idGeneratorService from "@/services/id-generator.service.js";
+import {userDataService} from "@/services/index.js";
 
 /**
  * 支出记账业务服务
@@ -244,7 +246,7 @@ class ExpenseService {
      */
     createExpenseRecord(formData) {
         const record = {
-            id: Date.now().toString(),
+            id: idGeneratorService.generateExpenseRecordId(userDataService.getCurrentUserId()),
             type: '支出',
             category: formData.type,
             subtype: formData.subtype || formData.type,

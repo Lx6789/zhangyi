@@ -262,6 +262,24 @@ class IdGeneratorService {
     generateRecordsMetaId(userId, planId) {
         return `meta_${userId}_${planId}`
     }
+
+    /**
+     * 生成客户ID
+     */
+    generateCustomerId(userId) {
+        const timestamp = Date.now()
+        const random = Math.random().toString(36).substring(2, 8)
+        return `CUST_${userId}_${timestamp}_${random}`
+    }
+
+    /**
+     * 生成还款记录ID
+     */
+    generateRepaymentId(userId) {
+        const timestamp = Date.now()
+        const random = Math.random().toString(36).substring(2, 8)
+        return `REPAY_${userId}_${timestamp}_${random}`
+    }
 }
 
 export default new IdGeneratorService()

@@ -781,12 +781,31 @@ class BusinessCacheService {
     async updatePurchaseOrder(id, data) {
         const order = await indexedDBService.get('purchase_orders', id)
         if (order && order.userId === this.getCurrentUserId()) {
-            const updatedOrder = {
+            // 清理数据，移除无法克隆的内容
+            const cleanedData = {
                 ...order,
                 ...data,
                 updateTime: new Date().toISOString()
             }
-            return indexedDBService.update('purchase_orders', updatedOrder)
+
+            // 清理 items 数组中的循环引用
+            if (cleanedData.items && Array.isArray(cleanedData.items)) {
+                cleanedData.items = cleanedData.items.map(item => ({
+                    productId: item.productId,
+                    productName: item.productName,
+                    quantity: item.quantity,
+                    price: item.price,
+                    unit: item.unit,
+                    category: item.category
+                }))
+            }
+
+            // 清理其他可能包含循环引用的字段
+            delete cleanedData.__ob__
+            delete cleanedData._rawValue
+            delete cleanedData._shallow
+
+            return indexedDBService.update('purchase_orders', cleanedData)
         }
         return false
     }
@@ -825,75 +844,618 @@ class BusinessCacheService {
         return history.filter(h => h.userId === userId)
     }
 
-    // ==================== 客户管理 (使用 userDataService) ====================
+    // ==================== 客户管理 (使用 IndexedDB) ====================
 
     /**
      * 获取所有客户列表
      */
-    getAllCustomers() {
-        return userDataService.getCustomers() || []
-    }
+    async getAllCustomers() {
+        console.log('getAllCustomers 被调用，当前用户ID:', this.getCurrentUserId())
+        const customers = await indexedDBService.getAll('customers')
+        console.log('原始客户数据:', customers)
 
-    /**
-     * 保存客户列表
-     */
-    saveCustomers(customers) {
-        userDataService.saveCustomers(customers)
+        const userId = this.getCurrentUserId()
+        const filteredCustomers = customers.filter(c => c.userId === userId)
+        console.log('过滤后的客户数据:', filteredCustomers)
+
+        return filteredCustomers
     }
 
     /**
      * 获取单个客户
      */
-    getCustomerById(customerId) {
-        const customers = this.getAllCustomers()
-        return customers.find(c => c.id === customerId) || null
+    async getCustomerById(customerId) {
+        const customer = await indexedDBService.get('customers', customerId)
+        if (customer && customer.userId === this.getCurrentUserId()) {
+            return customer
+        }
+        return null
     }
 
     /**
      * 添加客户
      */
-    addCustomer(customerData) {
-        const customers = this.getAllCustomers()
-        const newCustomer = {
-            id: Date.now().toString(),
+    async addCustomer(customerData) {
+        const customerId = idGenerator.generateCustomerId(this.getCurrentUserId())
+        const newCustomer = this.addUserIdentifier({
+            id: customerId,
             ...customerData,
+            type: customerData.type || '零售客户',
+            creditInfo: customerData.creditInfo || { hasCredit: false },
+            stats: customerData.stats || { transactionCount: 0, totalAmount: 0, lastTransactionDate: null },
             createTime: new Date().toISOString(),
             updateTime: new Date().toISOString()
-        }
-        customers.push(newCustomer)
-        this.saveCustomers(customers)
-        return newCustomer
+        })
+        return indexedDBService.add('customers', newCustomer)
+    }
+
+    /**
+     * 批量添加客户
+     */
+    async addCustomers(customers) {
+        const newCustomers = customers.map(customer => {
+            const customerId = idGenerator.generateCustomerId(this.getCurrentUserId())
+            return this.addUserIdentifier({
+                id: customerId,
+                ...customer,
+                type: customer.type || '零售客户',
+                creditInfo: customer.creditInfo || { hasCredit: false },
+                stats: customer.stats || { transactionCount: 0, totalAmount: 0, lastTransactionDate: null },
+                createTime: new Date().toISOString(),
+                updateTime: new Date().toISOString()
+            })
+        })
+        return indexedDBService.bulkAdd('customers', newCustomers)
     }
 
     /**
      * 更新客户
      */
-    updateCustomer(customerId, customerData) {
-        const customers = this.getAllCustomers()
-        const index = customers.findIndex(c => c.id === customerId)
-        if (index === -1) return null
+    async updateCustomer(customerId, customerData) {
+        console.log('updateCustomer 被调用:', customerId)
 
-        customers[index] = {
-            ...customers[index],
-            ...customerData,
+        const customer = await indexedDBService.get('customers', customerId)
+        if (!customer) {
+            console.error('客户不存在:', customerId)
+            return false
+        }
+
+        if (customer.userId !== this.getCurrentUserId()) {
+            console.error('无权修改此客户')
+            return false
+        }
+
+        // 创建完全干净的客户对象
+        const cleanedData = {
+            id: customerId,
+            name: customerData.name || customer.name,
+            type: customerData.type || customer.type || '零售客户',
+            phone: customerData.phone || customer.phone || '',
+            address: customerData.address || customer.address || '',
+            note: customerData.note || customer.note || '',
+            creditInfo: {
+                hasCredit: customerData.creditInfo?.hasCredit || false,
+                balance: customerData.creditInfo?.balance || 0,
+                creditLimit: customerData.creditInfo?.creditLimit || null,
+                settlementDays: customerData.creditInfo?.settlementDays || null,
+                note: customerData.creditInfo?.note || '',
+                lastCreditDate: customerData.creditInfo?.lastCreditDate || null,
+                lastCreditAmount: customerData.creditInfo?.lastCreditAmount || 0,
+                lastRepayDate: customerData.creditInfo?.lastRepayDate || null,
+                lastRepayAmount: customerData.creditInfo?.lastRepayAmount || 0
+            },
+            stats: {
+                transactionCount: customerData.stats?.transactionCount || 0,
+                totalAmount: customerData.stats?.totalAmount || 0,
+                lastTransactionDate: customerData.stats?.lastTransactionDate || null
+            },
+            userId: customer.userId,
+            createTime: customer.createTime,
             updateTime: new Date().toISOString()
         }
-        this.saveCustomers(customers)
-        return customers[index]
+
+        console.log('清理后的客户数据:', cleanedData)
+
+        return indexedDBService.update('customers', cleanedData)
     }
 
     /**
      * 删除客户
      */
-    deleteCustomer(customerId) {
-        const customers = this.getAllCustomers()
-        const index = customers.findIndex(c => c.id === customerId)
-        if (index === -1) return false
+    async deleteCustomer(customerId) {
+        const customer = await indexedDBService.get('customers', customerId)
+        if (customer && customer.userId === this.getCurrentUserId()) {
+            // 同时删除该客户的还款记录
+            const repayments = await this.getCustomerRepayments(customerId)
+            for (const repayment of repayments) {
+                await indexedDBService.delete('customer_repayments', repayment.id)
+            }
+            return indexedDBService.delete('customers', customerId)
+        }
+        return false
+    }
 
-        customers.splice(index, 1)
-        this.saveCustomers(customers)
+    /**
+     * 按名称查找客户
+     */
+    async getCustomerByName(name) {
+        const customers = await this.getAllCustomers()
+        return customers.find(c => c.name === name) || null
+    }
+
+    /**
+     * 按电话查找客户
+     */
+    async getCustomerByPhone(phone) {
+        const customers = await this.getAllCustomers()
+        return customers.find(c => c.phone === phone) || null
+    }
+
+    /**
+     * 按类型筛选客户
+     */
+    async getCustomersByType(type) {
+        const customers = await this.getAllCustomers()
+        return customers.filter(c => c.type === type)
+    }
+
+    /**
+     * 获取有赊账的客户
+     */
+    async getCustomersWithCredit() {
+        const customers = await this.getAllCustomers()
+        return customers.filter(c => c.creditInfo?.hasCredit === true && (c.creditInfo?.balance || 0) > 0)
+    }
+
+    // ==================== 客户还款记录管理 ====================
+
+    /**
+     * 添加客户还款记录
+     */
+    async addCustomerRepayment(repayment) {
+        const repaymentId = idGenerator.generateRepaymentId(this.getCurrentUserId())
+        const newRepayment = this.addUserIdentifier({
+            ...repayment,
+            id: repayment.id || repaymentId,
+            repaymentDate: repayment.repaymentDate || new Date().toISOString(),
+            createTime: new Date().toISOString()
+        })
+        return indexedDBService.add('customer_repayments', newRepayment)
+    }
+
+    /**
+     * 获取客户的所有还款记录
+     */
+    async getCustomerRepayments(customerId) {
+        const repayments = await indexedDBService.getAll('customer_repayments')
+        const userId = this.getCurrentUserId()
+        return repayments.filter(r => r.userId === userId && r.customerId === customerId)
+            .sort((a, b) => new Date(b.repaymentDate) - new Date(a.repaymentDate))
+    }
+
+    /**
+     * 获取客户的还款历史（带统计）
+     */
+    async getCustomerRepaymentHistory(customerId) {
+        const repayments = await this.getCustomerRepayments(customerId)
+        const totalRepaid = repayments.reduce((sum, r) => sum + (r.amount || 0), 0)
+        const repaymentCount = repayments.length
+        const lastRepaymentDate = repayments.length > 0 ? repayments[0].repaymentDate : null
+
+        return {
+            repayments,
+            totalRepaid,
+            repaymentCount,
+            lastRepaymentDate
+        }
+    }
+
+    /**
+     * 记录客户还款（业务方法）
+     */
+    async recordCustomerRepayment(customerId, repaymentData) {
+        const { amount, date, paymentMethod, note } = repaymentData
+        const repaymentAmount = parseFloat(amount)
+
+        console.log('=== 开始记录还款 ===')
+        console.log('客户ID:', customerId)
+        console.log('还款金额:', repaymentAmount)
+
+        if (repaymentAmount <= 0) throw new Error('还款金额必须大于0')
+
+        // 获取客户信息
+        const customer = await this.getCustomerById(customerId)
+        if (!customer) throw new Error('客户不存在')
+
+        // 获取该客户的所有未还清赊账记录
+        const incomeRecords = await this.getAllIncomeRecords()
+        const customerCreditRecords = incomeRecords.filter(r =>
+            r.customerId === customerId &&
+            r.paymentMethod === '赊账' &&
+            !r.isPaid  // 未还清的记录
+        ).sort((a, b) => new Date(a.date) - new Date(b.date))
+
+        console.log('客户赊账记录数量:', customerCreditRecords.length)
+
+        // 如果没有未结清的赊账记录，只更新客户余额
+        if (customerCreditRecords.length === 0) {
+            const currentBalance = customer.creditInfo?.balance || 0
+            const newBalance = Math.max(0, currentBalance - repaymentAmount)
+
+            console.log(`没有未结清的赊账记录，直接更新客户余额: ${currentBalance} -> ${newBalance}`)
+
+            // 更新客户欠款余额
+            await this.updateCustomer(customerId, {
+                creditInfo: {
+                    ...customer.creditInfo,
+                    balance: newBalance,
+                    lastRepayDate: date,
+                    lastRepayAmount: repaymentAmount
+                }
+            })
+
+            // 记录还款历史（不关联具体赊账记录）
+            await this.addCustomerRepayment({
+                id: idGenerator.generateRepaymentId(this.getCurrentUserId()),
+                customerId: customerId,
+                amount: repaymentAmount,
+                repaymentDate: date,
+                paymentMethod: paymentMethod,
+                note: note,
+                originalBalance: currentBalance,
+                newBalance: newBalance,
+                repaymentDetails: []
+            })
+
+            console.log('=== 还款完成（仅更新余额）===')
+            return true
+        }
+
+        // 计算总欠款
+        const totalDebt = customerCreditRecords.reduce((sum, r) => {
+            const repaid = r.repaidAmount || 0
+            const remaining = r.amount - repaid
+            console.log(`记录 ${r.id}: 原金额=${r.amount}, 已还=${repaid}, 剩余=${remaining}`)
+            return sum + remaining
+        }, 0)
+
+        console.log('总欠款:', totalDebt)
+        console.log('还款金额:', repaymentAmount)
+
+        if (repaymentAmount > totalDebt) {
+            throw new Error(`还款金额不能大于总欠款（总欠款：¥${totalDebt}）`)
+        }
+
+        let remainingAmount = repaymentAmount
+        const repaymentDetails = []
+
+        // 按时间顺序分配还款到各个赊账记录
+        for (const record of customerCreditRecords) {
+            if (remainingAmount <= 0) break
+
+            const recordRemaining = record.amount - (record.repaidAmount || 0)
+            console.log(`处理记录 ${record.id}: 剩余欠款=${recordRemaining}, 待分配=${remainingAmount}`)
+
+            if (remainingAmount >= recordRemaining) {
+                // 完全还清这笔赊账
+                const repaidAmount = recordRemaining
+                repaymentDetails.push({
+                    creditId: record.id,
+                    amount: repaidAmount,
+                    isPaid: true
+                })
+                remainingAmount -= repaidAmount
+
+                console.log(`完全还清记录 ${record.id}: 还款金额=${repaidAmount}`)
+
+                // 更新赊账记录
+                await this.updateIncomeRecord(record.id, {
+                    repaidAmount: record.amount,
+                    isPaid: true,
+                    lastRepayDate: date,
+                    lastRepayAmount: repaidAmount,
+                    repayments: [...(record.repayments || []), {
+                        id: idGenerator.generateRepaymentId(this.getCurrentUserId()),
+                        amount: repaidAmount,
+                        date: date,
+                        paymentMethod: paymentMethod,
+                        note: note,
+                        type: 'full'
+                    }]
+                })
+            } else {
+                // 部分还清
+                repaymentDetails.push({
+                    creditId: record.id,
+                    amount: remainingAmount,
+                    isPaid: false
+                })
+
+                const newRepaidAmount = (record.repaidAmount || 0) + remainingAmount
+                console.log(`部分还清记录 ${record.id}: 原已还=${record.repaidAmount || 0}, 新已还=${newRepaidAmount}`)
+
+                await this.updateIncomeRecord(record.id, {
+                    repaidAmount: newRepaidAmount,
+                    isPaid: false,
+                    lastRepayDate: date,
+                    lastRepayAmount: remainingAmount,
+                    repayments: [...(record.repayments || []), {
+                        id: idGenerator.generateRepaymentId(this.getCurrentUserId()),
+                        amount: remainingAmount,
+                        date: date,
+                        paymentMethod: paymentMethod,
+                        note: note,
+                        type: 'partial'
+                    }]
+                })
+                remainingAmount = 0
+            }
+        }
+
+        // 计算新的客户欠款余额
+        const currentBalance = customer.creditInfo?.balance || 0
+        const newBalance = Math.max(0, currentBalance - repaymentAmount)
+
+        console.log(`客户余额: 原=${currentBalance}, 新=${newBalance}`)
+
+        // 更新客户欠款余额
+        await this.updateCustomer(customerId, {
+            creditInfo: {
+                ...customer.creditInfo,
+                balance: newBalance,
+                lastRepayDate: date,
+                lastRepayAmount: repaymentAmount
+            }
+        })
+
+        // 记录还款历史
+        await this.addCustomerRepayment({
+            id: idGenerator.generateRepaymentId(this.getCurrentUserId()),
+            customerId: customerId,
+            amount: repaymentAmount,
+            repaymentDate: date,
+            paymentMethod: paymentMethod,
+            note: note,
+            originalBalance: currentBalance,
+            newBalance: newBalance,
+            repaymentDetails: repaymentDetails
+        })
+
+        console.log('=== 还款完成 ===')
         return true
     }
+
+    /**
+     * 记录应付账款还款（支出赊账）- 数据库操作
+     */
+    async recordPayableRepayment(recordId, repaymentData) {
+        const { amount, date, paymentMethod, note } = repaymentData
+        const repaymentAmount = parseFloat(amount)
+
+        console.log('=== 开始记录应付账款还款 ===')
+        console.log('记录ID:', recordId)
+        console.log('还款金额:', repaymentAmount)
+
+        if (repaymentAmount <= 0) throw new Error('还款金额必须大于0')
+
+        // 获取支出记录
+        const record = await this.getExpenseRecordById(recordId)
+        if (!record) throw new Error('赊账记录不存在')
+        if (record.paymentMethod !== '赊账') throw new Error('该记录不是赊账记录')
+
+        // 计算剩余欠款
+        const currentRemaining = record.amount - (record.repaidAmount || 0)
+        console.log(`当前剩余欠款: ${currentRemaining}, 原始金额: ${record.amount}, 已还: ${record.repaidAmount || 0}`)
+
+        if (repaymentAmount > currentRemaining) {
+            throw new Error(`还款金额不能大于当前欠款（当前欠款：¥${currentRemaining}）`)
+        }
+
+        const newRepaidAmount = (record.repaidAmount || 0) + repaymentAmount
+        const isFullyPaid = newRepaidAmount >= record.amount
+
+        // 更新支出记录（不修改 amount）
+        const updatedRecord = {
+            ...record,
+            repaidAmount: newRepaidAmount,
+            isPaid: isFullyPaid,
+            lastRepayDate: date,
+            lastRepayAmount: repaymentAmount,
+            repayments: [...(record.repayments || []), {
+                id: idGenerator.generateRepaymentId(this.getCurrentUserId()),
+                amount: repaymentAmount,
+                date: date,
+                paymentMethod: paymentMethod,
+                note: note,
+                type: isFullyPaid ? 'full' : 'partial'
+            }]
+        }
+
+        console.log(`更新支出记录: 原已还=${record.repaidAmount || 0}, 新已还=${newRepaidAmount}, 是否还清=${isFullyPaid}`)
+
+        // 更新到数据库
+        const result = await this.updateExpenseRecord(recordId, updatedRecord)
+
+        // 记录还款历史到专门的还款表
+        await this.addExpenseRepayment({
+            expenseRecordId: recordId,
+            amount: repaymentAmount,
+            repaymentDate: date,
+            paymentMethod: paymentMethod,
+            note: note,
+            originalRemaining: currentRemaining,
+            newRemaining: currentRemaining - repaymentAmount
+        })
+
+        console.log('=== 应付账款还款完成 ===')
+        return result
+    }
+
+    /**
+     * 记录应收账款收款（收入赊账）- 数据库操作
+     */
+    async recordReceivableCollection(recordId, collectionData) {
+        const { amount, date, paymentMethod, note } = collectionData
+        const collectionAmount = parseFloat(amount)
+
+        console.log('=== 开始记录应收账款收款 ===')
+        console.log('记录ID:', recordId)
+        console.log('收款金额:', collectionAmount)
+
+        if (collectionAmount <= 0) throw new Error('收款金额必须大于0')
+
+        // 获取收入记录
+        const record = await this.getIncomeRecordById(recordId)
+        if (!record) throw new Error('赊账记录不存在')
+        if (record.paymentMethod !== '赊账') throw new Error('该记录不是赊账记录')
+
+        // 计算剩余欠款
+        const currentRemaining = record.amount - (record.repaidAmount || 0)
+        console.log(`当前剩余欠款: ${currentRemaining}, 原始金额: ${record.amount}, 已收: ${record.repaidAmount || 0}`)
+
+        if (collectionAmount > currentRemaining) {
+            throw new Error(`收款金额不能大于当前欠款（当前欠款：¥${currentRemaining}）`)
+        }
+
+        const newRepaidAmount = (record.repaidAmount || 0) + collectionAmount
+        const isFullyPaid = newRepaidAmount >= record.amount
+
+        // 更新收入记录（不修改 amount）
+        const updatedRecord = {
+            ...record,
+            repaidAmount: newRepaidAmount,
+            isPaid: isFullyPaid,
+            lastRepayDate: date,
+            lastRepayAmount: collectionAmount,
+            repayments: [...(record.repayments || []), {
+                id: idGenerator.generateRepaymentId(this.getCurrentUserId()),
+                amount: collectionAmount,
+                date: date,
+                paymentMethod: paymentMethod,
+                note: note,
+                type: isFullyPaid ? 'full' : 'partial'
+            }]
+        }
+
+        console.log(`更新收入记录: 原已收=${record.repaidAmount || 0}, 新已收=${newRepaidAmount}, 是否收清=${isFullyPaid}`)
+
+        // 更新到数据库
+        const result = await this.updateIncomeRecord(recordId, updatedRecord)
+
+        // 记录收款历史到专门的收款表
+        await this.addIncomeCollection({
+            incomeRecordId: recordId,
+            amount: collectionAmount,
+            collectionDate: date,
+            paymentMethod: paymentMethod,
+            note: note,
+            originalRemaining: currentRemaining,
+            newRemaining: currentRemaining - collectionAmount
+        })
+
+        // 更新客户赊账余额（仅当有客户ID且客户存在时）
+        if (result && record.customerId) {
+            try {
+                // 先获取客户信息
+                const customer = await this.getCustomerById(record.customerId)
+                if (customer && customer.creditInfo?.hasCredit) {
+                    // 只有当客户有赊账功能且当前有欠款时才更新
+                    const currentBalance = customer.creditInfo?.balance || 0
+
+                    // 检查客户是否有对应的赊账记录
+                    const incomeRecords = await this.getAllIncomeRecords()
+                    const customerCreditRecords = incomeRecords.filter(r =>
+                        r.customerId === record.customerId &&
+                        r.paymentMethod === '赊账' &&
+                        !r.isPaid
+                    )
+
+                    // 只有当存在未结清的赊账记录时才更新客户余额
+                    if (customerCreditRecords.length > 0) {
+                        const repaymentData = {
+                            amount: collectionAmount,
+                            date: date,
+                            paymentMethod: paymentMethod,
+                            note: note
+                        }
+                        await this.recordCustomerRepayment(record.customerId, repaymentData)
+                    } else {
+                        // 如果没有未结清的赊账记录，只更新客户的 creditInfo 余额
+                        const newBalance = Math.max(0, currentBalance - collectionAmount)
+                        await this.updateCustomer(record.customerId, {
+                            creditInfo: {
+                                ...customer.creditInfo,
+                                balance: newBalance,
+                                lastRepayDate: date,
+                                lastRepayAmount: collectionAmount
+                            }
+                        })
+                        console.log(`直接更新客户余额: ${currentBalance} -> ${newBalance}`)
+                    }
+                }
+            } catch (error) {
+                console.error('更新客户赊账余额失败:', error)
+                // 不抛出错误，因为主要操作（收入记录更新）已经成功
+            }
+        }
+
+        console.log('=== 应收账款收款完成 ===')
+        return result
+    }
+
+    /**
+     * 添加收入收款记录
+     */
+    async addIncomeCollection(collection) {
+        const collectionId = idGenerator.generateRepaymentId(this.getCurrentUserId())
+        const newCollection = this.addUserIdentifier({
+            ...collection,
+            id: collection.id || collectionId,
+            collectionDate: collection.collectionDate || new Date().toISOString(),
+            createTime: new Date().toISOString()
+        })
+        return indexedDBService.add('income_collections', newCollection)
+    }
+
+    /**
+     * 获取收入收款记录
+     */
+    async getIncomeCollections(incomeRecordId) {
+        const collections = await indexedDBService.getAll('income_collections')
+        const userId = this.getCurrentUserId()
+        return collections.filter(c =>
+            c.userId === userId &&
+            c.incomeRecordId === incomeRecordId
+        ).sort((a, b) => new Date(b.collectionDate) - new Date(a.collectionDate))
+    }
+
+    /**
+     * 添加支出还款记录
+     */
+    async addExpenseRepayment(repayment) {
+        const repaymentId = idGenerator.generateRepaymentId(this.getCurrentUserId())
+        const newRepayment = this.addUserIdentifier({
+            ...repayment,
+            id: repayment.id || repaymentId,
+            repaymentDate: repayment.repaymentDate || new Date().toISOString(),
+            createTime: new Date().toISOString()
+        })
+        return indexedDBService.add('expense_repayments', newRepayment)
+    }
+
+    /**
+     * 获取支出还款记录
+     */
+    async getExpenseRepayments(expenseRecordId) {
+        const repayments = await indexedDBService.getAll('expense_repayments')
+        const userId = this.getCurrentUserId()
+        return repayments.filter(r =>
+            r.userId === userId &&
+            r.expenseRecordId === expenseRecordId
+        ).sort((a, b) => new Date(b.repaymentDate) - new Date(a.repaymentDate))
+    }
+
+    // ==================== 客户统计方法 ====================
 
     /**
      * 按客户ID分组交易记录
@@ -929,15 +1491,38 @@ class BusinessCacheService {
      * 获取所有客户（带交易统计）
      */
     async getAllCustomersWithStats() {
-        const customers = this.getAllCustomers()
-        const allIncomeRecords = await this.getAllIncomeRecords()
-        const transactionsByCustomer = this.groupTransactionsByCustomer(allIncomeRecords)
+        console.log('getAllCustomersWithStats 被调用')
+        const customers = await this.getAllCustomers()
+        console.log('从数据库获取到的客户:', customers)
 
-        return customers.map(customer => {
+        const allIncomeRecords = await this.getAllIncomeRecords()
+        console.log('收入记录数量:', allIncomeRecords.length)
+
+        const transactionsByCustomer = this.groupTransactionsByCustomer(allIncomeRecords)
+        console.log('按客户分组的交易:', transactionsByCustomer)
+
+        // 获取每个客户的还款统计
+        const customersWithStats = []
+        for (const customer of customers) {
             const customerTransactions = transactionsByCustomer[customer.id] || []
             const stats = this.calculateCustomerStats(customerTransactions)
-            return { ...customer, stats }
-        })
+
+            // 获取还款统计
+            const repaymentHistory = await this.getCustomerRepaymentHistory(customer.id)
+
+            customersWithStats.push({
+                ...customer,
+                stats,
+                repaymentStats: {
+                    totalRepaid: repaymentHistory.totalRepaid,
+                    repaymentCount: repaymentHistory.repaymentCount,
+                    lastRepaymentDate: repaymentHistory.lastRepaymentDate
+                }
+            })
+        }
+
+        console.log('最终返回的客户数据:', customersWithStats)
+        return customersWithStats
     }
 
     /**
@@ -968,7 +1553,14 @@ class BusinessCacheService {
             }))
             .sort((a, b) => new Date(b.date) - new Date(a.date))
 
-        return { ...customer, transactions }
+        // 获取还款记录
+        const repaymentHistory = await this.getCustomerRepaymentHistory(customerId)
+
+        return {
+            ...customer,
+            transactions,
+            repaymentHistory: repaymentHistory.repayments
+        }
     }
 
     /**
@@ -1011,97 +1603,17 @@ class BusinessCacheService {
                 productName: r.productName,
                 quantity: r.quantity,
                 unit: r.unit,
-                price: r.price
+                price: r.price,
+                isPaid: r.isPaid
             }))
             .sort((a, b) => new Date(b.date) - new Date(a.date))
-    }
-
-    /**
-     * 记录客户还款
-     */
-    async recordCustomerRepayment(customerId, repaymentData) {
-        const { amount, date, paymentMethod, note } = repaymentData
-        const repaymentAmount = parseFloat(amount)
-
-        if (repaymentAmount <= 0) throw new Error('还款金额必须大于0')
-
-        const customers = this.getAllCustomers()
-        const customerIndex = customers.findIndex(c => c.id === customerId)
-
-        if (customerIndex === -1) throw new Error('客户不存在')
-
-        const customer = customers[customerIndex]
-        const currentBalance = customer.creditInfo?.balance || 0
-
-        if (repaymentAmount > currentBalance) throw new Error('还款金额不能大于当前欠款')
-
-        // 1. 更新客户欠款余额
-        customers[customerIndex].creditInfo.balance = currentBalance - repaymentAmount
-        customers[customerIndex].creditInfo.lastRepayDate = date
-        this.saveCustomers(customers)
-
-        // 2. 更新该客户的收入记录（赊账记录）
-        const incomeRecords = await this.getAllIncomeRecords()
-        const customerCreditRecords = incomeRecords.filter(r =>
-            r.customerId === customerId &&
-            r.paymentMethod === '赊账' &&
-            !r.isPaid
-        ).sort((a, b) => new Date(a.date) - new Date(b.date))
-
-        let remainingAmount = repaymentAmount
-
-        for (const record of customerCreditRecords) {
-            if (remainingAmount <= 0) break
-
-            const recordAmount = record.amount
-            if (remainingAmount >= recordAmount) {
-                await this.updateIncomeRecord(record.id, {
-                    amount: 0,
-                    isPaid: true,
-                    repayDate: date,
-                    repayMethod: paymentMethod,
-                    repayNote: note
-                })
-                remainingAmount -= recordAmount
-            } else {
-                await this.updateIncomeRecord(record.id, {
-                    amount: recordAmount - remainingAmount,
-                    isPaid: false,
-                    partialRepay: true,
-                    lastRepayDate: date,
-                    lastRepayAmount: remainingAmount
-                })
-                remainingAmount = 0
-            }
-        }
-
-        // 3. 记录还款历史
-        const repayments = userDataService.getUserData(`customer_repayments_${customerId}`, [])
-        repayments.push({
-            id: Date.now(),
-            amount: repaymentAmount,
-            date: date,
-            paymentMethod: paymentMethod,
-            note: note,
-            timestamp: new Date().toISOString()
-        })
-        userDataService.setUserData(`customer_repayments_${customerId}`, repayments)
-
-        return true
-    }
-
-    /**
-     * 获取客户还款历史
-     */
-    getCustomerRepaymentHistory(customerId) {
-        return userDataService.getUserData(`customer_repayments_${customerId}`, [])
     }
 
     /**
      * 获取客户赊账统计
      */
     async getCustomerCreditStats() {
-        const customers = await this.getAllCustomersWithStats()
+        const customers = await this.getAllCustomers()
         let totalCreditBalance = 0
         let customersWithCredit = 0
         let totalCreditLimit = 0
@@ -1174,7 +1686,11 @@ class BusinessCacheService {
             'inventory',
             'suppliers',
             'purchase_orders',
-            'purchase_history'
+            'purchase_history',
+            'customers',
+            'customer_repayments',
+            'expense_repayments',
+            'income_collections'
         ]
 
         for (const storeName of stores) {
@@ -1203,7 +1719,9 @@ class BusinessCacheService {
             'inventory',
             'suppliers',
             'purchase_orders',
-            'purchase_history'
+            'purchase_history',
+            'customers',
+            'customer_repayments'
         ]
 
         for (const store of stores) {

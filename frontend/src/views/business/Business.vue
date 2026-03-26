@@ -137,6 +137,7 @@
         @success="handleExpenseSuccess"
         @refresh-products="handleRefreshProducts"
         @open-category="handleOpenCategoryFromExpense"
+        @open-purchase="handleOpenPurchase"
     />
 
     <ProductManagement
@@ -220,6 +221,7 @@ import {
 } from './components'
 import reportService from "@/services/api/business/report.service.js";
 import costService from "@/services/api/business/cost.service.js";
+import customerService from "@/services/api/business/customer.service.js";
 
 const router = useRouter()
 
@@ -237,6 +239,10 @@ const modalStates = reactive({
   price: false,
   cost: false
 })
+
+const handleOpenPurchase = () => {
+  modalStates.purchase = true
+}
 
 const activePlaceholder = ref('')
 const lastModal = ref(null)
@@ -376,9 +382,16 @@ const loadRecentRecords = async () => {
 // 加载客户数据
 const loadCustomers = async () => {
   try {
-    customers.value = userDataService.getCustomers()
+    customers.value = await customerService.getAllCustomers()
+    console.log('Business.vue - 加载客户数据成功，共', customers.value.length, '个客户')
+    if (customers.value.length > 0) {
+      console.log('示例客户:', customers.value[0])
+    }
+    return customers.value
   } catch (error) {
     console.error('加载客户失败:', error)
+    customers.value = []
+    return []
   }
 }
 
@@ -404,6 +417,8 @@ const loadProducts = async (showLoading = false) => {
 const loadCategories = async () => {
   try {
     categories.value = await businessDataService.getAllCategories()
+    console.log('Business.vue - 加载分类成功，共', categories.value.length, '个')
+    console.log('分类列表:', categories.value)
   } catch (error) {
     console.error('加载分类失败:', error)
   }
@@ -500,7 +515,6 @@ onMounted(async () => {
   const currentUser = authHelperService?.getCurrentUser?.()
   if (currentUser) {
     userDataService.setCurrentUser(currentUser)
-    await businessDataService.init(currentUser.id)
   }
 
   // 加载所有数据

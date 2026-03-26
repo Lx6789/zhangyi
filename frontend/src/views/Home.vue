@@ -976,20 +976,6 @@ onMounted(async () => {
 
   userDataService.setCurrentUser(currentUser)
 
-  // 关键：先初始化业务数据服务，确保 IndexedDB 已经准备好
-  console.log('开始初始化业务数据服务...')
-  await businessDataService.init(currentUser.id)
-  console.log('业务数据服务初始化完成')
-
-  // 验证数据库是否可用
-  try {
-    const db = await indexedDBService.getDB()
-    console.log('数据库连接成功:', db ? '是' : '否')
-    console.log('数据库中的表:', db ? Array.from(db.objectStoreNames) : '无')
-  } catch (error) {
-    console.error('数据库连接失败:', error)
-  }
-
   // 设置默认日期
   const today = new Date()
   const formattedDate = dateHelper.formatDate(today)

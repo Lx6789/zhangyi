@@ -17,15 +17,22 @@ class CustomerService {
     /**
      * 筛选客户
      */
-    filterCustomers(customers, filters = {}) {
+    async filterCustomers(filters = {}) {
+        let customers = await this.getAllCustomers()
+        console.log('filterCustomers - 原始客户:', customers)
+
         let filtered = [...customers]
         const { type, keyword } = filters
+
+        console.log('筛选条件 - type:', type, 'keyword:', keyword)
 
         if (type && type !== '全部') {
             if (type === '有赊账') {
                 filtered = filtered.filter(c => c.creditInfo?.hasCredit && (c.creditInfo?.balance || 0) > 0)
+                console.log('筛选有赊账后:', filtered.length)
             } else {
                 filtered = filtered.filter(c => c.type === type)
+                console.log(`筛选类型 ${type} 后:`, filtered.length)
             }
         }
 
@@ -36,8 +43,10 @@ class CustomerService {
                 (c.phone && c.phone.includes(searchTerm)) ||
                 (c.type && c.type.toLowerCase().includes(searchTerm))
             )
+            console.log('关键词筛选后:', filtered.length)
         }
 
+        console.log('最终筛选结果:', filtered)
         return filtered
     }
 
@@ -55,7 +64,8 @@ class CustomerService {
                 settlementDays: customerData.settlementDays ? parseInt(customerData.settlementDays) : null,
                 note: customerData.creditNote || '',
                 balance: 0,
-                lastRepayDate: null
+                lastRepayDate: null,
+                lastRepayAmount: 0
             } : { hasCredit: false },
             stats: { transactionCount: 0, totalAmount: 0, lastTransactionDate: null }
         }
@@ -67,7 +77,7 @@ class CustomerService {
      * 更新客户
      */
     async updateCustomer(customerId, customerData) {
-        const existingCustomer = businessDataService.getCustomerById(customerId)
+        const existingCustomer = await businessDataService.getCustomerById(customerId)
         if (!existingCustomer) throw new Error('客户不存在')
 
         const updatedCustomer = {
@@ -75,16 +85,17 @@ class CustomerService {
             ...customerData,
             creditInfo: customerData.hasCredit ? {
                 hasCredit: true,
-                creditLimit: customerData.creditLimit ? parseFloat(customerData.creditLimit) : null,
-                settlementDays: customerData.settlementDays ? parseInt(customerData.settlementDays) : null,
-                note: customerData.creditNote || '',
+                creditLimit: customerData.creditLimit ? parseFloat(customerData.creditLimit) : (existingCustomer.creditInfo?.creditLimit || null),
+                settlementDays: customerData.settlementDays ? parseInt(customerData.settlementDays) : (existingCustomer.creditInfo?.settlementDays || null),
+                note: customerData.creditNote || (existingCustomer.creditInfo?.note || ''),
                 balance: existingCustomer.creditInfo?.balance || 0,
-                lastRepayDate: existingCustomer.creditInfo?.lastRepayDate || null
+                lastRepayDate: existingCustomer.creditInfo?.lastRepayDate || null,
+                lastRepayAmount: existingCustomer.creditInfo?.lastRepayAmount || 0
             } : { hasCredit: false },
             updateTime: new Date().toISOString()
         }
 
-        const result = businessDataService.updateCustomer(customerId, updatedCustomer)
+        const result = await businessDataService.updateCustomer(customerId, updatedCustomer)
         if (!result) throw new Error('更新客户失败')
         return result
     }
@@ -93,10 +104,10 @@ class CustomerService {
      * 删除客户
      */
     async deleteCustomer(customerId) {
-        const existing = businessDataService.getCustomerById(customerId)
+        const existing = await businessDataService.getCustomerById(customerId)
         if (!existing) throw new Error('客户不存在')
 
-        const deleted = businessDataService.deleteCustomer(customerId)
+        const deleted = await businessDataService.deleteCustomer(customerId)
         if (!deleted) throw new Error('删除客户失败')
         return true
     }
@@ -124,7 +135,7 @@ class CustomerService {
 
         if (repaymentAmount <= 0) throw new Error('还款金额必须大于0')
 
-        const customer = businessDataService.getCustomerById(customerId)
+        const customer = await businessDataService.getCustomerById(customerId)
         if (!customer) throw new Error('客户不存在')
 
         const currentBalance = customer.creditInfo?.balance || 0
@@ -137,7 +148,8 @@ class CustomerService {
      * 获取客户还款历史
      */
     async getCustomerRepaymentHistory(customerId) {
-        return businessDataService.getCustomerRepaymentHistory(customerId)
+        const history = await businessDataService.getCustomerRepaymentHistory(customerId)
+        return history.repayments
     }
 
     /**
@@ -208,6 +220,38 @@ class CustomerService {
     }
 
     /**
+     * 本地筛选客户（不发起 API 请求）
+     * @param {Array} customers - 客户列表
+     * @param {Object} filters - 筛选条件
+     * @returns {Array} 筛选后的客户列表
+     */
+    filterCustomersLocal(customers, filters = {}) {
+        if (!customers || !Array.isArray(customers)) return []
+
+        let filtered = [...customers]
+        const { type, keyword } = filters
+
+        if (type && type !== '全部') {
+            if (type === '有赊账') {
+                filtered = filtered.filter(c => c.creditInfo?.hasCredit && (c.creditInfo?.balance || 0) > 0)
+            } else {
+                filtered = filtered.filter(c => c.type === type)
+            }
+        }
+
+        if (keyword && keyword.trim()) {
+            const searchTerm = keyword.toLowerCase().trim()
+            filtered = filtered.filter(c =>
+                c.name.toLowerCase().includes(searchTerm) ||
+                (c.phone && c.phone.includes(searchTerm)) ||
+                (c.type && c.type.toLowerCase().includes(searchTerm))
+            )
+        }
+
+        return filtered
+    }
+
+    /**
      * 获取客户快速操作选项
      */
     getCustomerQuickActions() {
@@ -239,6 +283,56 @@ class CustomerService {
     canCustomerUseCredit(customer) {
         if (!customer) return true
         return customer.creditInfo?.hasCredit === true
+    }
+
+    /**
+     * 数据迁移：将 localStorage 中的客户数据迁移到 IndexedDB
+     */
+    async migrateFromLocalStorage() {
+        // 注意：这需要导入 userDataService，为了避免循环依赖，在实际使用时才导入
+        const userDataService = (await import('@/services/user-data.service.js')).default
+
+        const oldCustomers = userDataService.getCustomers() || []
+        if (oldCustomers.length === 0) {
+            console.log('没有需要迁移的客户数据')
+            return
+        }
+
+        console.log(`开始迁移 ${oldCustomers.length} 个客户到 IndexedDB...`)
+
+        // 迁移客户数据
+        for (const oldCustomer of oldCustomers) {
+            const existing = await businessDataService.getCustomerById(oldCustomer.id)
+            if (!existing) {
+                await businessDataService.addCustomer(oldCustomer)
+            }
+        }
+
+        // 迁移还款记录
+        let totalRepayments = 0
+        for (const customer of oldCustomers) {
+            const repaymentsKey = `customer_repayments_${customer.id}`
+            const oldRepayments = userDataService.getUserData(repaymentsKey, [])
+
+            for (const oldRepayment of oldRepayments) {
+                const existingRepayments = await businessDataService.getCustomerRepayments(customer.id)
+                const exists = existingRepayments.some(r => r.id === oldRepayment.id)
+                if (!exists) {
+                    await businessDataService.addCustomerRepayment({
+                        ...oldRepayment,
+                        customerId: customer.id
+                    })
+                    totalRepayments++
+                }
+            }
+        }
+
+        console.log(`迁移完成：${oldCustomers.length} 个客户，${totalRepayments} 条还款记录`)
+
+        return {
+            customersMigrated: oldCustomers.length,
+            repaymentsMigrated: totalRepayments
+        }
     }
 }
 

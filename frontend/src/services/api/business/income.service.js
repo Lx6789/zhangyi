@@ -3,6 +3,8 @@ import businessDataService from '@/services/cache/business-cache.service.js'
 import baseService from './base.service.js'
 import productService from './product.service.js'
 import inventoryService from './inventory.service.js'
+import idGeneratorService from "@/services/id-generator.service.js";
+import userDataService from "@/services/user-data.service.js";
 
 /**
  * 收入记账业务服务
@@ -200,30 +202,33 @@ class IncomeService {
      * 创建收入记录对象
      */
     createIncomeRecord(formData, selectedProduct, selectedCustomer, totalAmount) {
-        return {
-            id: Date.now().toString(),
+        const record = {
+            id: idGeneratorService.generateIncomeRecordId(userDataService.getCurrentUserId()),
             type: '收入',
             category: selectedProduct?.category || formData.category,
             source: formData.channel,
-            amount: totalAmount,
+            amount: totalAmount,  // 原始赊账金额，保持不变
             date: formData.date,
             paymentMethod: formData.paymentMethod,
             note: `${selectedProduct?.name || ''} ${formData.quantity}${formData.unit} ${formData.note || ''}`.trim(),
             businessType: 'business',
-            productId: selectedProduct?.id,
-            productName: selectedProduct?.name,
+            productId: selectedProduct?.id || null,
+            productName: selectedProduct?.name || formData.category || '商品',
             channel: formData.channel,
             customer: selectedCustomer?.name || '散客',
             customerId: selectedCustomer?.id || null,
-            quantity: parseFloat(formData.quantity),
-            price: parseFloat(formData.price),
-            unit: formData.unit,
-            isPaid: formData.paymentMethod !== '赊账',
+            quantity: parseFloat(formData.quantity) || 0,
+            price: parseFloat(formData.price) || 0,
+            unit: formData.unit || '斤',
+            isPaid: formData.paymentMethod !== '赊账',  // 赊账时为 false
+            repaidAmount: 0,  // 已还金额
+            repayments: [],   // 还款记录列表
             expectedRepayDate: formData.paymentMethod === '赊账' ? formData.expectedRepayDate : null,
             creditNote: formData.paymentMethod === '赊账' ? formData.creditNote : null,
             isWholesale: formData.channel === '批发',
             autoUpdateInventory: formData.autoUpdateInventory
         }
+        return record
     }
 
     /**
@@ -232,13 +237,55 @@ class IncomeService {
     async updateCustomerCreditBalance(customer, totalAmount) {
         if (!customer) return null
 
-        const updatedCustomer = { ...customer }
-        if (!updatedCustomer.creditInfo) {
-            updatedCustomer.creditInfo = { hasCredit: true, balance: 0 }
-        }
-        updatedCustomer.creditInfo.balance = (updatedCustomer.creditInfo.balance || 0) + totalAmount
+        console.log('updateCustomerCreditBalance 被调用')
+        console.log('客户ID:', customer.id)
+        console.log('客户名称:', customer.name)
+        console.log('赊账金额:', totalAmount)
 
-        return businessDataService.updateCustomer(customer.id, updatedCustomer)
+        // 获取当前余额
+        const currentBalance = customer.creditInfo?.balance || 0
+        const newBalance = currentBalance + totalAmount
+
+        // 创建完全干净的对象，只包含必要字段
+        const updatedCustomer = {
+            id: customer.id,
+            name: customer.name,
+            type: customer.type || '零售客户',
+            phone: customer.phone || '',
+            address: customer.address || '',
+            note: customer.note || '',
+            creditInfo: {
+                hasCredit: customer.creditInfo?.hasCredit || false,
+                balance: newBalance,
+                creditLimit: customer.creditInfo?.creditLimit || null,
+                settlementDays: customer.creditInfo?.settlementDays || null,
+                note: customer.creditInfo?.note || '',
+                lastCreditDate: new Date().toISOString(),
+                lastCreditAmount: totalAmount,
+                lastRepayDate: customer.creditInfo?.lastRepayDate || null,
+                lastRepayAmount: customer.creditInfo?.lastRepayAmount || 0
+            },
+            stats: {
+                transactionCount: customer.stats?.transactionCount || 0,
+                totalAmount: customer.stats?.totalAmount || 0,
+                lastTransactionDate: customer.stats?.lastTransactionDate || null
+            },
+            userId: customer.userId,
+            createTime: customer.createTime,
+            updateTime: new Date().toISOString()
+        }
+
+        console.log('准备更新的客户数据:', updatedCustomer)
+
+        // 更新到 IndexedDB
+        try {
+            const result = await businessDataService.updateCustomer(customer.id, updatedCustomer)
+            console.log('更新结果:', result)
+            return updatedCustomer
+        } catch (error) {
+            console.error('更新客户失败:', error)
+            throw error
+        }
     }
 
     /**

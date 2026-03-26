@@ -312,6 +312,17 @@
             <button type="button" class="btn btn-secondary" @click="close">
               取消
             </button>
+
+            <!-- 进货采购时显示快捷跳转按钮 -->
+            <button
+                v-if="form.type === '进货采购' && selectedProduct"
+                type="button"
+                class="btn btn-info"
+                @click="openPurchaseManagement"
+            >
+              <i class="fas fa-truck"></i> 创建采购订单
+            </button>
+
             <button type="submit" class="btn btn-primary">
               <i class="fas fa-check"></i> 记录支出
             </button>
@@ -355,7 +366,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:visible', 'success', 'refresh-products', 'open-category'])
+const emit = defineEmits(['update:visible', 'success', 'refresh-products', 'open-category', 'open-purchase'])
 
 // ==================== 常量（使用业务服务） ====================
 const expenseSubtypesMap = expenseService.getExpenseSubtypesMap()
@@ -411,7 +422,7 @@ const showInventoryFields = computed(() => {
 
 // 库存状态样式
 const getStockStatusClass = computed(() => {
-  return  inventoryService.getStockStatusClass(currentInventoryItem.value)
+  return inventoryService.getStockStatusClass(currentInventoryItem.value)
 })
 
 // 更新库存文本
@@ -637,6 +648,33 @@ const openCategoryManagement = () => {
   emit('open-category')
 }
 
+// 打开采购管理（快捷跳转）
+const openPurchaseManagement = () => {
+  // 保存当前表单数据到 localStorage，供采购管理读取
+  const purchaseData = {
+    supplier: form.supplier,
+    productId: selectedProduct.value?.id,
+    productName: selectedProduct.value?.name,
+    quantity: form.quantity,
+    unitPrice: form.unitPrice,
+    unit: form.unit,
+    date: form.date,
+    note: form.note
+  }
+
+  localStorage.setItem('pending_purchase_data', JSON.stringify(purchaseData))
+
+  // 关闭当前模态框
+  close()
+
+  // 通知父组件打开采购管理
+  setTimeout(() => {
+    emit('open-purchase')
+  }, 100)
+
+  notificationService.showNotification('已跳转到采购管理，可继续创建采购订单', 'info')
+}
+
 // 重置表单
 const resetForm = () => {
   form.type = ''
@@ -732,7 +770,16 @@ const submitForm = async () => {
     close()
 
     const successMsg = expenseService.formatExpenseSuccessMessage(form, inventoryUpdated)
-    notificationService.showNotification(successMsg, 'success')
+
+    // 如果是进货采购，添加采购订单提示
+    if (form.type === '进货采购' && selectedProduct.value) {
+      notificationService.showNotification(
+          `${successMsg}。如需创建采购订单，可点击「创建采购订单」按钮`,
+          'success'
+      )
+    } else {
+      notificationService.showNotification(successMsg, 'success')
+    }
   } catch (error) {
     console.error('保存支出记录失败:', error)
     notificationService.showNotification('保存支出记录失败，请重试', 'error')
@@ -806,7 +853,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
 </script>
 
 <style scoped>
-/* 样式保持不变 - 与之前相同 */
+/* ==================== 基础样式 ==================== */
 .modal {
   position: fixed;
   top: 0;
@@ -902,6 +949,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
   max-height: calc(85vh - 80px);
 }
 
+/* ==================== 表单样式 ==================== */
 .form-group {
   margin-bottom: 20px;
 }
@@ -1030,6 +1078,18 @@ watch(() => props.products, (newProducts, oldProducts) => {
   border-color: #80A492;
 }
 
+/* 信息按钮样式（采购订单快捷跳转） */
+.btn-info {
+  background-color: #3498db;
+  color: white;
+  border: none;
+}
+
+.btn-info:hover {
+  background-color: #2980b9;
+}
+
+/* ==================== 支付方式标签 ==================== */
 .payment-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1063,6 +1123,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
   border-color: #80A492;
 }
 
+/* ==================== 库存区域样式 ==================== */
 .inventory-section {
   margin-top: 15px;
   padding: 20px;
@@ -1199,6 +1260,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
   color: #608070;
 }
 
+/* ==================== 库存信息卡片 ==================== */
 .stock-info-card {
   margin: 15px 0;
   padding: 16px;
@@ -1283,6 +1345,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
   background: #e74c3c;
 }
 
+/* ==================== 复选框样式 ==================== */
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -1313,6 +1376,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
   color: #99BCAC;
 }
 
+/* ==================== 警告和提示消息 ==================== */
 .warning-message {
   margin: 10px 0;
   padding: 12px 16px;
@@ -1365,6 +1429,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
   font-size: 12px;
 }
 
+/* ==================== 滚动条 ==================== */
 .modal-body::-webkit-scrollbar,
 .product-type-selector::-webkit-scrollbar {
   width: 6px;
@@ -1391,6 +1456,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
   margin-right: 25px;
 }
 
+/* ==================== 响应式设计 ==================== */
 @media (max-width: 480px) {
   .modal-header {
     padding: 15px 20px;

@@ -37,7 +37,7 @@ class InitDatabaseService {
         { name: 'friends_cache', force: true, dependsOn: [] },
         { name: 'group_savings_cache', force: true, dependsOn: [] },
         { name: 'savings_members_cache', force: true, dependsOn: ['group_savings_cache'] },
-        { name: 'saving_deposit_records_cache', force: true, dependsOn: [] }, // 改为无依赖，独立获取
+        { name: 'saving_deposit_records_cache', force: true, dependsOn: [] },
         // 普通表（有数据则跳过初始化）
         { name: 'personal_savings', force: false, dependsOn: [] },
         { name: 'daily_records', force: false, dependsOn: [] },
@@ -51,7 +51,12 @@ class InitDatabaseService {
         { name: 'purchase_history', force: false, dependsOn: [] },
         { name: 'chart_data_cache', force: false, dependsOn: [] },
         { name: 'sync_status', force: false, dependsOn: [] },
-        { name: 'offline_queue', force: false, dependsOn: [] }
+        { name: 'offline_queue', force: false, dependsOn: [] },
+        // 客户相关表（本地存储，不需要从后端获取）
+        { name: 'customers', force: false, dependsOn: [] },
+        { name: 'customer_repayments', force: false, dependsOn: ['customers'] },
+        { name: 'expense_repayments', force: false, dependsOn: ['expense_records'] },
+        { name: 'income_collections', force: false, dependsOn: ['income_records'] }
     ]
 
     /**
@@ -326,6 +331,13 @@ class InitDatabaseService {
                     break
                 case 'products':
                     initResult = await this._initProducts(userId)
+                    break
+                case 'customers':
+                    initResult = await this._initCustomers(userId)
+                    break
+                case 'customer_repayments':
+                    // 还款记录表不需要单独初始化，会在客户还款时自动创建
+                    initResult = { success: true, dataCount: 0, message: '还款记录表无需初始化', skipped: true }
                     break
                 default:
                     // 普通表：如果没有数据，创建空记录或默认数据
@@ -814,6 +826,43 @@ class InitDatabaseService {
 
         } catch (error) {
             console.error('【InitDatabase】初始化商品表失败:', error)
+            return { success: false, error: error.message, dataCount: 0 }
+        }
+    }
+
+    /**
+     * 初始化客户表
+     * 如果用户没有客户，不创建默认客户（让用户自己添加）
+     * @private
+     */
+    async _initCustomers(userId) {
+        try {
+            console.log('【InitDatabase】开始初始化客户表...')
+
+            // 检查是否已有客户
+            const existingCustomers = await indexedDBService.query('customers', 'userId', userId)
+
+            if (existingCustomers && existingCustomers.length > 0) {
+                console.log(`【InitDatabase】客户表已有 ${existingCustomers.length} 条数据，跳过初始化`)
+                return {
+                    success: true,
+                    dataCount: existingCustomers.length,
+                    message: '已有数据，跳过',
+                    skipped: true
+                }
+            }
+
+            // 不创建默认客户，让用户自己添加
+            console.log('【InitDatabase】客户表为空，无需初始化（用户可自行添加客户）')
+
+            return {
+                success: true,
+                dataCount: 0,
+                message: '客户表为空，无需初始化'
+            }
+
+        } catch (error) {
+            console.error('【InitDatabase】初始化客户表失败:', error)
             return { success: false, error: error.message, dataCount: 0 }
         }
     }

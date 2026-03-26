@@ -7,10 +7,11 @@
 class IndexedDBService {
     constructor() {
         this.dbName = 'FinanceDB'
-        this.version = 7
+        this.version = 8
         this.db = null
         this.initPromise = null
         this.isInitializing = false
+        this.ready = false  // 添加就绪标志
     }
 
     /**
@@ -18,7 +19,7 @@ class IndexedDBService {
      */
     async init() {
         // 如果已经初始化完成且有数据库连接，直接返回
-        if (this.db && this.db.name === this.dbName) {
+        if (this.ready && this.db && this.db.name === this.dbName) {
             console.log('数据库已初始化，直接返回')
             return this.db
         }
@@ -31,6 +32,8 @@ class IndexedDBService {
 
         console.log(`开始初始化数据库 ${this.dbName}，版本 ${this.version}`)
 
+        this.isInitializing = true
+
         this.initPromise = new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.version)
 
@@ -38,11 +41,15 @@ class IndexedDBService {
                 console.error('数据库打开失败:', event.target.error)
                 this.initPromise = null
                 this.db = null
+                this.ready = false
+                this.isInitializing = false
                 reject(event.target.error)
             }
 
             request.onsuccess = (event) => {
                 this.db = event.target.result
+                this.ready = true  // 标记就绪
+                this.isInitializing = false
                 console.log('数据库连接成功，当前版本:', this.db.version)
                 console.log('数据库中的表:', Array.from(this.db.objectStoreNames))
 
@@ -50,6 +57,7 @@ class IndexedDBService {
                 this.db.onclose = () => {
                     console.warn('数据库连接被关闭')
                     this.db = null
+                    this.ready = false
                     this.initPromise = null
                 }
 
@@ -57,6 +65,7 @@ class IndexedDBService {
                 this.db.onerror = (event) => {
                     console.error('数据库连接错误:', event.target.error)
                     this.db = null
+                    this.ready = false
                     this.initPromise = null
                 }
 
@@ -263,6 +272,47 @@ class IndexedDBService {
                     console.log('创建 offline_queue 表')
                 }
 
+                // 18. 创建客户表
+                if (!db.objectStoreNames.contains('customers')) {
+                    const customerStore = db.createObjectStore('customers', { keyPath: 'id' })
+                    customerStore.createIndex('name', 'name', { unique: false })
+                    customerStore.createIndex('phone', 'phone', { unique: false })
+                    customerStore.createIndex('type', 'type', { unique: false })
+                    customerStore.createIndex('userId', 'userId', { unique: false })
+                    customerStore.createIndex('createTime', 'createTime', { unique: false })
+                    customerStore.createIndex('updateTime', 'updateTime', { unique: false })
+                    customerStore.createIndex('hasCredit', 'hasCredit', { unique: false })
+                    console.log('创建 customers 表')
+                }
+
+                // 19. 创建客户还款记录表
+                if (!db.objectStoreNames.contains('customer_repayments')) {
+                    const repaymentStore = db.createObjectStore('customer_repayments', { keyPath: 'id' })
+                    repaymentStore.createIndex('customerId', 'customerId', { unique: false })
+                    repaymentStore.createIndex('userId', 'userId', { unique: false })
+                    repaymentStore.createIndex('date', 'date', { unique: false })
+                    repaymentStore.createIndex('repaymentDate', 'repaymentDate', { unique: false })
+                    repaymentStore.createIndex('createTime', 'createTime', { unique: false })
+                    console.log('创建 customer_repayments 表')
+                }
+
+                // 20. 创建支出还款记录表
+                if (!db.objectStoreNames.contains('expense_repayments')) {
+                    const expenseRepaymentStore = db.createObjectStore('expense_repayments', { keyPath: 'id' })
+                    expenseRepaymentStore.createIndex('expenseRecordId', 'expenseRecordId', { unique: false })
+                    expenseRepaymentStore.createIndex('userId', 'userId', { unique: false })
+                    expenseRepaymentStore.createIndex('repaymentDate', 'repaymentDate', { unique: false })
+                    console.log('创建 expense_repayments 表')
+                }
+
+                if (!db.objectStoreNames.contains('income_collections')) {
+                    const incomeCollectionStore = db.createObjectStore('income_collections', { keyPath: 'id' })
+                    incomeCollectionStore.createIndex('incomeRecordId', 'incomeRecordId', { unique: false })
+                    incomeCollectionStore.createIndex('userId', 'userId', { unique: false })
+                    incomeCollectionStore.createIndex('collectionDate', 'collectionDate', { unique: false })
+                    console.log('创建 income_collections 表')
+                }
+
                 console.log('升级完成，当前所有表:', Array.from(db.objectStoreNames))
             }
         })
@@ -271,43 +321,75 @@ class IndexedDBService {
     }
 
     /**
-     * 确保数据库已初始化
+     * 确保数据库已初始化（带重试机制）
+     * @param {number} retries - 重试次数
+     * @param {number} delay - 重试延迟（毫秒）
+     * @returns {Promise<IDBDatabase>} 数据库实例
      */
-    async ensureInitialized() {
-        // 如果数据库已存在且有效，直接返回
-        if (this.db && this.db.name === this.dbName) {
-            // 检查连接是否仍然有效
+    async ensureReady(retries = 5, delay = 500) {
+        // 如果已经就绪，直接返回，不打印日志
+        if (this.ready && this.db) {
+            // 移除这行日志，或者改为 debug 级别
+            // console.log('数据库已就绪')
+            return this.db
+        }
+
+        // 只在第一次初始化时打印日志
+        if (!this._initializingLogged) {
+            console.log(`数据库未就绪，开始初始化，最多重试 ${retries} 次...`)
+            this._initializingLogged = true
+        }
+
+        // 尝试初始化
+        for (let i = 0; i < retries; i++) {
             try {
-                // 尝试执行一个简单的操作来验证连接
-                const storeNames = Array.from(this.db.objectStoreNames)
-                if (storeNames.length > 0) {
+                // 如果还没有初始化，调用 init
+                if (!this.db) {
+                    await this.init()
+                }
+
+                // 检查是否就绪
+                if (this.ready && this.db) {
+                    if (i > 0) {
+                        console.log(`数据库就绪成功 (尝试 ${i + 1}/${retries})`)
+                    }
+                    this._initializingLogged = false
                     return this.db
                 }
+
+                // 等待一小段时间，让数据库完全就绪
+                await new Promise(resolve => setTimeout(resolve, delay))
+
+                // 只在重试时打印
+                if (i === 0) {
+                    console.log(`等待数据库就绪...`)
+                }
             } catch (error) {
-                console.warn('数据库连接可能已失效，重新初始化:', error)
-                this.db = null
-                this.initPromise = null
+                console.warn(`数据库初始化尝试 ${i + 1} 失败:`, error.message)
+                if (i === retries - 1) {
+                    this._initializingLogged = false
+                    throw error
+                }
             }
         }
 
-        // 如果数据库不存在或已失效，重新初始化
-        if (!this.db || this.db.name !== this.dbName) {
-            console.log('数据库未初始化或已失效，开始初始化...')
-            await this.init()
-        }
-
-        if (!this.db) {
-            throw new Error('数据库初始化失败')
-        }
-
-        return this.db
+        this._initializingLogged = false
+        throw new Error(`数据库初始化失败，已重试 ${retries} 次`)
     }
 
     /**
-     * 获取数据库连接
+     * 确保数据库已初始化（简写，兼容旧代码）
+     * @deprecated 使用 ensureReady 替代
+     */
+    async ensureInitialized() {
+        return this.ensureReady()
+    }
+
+    /**
+     * 获取数据库连接（确保就绪）
      */
     async getDB() {
-        await this.ensureInitialized()
+        await this.ensureReady()
         if (!this.db) {
             console.error('数据库连接为 null')
             throw new Error('数据库未初始化')
@@ -316,12 +398,33 @@ class IndexedDBService {
     }
 
     /**
+     * 获取数据库实例（不等待初始化）
+     */
+    getDBInstance() {
+        return this.db
+    }
+
+    /**
+     * 检查数据库是否就绪
+     */
+    isReady() {
+        return this.ready && this.db !== null
+    }
+
+    /**
      * 添加数据
      */
     async add(storeName, data) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
+                // 检查表是否存在
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在，返回 false`)
+                    resolve(false)
+                    return
+                }
+
                 const transaction = this.db.transaction([storeName], 'readwrite')
                 const store = transaction.objectStore(storeName)
                 const request = store.add(data)
@@ -355,11 +458,18 @@ class IndexedDBService {
      * 批量添加数据
      */
     async bulkAdd(storeName, dataArray) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
                 if (!dataArray || dataArray.length === 0) {
                     resolve()
+                    return
+                }
+
+                // 检查表是否存在
+                if (!this.db.objectStoreNames.contains(storeName)) {
+                    console.warn(`表 ${storeName} 不存在`)
+                    reject(new Error(`表 ${storeName} 不存在`))
                     return
                 }
 
@@ -412,10 +522,10 @@ class IndexedDBService {
      * 获取所有数据
      */
     async getAll(storeName) {
-        await this.ensureInitialized()
+        console.log(`开始获取 ${storeName} 表数据`)
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
-                // 检查表是否存在
                 if (!this.db.objectStoreNames.contains(storeName)) {
                     console.warn(`表 ${storeName} 不存在，返回空数组`)
                     resolve([])
@@ -427,6 +537,7 @@ class IndexedDBService {
                 const request = store.getAll()
 
                 request.onsuccess = () => {
+                    console.log(`获取 ${storeName} 数据成功，共 ${request.result?.length || 0} 条`)
                     resolve(request.result || [])
                 }
 
@@ -445,7 +556,7 @@ class IndexedDBService {
      * 根据ID获取数据
      */
     async get(storeName, id) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
                 if (!this.db.objectStoreNames.contains(storeName)) {
@@ -477,7 +588,7 @@ class IndexedDBService {
      * 更新数据
      */
     async update(storeName, data) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
                 if (!this.db.objectStoreNames.contains(storeName)) {
@@ -486,6 +597,7 @@ class IndexedDBService {
                     return
                 }
 
+                const cleanedData = this._cleanObjectForStorage(data)
                 const transaction = this.db.transaction([storeName], 'readwrite')
                 const store = transaction.objectStore(storeName)
                 const request = store.put(data)
@@ -510,7 +622,7 @@ class IndexedDBService {
      * 删除数据
      */
     async delete(storeName, id) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
                 if (!this.db.objectStoreNames.contains(storeName)) {
@@ -543,7 +655,7 @@ class IndexedDBService {
      * 清空表
      */
     async clear(storeName) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
                 if (!this.db.objectStoreNames.contains(storeName)) {
@@ -576,7 +688,7 @@ class IndexedDBService {
      * 根据索引查询
      */
     async query(storeName, indexName, value) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
                 if (!this.db.objectStoreNames.contains(storeName)) {
@@ -619,7 +731,7 @@ class IndexedDBService {
      * 范围查询
      */
     async rangeQuery(storeName, indexName, start, end) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
                 if (!this.db.objectStoreNames.contains(storeName)) {
@@ -669,7 +781,7 @@ class IndexedDBService {
      * 检查表是否存在
      */
     async hasStore(storeName) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return this.db.objectStoreNames.contains(storeName)
     }
 
@@ -677,7 +789,7 @@ class IndexedDBService {
      * 获取所有表名
      */
     async getStoreNames() {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return Array.from(this.db.objectStoreNames)
     }
 
@@ -688,6 +800,7 @@ class IndexedDBService {
         if (this.db) {
             this.db.close()
             this.db = null
+            this.ready = false
             this.initPromise = null
             console.log('数据库连接已关闭')
         }
@@ -722,7 +835,7 @@ class IndexedDBService {
      * 批量更新或添加数据（如果存在则更新，不存在则添加）
      */
     async bulkPut(storeName, dataArray) {
-        await this.ensureInitialized()
+        await this.ensureReady()
         return new Promise((resolve, reject) => {
             try {
                 if (!dataArray || dataArray.length === 0) {
@@ -788,7 +901,52 @@ class IndexedDBService {
         console.log('尝试重新连接数据库...')
         this.close()
         this.initPromise = null
+        this.ready = false
         return await this.init()
+    }
+
+    /**
+     * 清理对象，移除无法克隆的数据
+     */
+    _cleanObjectForStorage(obj) {
+        if (obj === null || obj === undefined) return obj
+
+        // 如果是数组，递归清理
+        if (Array.isArray(obj)) {
+            return obj.map(item => this._cleanObjectForStorage(item))
+        }
+
+        // 如果是对象，清理每个属性
+        if (typeof obj === 'object') {
+            // 跳过 Vue 响应式对象
+            if (obj.__ob__) {
+                const cleaned = {}
+                for (const key in obj) {
+                    if (key !== '__ob__' && obj.hasOwnProperty(key)) {
+                        const value = obj[key]
+                        if (value === undefined) continue
+                        if (typeof value === 'function') continue
+                        if (typeof value === 'symbol') continue
+                        cleaned[key] = this._cleanObjectForStorage(value)
+                    }
+                }
+                return cleaned
+            }
+
+            const cleaned = {}
+            for (const key in obj) {
+                if (obj.hasOwnProperty(key)) {
+                    const value = obj[key]
+                    if (value === undefined) continue
+                    if (typeof value === 'function') continue
+                    if (typeof value === 'symbol') continue
+                    cleaned[key] = this._cleanObjectForStorage(value)
+                }
+            }
+            return cleaned
+        }
+
+        return obj
     }
 }
 

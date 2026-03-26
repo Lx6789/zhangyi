@@ -54,14 +54,14 @@
                   :class="{ active: activeTab === 'payable' }"
                   @click="activeTab = 'payable'"
               >
-                <i class="fas fa-arrow-up"></i> 应付账款 <span class="tab-badge">支出赊账</span>
+                <i class="fas fa-arrow-up"></i> 应付账款
               </button>
               <button
                   class="tab-btn"
                   :class="{ active: activeTab === 'receivable' }"
                   @click="activeTab = 'receivable'"
               >
-                <i class="fas fa-arrow-down"></i> 应收账款 <span class="tab-badge">收入赊账</span>
+                <i class="fas fa-arrow-down"></i> 应收账款
               </button>
               <button
                   class="tab-btn"
@@ -81,24 +81,238 @@
                     type="text"
                     class="search-input"
                     :placeholder="searchPlaceholder"
-                    @input="searchCredits"
                 >
               </div>
             </div>
 
-            <!-- 赊账列表 -->
-            <div class="credit-list">
-              <!-- 应付账款（支出赊账 - 欠别人） -->
-              <div v-if="activeTab !== 'receivable'" class="credit-section">
+            <!-- 全部赊账视图 - 按还款状态分组 -->
+            <template v-if="activeTab === 'all'">
+              <!-- 待处理组 -->
+              <div class="credit-group" v-if="filteredAllCredits.pending.length > 0">
+                <div class="group-header pending">
+                  <i class="fas fa-clock"></i>
+                  <h3>待处理 ({{ filteredAllCredits.pending.length }})</h3>
+                  <span class="group-total">合计: ¥{{ formatNumber(filteredAllCredits.pendingTotal) }}</span>
+                </div>
+                <div class="credit-cards">
+                  <div
+                      v-for="credit in filteredAllCredits.pending"
+                      :key="credit.id"
+                      class="credit-card"
+                      :class="[credit.creditType === 'payable' ? 'payable' : 'receivable']"
+                  >
+                    <div class="credit-header">
+                      <div class="credit-title">
+                        <span class="credit-type-badge" :class="credit.creditType">
+                          <i :class="credit.creditType === 'payable' ? 'fas fa-arrow-up' : 'fas fa-arrow-down'"></i>
+                          {{ credit.creditType === 'payable' ? '应付' : '应收' }}
+                        </span>
+                        <h4>{{ credit.creditType === 'payable' ? (credit.category || '支出') : (credit.productName || credit.category || '商品') }}</h4>
+                        <span class="credit-subtype" v-if="credit.creditType === 'payable' && credit.subtype">
+                          {{ credit.subtype }}
+                        </span>
+                        <span class="credit-channel" v-if="credit.creditType === 'receivable' && credit.channel">
+                          {{ credit.channel }}
+                        </span>
+                        <span class="credit-badge badge-pending">{{ credit.creditType === 'payable' ? '待还款' : '待收款' }}</span>
+                      </div>
+                      <div class="credit-amount" :class="credit.creditType === 'payable' ? 'warning-text' : 'success-text'">
+                        ¥{{ formatNumber(credit.amount) }}
+                      </div>
+                    </div>
+
+                    <div class="credit-info">
+                      <div class="info-row">
+                        <span class="info-label"><i class="fas fa-calendar"></i> 日期:</span>
+                        <span class="info-value">{{ formatDate(credit.date) }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.expectedRepayDate">
+                        <span class="info-label"><i class="fas fa-clock"></i> 预计{{ credit.creditType === 'payable' ? '还款' : '收款' }}:</span>
+                        <span class="info-value">
+                          {{ formatDate(credit.expectedRepayDate) }}
+                        </span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'payable' && credit.supplier">
+                        <span class="info-label"><i class="fas fa-truck"></i> 供应商:</span>
+                        <span class="info-value">{{ credit.supplier }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'receivable' && credit.customer">
+                        <span class="info-label"><i class="fas fa-user"></i> 客户:</span>
+                        <span class="info-value">{{ credit.customer }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'receivable' && credit.quantity">
+                        <span class="info-label"><i class="fas fa-weight"></i> 数量:</span>
+                        <span class="info-value">{{ credit.quantity }} {{ credit.unit }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.note">
+                        <span class="info-label"><i class="fas fa-sticky-note"></i> 备注:</span>
+                        <span class="info-value">{{ credit.note }}</span>
+                      </div>
+                    </div>
+
+                    <div class="credit-actions">
+                      <button
+                          class="action-btn"
+                          :class="credit.creditType === 'payable' ? 'repay' : 'collect'"
+                          @click="credit.creditType === 'payable' ? openRepaymentModal(credit) : openCollectionModal(credit)"
+                      >
+                        <i class="fas fa-hand-holding-usd"></i>
+                        {{ credit.creditType === 'payable' ? '还款' : '收款' }}
+                      </button>
+                      <button class="action-btn detail" @click="credit.creditType === 'payable' ? viewPayableDetail(credit) : viewReceivableDetail(credit)">
+                        <i class="fas fa-info-circle"></i> 详情
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 逾期组 -->
+              <div class="credit-group" v-if="filteredAllCredits.overdue.length > 0">
+                <div class="group-header overdue">
+                  <i class="fas fa-exclamation-triangle"></i>
+                  <h3>逾期 ({{ filteredAllCredits.overdue.length }})</h3>
+                  <span class="group-total">合计: ¥{{ formatNumber(filteredAllCredits.overdueTotal) }}</span>
+                </div>
+                <div class="credit-cards">
+                  <div
+                      v-for="credit in filteredAllCredits.overdue"
+                      :key="credit.id"
+                      class="credit-card credit-overdue"
+                      :class="[credit.creditType === 'payable' ? 'payable' : 'receivable']"
+                  >
+                    <div class="credit-header">
+                      <div class="credit-title">
+                        <span class="credit-type-badge" :class="credit.creditType">
+                          <i :class="credit.creditType === 'payable' ? 'fas fa-arrow-up' : 'fas fa-arrow-down'"></i>
+                          {{ credit.creditType === 'payable' ? '应付' : '应收' }}
+                        </span>
+                        <h4>{{ credit.creditType === 'payable' ? (credit.category || '支出') : (credit.productName || credit.category || '商品') }}</h4>
+                        <span class="credit-badge badge-overdue">逾期</span>
+                      </div>
+                      <div class="credit-amount" :class="credit.creditType === 'payable' ? 'warning-text' : 'success-text'">
+                        ¥{{ formatNumber(credit.amount) }}
+                      </div>
+                    </div>
+
+                    <div class="credit-info">
+                      <div class="info-row">
+                        <span class="info-label"><i class="fas fa-calendar"></i> 日期:</span>
+                        <span class="info-value">{{ formatDate(credit.date) }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.expectedRepayDate">
+                        <span class="info-label"><i class="fas fa-clock"></i> 应{{ credit.creditType === 'payable' ? '还' : '收' }}日期:</span>
+                        <span class="info-value warning-text">
+                          {{ formatDate(credit.expectedRepayDate) }}
+                        </span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'payable' && credit.supplier">
+                        <span class="info-label"><i class="fas fa-truck"></i> 供应商:</span>
+                        <span class="info-value">{{ credit.supplier }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'receivable' && credit.customer">
+                        <span class="info-label"><i class="fas fa-user"></i> 客户:</span>
+                        <span class="info-value">{{ credit.customer }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.note">
+                        <span class="info-label"><i class="fas fa-sticky-note"></i> 备注:</span>
+                        <span class="info-value">{{ credit.note }}</span>
+                      </div>
+                    </div>
+
+                    <div class="credit-actions">
+                      <button
+                          class="action-btn"
+                          :class="credit.creditType === 'payable' ? 'repay' : 'collect'"
+                          @click="credit.creditType === 'payable' ? openRepaymentModal(credit) : openCollectionModal(credit)"
+                      >
+                        <i class="fas fa-hand-holding-usd"></i>
+                        {{ credit.creditType === 'payable' ? '立即还款' : '立即收款' }}
+                      </button>
+                      <button class="action-btn detail" @click="credit.creditType === 'payable' ? viewPayableDetail(credit) : viewReceivableDetail(credit)">
+                        <i class="fas fa-info-circle"></i> 详情
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 已结清组（只有详情按钮，没有还款/收款按钮） -->
+              <div class="credit-group" v-if="filteredAllCredits.paid.length > 0">
+                <div class="group-header paid">
+                  <i class="fas fa-check-circle"></i>
+                  <h3>已结清 ({{ filteredAllCredits.paid.length }})</h3>
+                  <span class="group-total">合计: ¥{{ formatNumber(filteredAllCredits.paidTotal) }}</span>
+                </div>
+                <div class="credit-cards">
+                  <div
+                      v-for="credit in filteredAllCredits.paid"
+                      :key="credit.id"
+                      class="credit-card paid-card"
+                      :class="[credit.creditType === 'payable' ? 'payable' : 'receivable']"
+                  >
+                    <div class="credit-header">
+                      <div class="credit-title">
+                        <span class="credit-type-badge" :class="credit.creditType">
+                          <i :class="credit.creditType === 'payable' ? 'fas fa-arrow-up' : 'fas fa-arrow-down'"></i>
+                          {{ credit.creditType === 'payable' ? '应付' : '应收' }}
+                        </span>
+                        <h4>{{ credit.creditType === 'payable' ? (credit.category || '支出') : (credit.productName || credit.category || '商品') }}</h4>
+                        <span class="credit-badge badge-paid">{{ credit.creditType === 'payable' ? '已还清' : '已收清' }}</span>
+                      </div>
+                      <div class="credit-amount" :class="credit.creditType === 'payable' ? 'warning-text' : 'success-text'">
+                        ¥{{ formatNumber(credit.originalAmount || credit.amount) }}
+                      </div>
+                    </div>
+
+                    <div class="credit-info">
+                      <div class="info-row">
+                        <span class="info-label"><i class="fas fa-calendar"></i> 日期:</span>
+                        <span class="info-value">{{ formatDate(credit.date) }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.lastRepayDate">
+                        <span class="info-label"><i class="fas fa-check"></i> 结清日期:</span>
+                        <span class="info-value">{{ formatDate(credit.lastRepayDate) }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'payable' && credit.supplier">
+                        <span class="info-label"><i class="fas fa-truck"></i> 供应商:</span>
+                        <span class="info-value">{{ credit.supplier }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'receivable' && credit.customer">
+                        <span class="info-label"><i class="fas fa-user"></i> 客户:</span>
+                        <span class="info-value">{{ credit.customer }}</span>
+                      </div>
+                    </div>
+
+                    <!-- 已结清卡片只显示详情按钮，不显示还款/收款按钮 -->
+                    <div class="credit-actions">
+                      <button class="action-btn detail" @click="credit.creditType === 'payable' ? viewPayableDetail(credit) : viewReceivableDetail(credit)">
+                        <i class="fas fa-info-circle"></i> 详情
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="filteredAllCredits.pending.length === 0 && filteredAllCredits.overdue.length === 0 && filteredAllCredits.paid.length === 0" class="empty-state">
+                <i class="fas fa-credit-card"></i>
+                <p>暂无赊账记录</p>
+                <small>在收入记账或支出记账时选择"赊账"支付方式即可创建赊账记录</small>
+              </div>
+            </template>
+
+            <!-- 应付账款视图（只显示未结清的应付账款） -->
+            <div v-else-if="activeTab === 'payable'" class="credit-list">
+              <div class="credit-section">
                 <div class="section-header">
                   <h3><i class="fas fa-arrow-up"></i> 应付账款 - 支出赊账 (欠别人)</h3>
-                  <span class="section-total">总计: ¥{{ formatNumber(filteredPayableTotal) }}</span>
+                  <span class="section-total">未结清总计: ¥{{ formatNumber(filteredPayableTotal) }}</span>
                 </div>
 
                 <div v-if="filteredPayableCredits.length === 0" class="empty-state">
                   <i class="fas fa-credit-card"></i>
-                  <p>暂无应付账款</p>
-                  <small>这里显示您支出记账时选择"赊账"的记录</small>
+                  <p>暂无未结清的应付账款</p>
+                  <small>所有支出赊账都已还清</small>
                 </div>
 
                 <div v-else class="credit-cards">
@@ -152,18 +366,20 @@
                   </div>
                 </div>
               </div>
+            </div>
 
-              <!-- 应收账款（收入赊账 - 别人欠） -->
-              <div v-if="activeTab !== 'payable'" class="credit-section">
+            <!-- 应收账款视图（只显示未结清的应收账款） -->
+            <div v-else-if="activeTab === 'receivable'" class="credit-list">
+              <div class="credit-section">
                 <div class="section-header">
                   <h3><i class="fas fa-arrow-down"></i> 应收账款 - 收入赊账 (别人欠)</h3>
-                  <span class="section-total">总计: ¥{{ formatNumber(filteredReceivableTotal) }}</span>
+                  <span class="section-total">未结清总计: ¥{{ formatNumber(filteredReceivableTotal) }}</span>
                 </div>
 
                 <div v-if="filteredReceivableCredits.length === 0" class="empty-state">
                   <i class="fas fa-users"></i>
-                  <p>暂无应收账款</p>
-                  <small>这里显示您收入记账时选择"赊账"的记录</small>
+                  <p>暂无未结清的应收账款</p>
+                  <small>所有收入赊账都已收清</small>
                 </div>
 
                 <div v-else class="credit-cards">
@@ -215,6 +431,80 @@
                         <i class="fas fa-hand-holding-usd"></i> 收款
                       </button>
                       <button class="action-btn detail" @click="viewReceivableDetail(credit)">
+                        <i class="fas fa-info-circle"></i> 详情
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 逾期账款视图（只显示未结清且逾期的） -->
+            <div v-else-if="activeTab === 'overdue'" class="credit-list">
+              <div class="credit-section">
+                <div class="section-header">
+                  <h3><i class="fas fa-exclamation-triangle"></i> 逾期账款</h3>
+                  <span class="section-total">总计: ¥{{ formatNumber(filteredOverdueTotal) }}</span>
+                </div>
+
+                <div v-if="filteredOverdueCredits.length === 0" class="empty-state">
+                  <i class="fas fa-check-circle"></i>
+                  <p>暂无逾期账款</p>
+                  <small>所有赊账都在期限内</small>
+                </div>
+
+                <div v-else class="credit-cards">
+                  <div
+                      v-for="credit in filteredOverdueCredits"
+                      :key="credit.id"
+                      class="credit-card credit-overdue"
+                      :class="[credit.creditType === 'payable' ? 'payable' : 'receivable']"
+                  >
+                    <div class="credit-header">
+                      <div class="credit-title">
+                        <span class="credit-type-badge" :class="credit.creditType">
+                          <i :class="credit.creditType === 'payable' ? 'fas fa-arrow-up' : 'fas fa-arrow-down'"></i>
+                          {{ credit.creditType === 'payable' ? '应付' : '应收' }}
+                        </span>
+                        <h4>{{ credit.creditType === 'payable' ? (credit.category || '支出') : (credit.productName || credit.category || '商品') }}</h4>
+                        <span class="credit-badge badge-overdue">逾期</span>
+                      </div>
+                      <div class="credit-amount" :class="credit.creditType === 'payable' ? 'warning-text' : 'success-text'">
+                        ¥{{ formatNumber(credit.amount) }}
+                      </div>
+                    </div>
+
+                    <div class="credit-info">
+                      <div class="info-row">
+                        <span class="info-label"><i class="fas fa-calendar"></i> 日期:</span>
+                        <span class="info-value">{{ formatDate(credit.date) }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.expectedRepayDate">
+                        <span class="info-label"><i class="fas fa-clock"></i> 应{{ credit.creditType === 'payable' ? '还' : '收' }}日期:</span>
+                        <span class="info-value warning-text">
+                          {{ formatDate(credit.expectedRepayDate) }}
+                        </span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'payable' && credit.supplier">
+                        <span class="info-label"><i class="fas fa-truck"></i> 供应商:</span>
+                        <span class="info-value">{{ credit.supplier }}</span>
+                      </div>
+                      <div class="info-row" v-if="credit.creditType === 'receivable' && credit.customer">
+                        <span class="info-label"><i class="fas fa-user"></i> 客户:</span>
+                        <span class="info-value">{{ credit.customer }}</span>
+                      </div>
+                    </div>
+
+                    <div class="credit-actions">
+                      <button
+                          class="action-btn"
+                          :class="credit.creditType === 'payable' ? 'repay' : 'collect'"
+                          @click="credit.creditType === 'payable' ? openRepaymentModal(credit) : openCollectionModal(credit)"
+                      >
+                        <i class="fas fa-hand-holding-usd"></i>
+                        {{ credit.creditType === 'payable' ? '立即还款' : '立即收款' }}
+                      </button>
+                      <button class="action-btn detail" @click="credit.creditType === 'payable' ? viewPayableDetail(credit) : viewReceivableDetail(credit)">
                         <i class="fas fa-info-circle"></i> 详情
                       </button>
                     </div>
@@ -415,8 +705,8 @@ const emit = defineEmits(['update:visible', 'update'])
 
 // ==================== 状态 ====================
 const loading = ref(false)
-const payableCredits = ref([]) // 应付账款
-const receivableCredits = ref([]) // 应收账款
+const payableCredits = ref([])
+const receivableCredits = ref([])
 const creditStats = ref({
   totalPayable: 0,
   totalReceivable: 0,
@@ -452,22 +742,59 @@ const searchPlaceholder = computed(() => {
   return creditService.getCreditSearchPlaceholder(activeTab.value)
 })
 
-// 过滤后的应付账款
-const filteredPayableCredits = computed(() => {
-  let filtered = [...payableCredits.value]
+// 合并所有赊账记录
+const allCredits = computed(() => {
+  const all = [
+    ...payableCredits.value.map(c => ({ ...c, creditType: 'payable' })),
+    ...receivableCredits.value.map(c => ({ ...c, creditType: 'receivable' }))
+  ]
 
-  // 根据标签页过滤
-  if (activeTab.value === 'overdue') {
-    filtered = filtered.filter(c => creditService.isCreditOverdue(c.expectedRepayDate))
+  if (searchKeyword.value.trim()) {
+    return creditService.filterCreditRecords(all, {
+      keyword: searchKeyword.value
+    })
   }
 
-  // 关键词搜索
+  return all
+})
+
+// 按状态分组的全部赊账
+const filteredAllCredits = computed(() => {
+  const pending = []
+  const overdue = []
+  const paid = []
+
+  allCredits.value.forEach(credit => {
+    if (credit.isPaid) {
+      paid.push(credit)
+    } else if (creditService.isCreditOverdue(credit.expectedRepayDate)) {
+      overdue.push(credit)
+    } else {
+      pending.push(credit)
+    }
+  })
+
+  return {
+    pending,
+    overdue,
+    paid,
+    pendingTotal: pending.reduce((sum, c) => sum + (c.amount || 0), 0),
+    overdueTotal: overdue.reduce((sum, c) => sum + (c.amount || 0), 0),
+    paidTotal: paid.reduce((sum, c) => sum + (c.originalAmount || c.amount || 0), 0)
+  }
+})
+
+// 过滤后的应付账款（只显示未结清的）
+const filteredPayableCredits = computed(() => {
+  let filtered = [...payableCredits.value]
+  // 只显示未结清的
+  filtered = filtered.filter(c => !c.isPaid)
+
   if (searchKeyword.value.trim()) {
     filtered = creditService.filterCreditRecords(filtered, {
       keyword: searchKeyword.value
     })
   }
-
   return filtered.sort((a, b) => new Date(b.date) - new Date(a.date))
 })
 
@@ -475,27 +802,41 @@ const filteredPayableTotal = computed(() => {
   return filteredPayableCredits.value.reduce((sum, c) => sum + (c.amount || 0), 0)
 })
 
-// 过滤后的应收账款
+// 过滤后的应收账款（只显示未结清的）
 const filteredReceivableCredits = computed(() => {
   let filtered = [...receivableCredits.value]
+  // 只显示未结清的
+  filtered = filtered.filter(c => !c.isPaid)
 
-  // 根据标签页过滤
-  if (activeTab.value === 'overdue') {
-    filtered = filtered.filter(c => creditService.isCreditOverdue(c.expectedRepayDate))
-  }
-
-  // 关键词搜索
   if (searchKeyword.value.trim()) {
     filtered = creditService.filterCreditRecords(filtered, {
       keyword: searchKeyword.value
     })
   }
-
   return filtered.sort((a, b) => new Date(b.date) - new Date(a.date))
 })
 
 const filteredReceivableTotal = computed(() => {
   return filteredReceivableCredits.value.reduce((sum, c) => sum + (c.amount || 0), 0)
+})
+
+// 过滤后的逾期账款（只显示未结清且逾期的）
+const filteredOverdueCredits = computed(() => {
+  const allOverdue = allCredits.value.filter(c =>
+      !c.isPaid && creditService.isCreditOverdue(c.expectedRepayDate)
+  )
+
+  if (searchKeyword.value.trim()) {
+    return creditService.filterCreditRecords(allOverdue, {
+      keyword: searchKeyword.value
+    })
+  }
+
+  return allOverdue
+})
+
+const filteredOverdueTotal = computed(() => {
+  return filteredOverdueCredits.value.reduce((sum, c) => sum + (c.amount || 0), 0)
 })
 
 // ==================== 方法 ====================
@@ -504,15 +845,10 @@ const filteredReceivableTotal = computed(() => {
 const loadData = async () => {
   loading.value = true
   try {
-    // 获取所有赊账记录
     const creditData = await creditService.getAllCreditRecords()
-
     payableCredits.value = creditData.payableCredits
     receivableCredits.value = creditData.receivableCredits
-
-    // 获取统计数据
     creditStats.value = await creditService.getCreditStats()
-
     console.log('应付账款:', payableCredits.value.length)
     console.log('应收账款:', receivableCredits.value.length)
   } catch (error) {
@@ -535,7 +871,6 @@ const getPayableBadgeClass = (credit) => {
   return creditService.getPayableBadgeClass(credit)
 }
 
-// 应付账款标签文本
 const getPayableBadgeText = (credit) => {
   return creditService.getPayableBadgeText(credit)
 }
@@ -545,13 +880,8 @@ const getReceivableBadgeClass = (credit) => {
   return creditService.getReceivableBadgeClass(credit)
 }
 
-// 应收账款标签文本
 const getReceivableBadgeText = (credit) => {
   return creditService.getReceivableBadgeText(credit)
-}
-
-const searchCredits = () => {
-  // 计算属性会自动更新
 }
 
 // 打开还款模态框
@@ -614,7 +944,7 @@ const submitRepayment = async () => {
   }
 
   if (parseFloat(repaymentForm.amount) > selectedPayable.value.amount) {
-    notificationService.showNotification('还款金额不能大于赊账金额', 'error')
+    notificationService.showNotification('还款金额不能大于当前欠款', 'error')
     return
   }
 
@@ -720,6 +1050,102 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 样式保持不变，与之前相同 */
+.credit-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.credit-type-badge.payable {
+  background: rgba(231, 76, 60, 0.1);
+  color: #e74c3c;
+}
+
+.credit-type-badge.receivable {
+  background: rgba(46, 204, 113, 0.1);
+  color: #2ecc71;
+}
+
+/* 分组头部 */
+.credit-group {
+  margin-bottom: 30px;
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 15px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border-left: 4px solid #80A492;
+}
+
+.group-header i {
+  font-size: 18px;
+  color: #80A492;
+}
+
+.group-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+}
+
+.group-total {
+  margin-left: auto;
+  font-size: 14px;
+  font-weight: 600;
+  color: #80A492;
+}
+
+.group-header.pending {
+  border-left-color: #3498db;
+}
+
+.group-header.pending i {
+  color: #3498db;
+}
+
+.group-header.overdue {
+  border-left-color: #f39c12;
+}
+
+.group-header.overdue i {
+  color: #f39c12;
+}
+
+.group-header.paid {
+  border-left-color: #2ecc71;
+}
+
+.group-header.paid i {
+  color: #2ecc71;
+}
+
+/* 已结清卡片样式 */
+.paid-card {
+  opacity: 0.85;
+  background: rgba(46, 204, 113, 0.05);
+}
+
+.paid-card:hover {
+  opacity: 1;
+}
+
+/* 逾期卡片加强样式 */
+.credit-overdue {
+  background: rgba(243, 156, 18, 0.05);
+  border-left: 4px solid #f39c12 !important;
+}
+
 /* ==================== 基础样式 ==================== */
 .modal {
   position: fixed;
@@ -887,11 +1313,11 @@ onMounted(() => {
 }
 
 .payable-card .stat-value {
-  color: #e74c3c; /* 红色表示应付账款 - 支出赊账 */
+  color: #e74c3c;
 }
 
 .receivable-card .stat-value {
-  color: #2ecc71; /* 绿色表示应收账款 - 收入赊账 */
+  color: #2ecc71;
 }
 
 .overdue-card .stat-value {
@@ -1063,11 +1489,11 @@ onMounted(() => {
 }
 
 .credit-card.payable {
-  border-left: 4px solid #e74c3c; /* 红色边框表示应付账款 - 支出赊账 */
+  border-left: 4px solid #e74c3c;
 }
 
 .credit-card.receivable {
-  border-left: 4px solid #2ecc71; /* 绿色边框表示应收账款 - 收入赊账 */
+  border-left: 4px solid #2ecc71;
 }
 
 .credit-card.credit-overdue {
@@ -1134,11 +1560,11 @@ onMounted(() => {
 }
 
 .credit-amount.warning-text {
-  color: #e74c3c; /* 应付账款用红色 */
+  color: #e74c3c;
 }
 
 .credit-amount.success-text {
-  color: #2ecc71; /* 应收账款用绿色 */
+  color: #2ecc71;
 }
 
 /* ==================== 信用信息 ==================== */
@@ -1245,7 +1671,7 @@ onMounted(() => {
 }
 
 .action-btn.repay {
-  background: #e74c3c; /* 红色表示还款 - 支出赊账 */
+  background: #e74c3c;
   border-color: #e74c3c;
   color: white;
 }
@@ -1255,7 +1681,7 @@ onMounted(() => {
 }
 
 .action-btn.collect {
-  background: #2ecc71; /* 绿色表示收款 - 收入赊账 */
+  background: #2ecc71;
   border-color: #2ecc71;
   color: white;
 }

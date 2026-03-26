@@ -4,6 +4,7 @@ import baseService from './base.service.js'
 
 /**
  * 赊账管理业务服务
+ * 只包含业务逻辑，数据库操作全部委托给 businessDataService
  */
 class CreditService {
     /**
@@ -13,16 +14,43 @@ class CreditService {
         const expenseRecords = await businessDataService.getAllExpenseRecords()
         const incomeRecords = await businessDataService.getAllIncomeRecords()
 
+        // 应付账款（支出赊账）- 计算剩余金额
         const payableCredits = expenseRecords
-            .filter(record => record.paymentMethod === '赊账' && !record.isPaid)
-            .map(record => ({ ...record, type: 'expense', creditType: 'payable', sourceTable: 'expense_records' }))
+            .filter(record => record.paymentMethod === '赊账')
+            .map(record => {
+                const repaidAmount = record.repaidAmount || 0
+                const remainingAmount = record.amount - repaidAmount
+                return {
+                    ...record,
+                    type: 'expense',
+                    creditType: 'payable',
+                    amount: remainingAmount,  // 显示剩余欠款
+                    originalAmount: record.amount,  // 原始赊账金额
+                    repaidAmount: repaidAmount,
+                    isPaid: remainingAmount <= 0
+                }
+            })
 
+        // 应收账款（收入赊账）- 计算剩余金额
         const receivableCredits = incomeRecords
-            .filter(record => record.paymentMethod === '赊账' && !record.isPaid)
-            .map(record => ({ ...record, type: 'income', creditType: 'receivable', sourceTable: 'income_records' }))
+            .filter(record => record.paymentMethod === '赊账')
+            .map(record => {
+                const repaidAmount = record.repaidAmount || 0
+                const remainingAmount = record.amount - repaidAmount
+                return {
+                    ...record,
+                    type: 'income',
+                    creditType: 'receivable',
+                    amount: remainingAmount,  // 显示剩余欠款
+                    originalAmount: record.amount,  // 原始赊账金额
+                    repaidAmount: repaidAmount,
+                    isPaid: remainingAmount <= 0
+                }
+            })
 
         return {
-            payableCredits, receivableCredits,
+            payableCredits,
+            receivableCredits,
             totalPayable: payableCredits.reduce((sum, c) => sum + (c.amount || 0), 0),
             totalReceivable: receivableCredits.reduce((sum, c) => sum + (c.amount || 0), 0),
             totalCredit: payableCredits.reduce((sum, c) => sum + (c.amount || 0), 0) +
@@ -36,8 +64,13 @@ class CreditService {
     async getCreditStats() {
         const { payableCredits, receivableCredits } = await this.getAllCreditRecords()
 
-        const payableOverdue = payableCredits.filter(c => this.isCreditOverdue(c.expectedRepayDate)).length
-        const receivableOverdue = receivableCredits.filter(c => this.isCreditOverdue(c.expectedRepayDate)).length
+        // 只统计未还清的逾期记录
+        const payableOverdue = payableCredits
+            .filter(c => !c.isPaid && this.isCreditOverdue(c.expectedRepayDate))
+            .length
+        const receivableOverdue = receivableCredits
+            .filter(c => !c.isPaid && this.isCreditOverdue(c.expectedRepayDate))
+            .length
 
         return {
             totalPayable: payableCredits.reduce((sum, c) => sum + (c.amount || 0), 0),
@@ -112,63 +145,14 @@ class CreditService {
      * 记录应付账款还款
      */
     async recordPayableRepayment(recordId, repaymentData) {
-        const { amount, date, paymentMethod, note } = repaymentData
-
-        const record = await businessDataService.getExpenseRecordById(recordId)
-        if (!record) throw new Error('赊账记录不存在')
-        if (record.paymentMethod !== '赊账') throw new Error('该记录不是赊账记录')
-
-        const repaymentAmount = parseFloat(amount)
-        const remainingAmount = record.amount - repaymentAmount
-
-        const updatedRecord = {
-            ...record,
-            amount: remainingAmount,
-            isPaid: remainingAmount <= 0,
-            repayDate: date,
-            repayMethod: paymentMethod,
-            repayNote: note
-        }
-
-        return businessDataService.updateExpenseRecord(recordId, updatedRecord)
+        return await businessDataService.recordPayableRepayment(recordId, repaymentData)
     }
 
     /**
      * 记录应收账款收款
      */
     async recordReceivableCollection(recordId, collectionData) {
-        const { amount, date, paymentMethod, note } = collectionData
-
-        const record = await businessDataService.getIncomeRecordById(recordId)
-        if (!record) throw new Error('赊账记录不存在')
-        if (record.paymentMethod !== '赊账') throw new Error('该记录不是赊账记录')
-
-        const collectionAmount = parseFloat(amount)
-        const remainingAmount = record.amount - collectionAmount
-
-        const updatedRecord = {
-            ...record,
-            amount: remainingAmount,
-            isPaid: remainingAmount <= 0,
-            repayDate: date,
-            repayMethod: paymentMethod,
-            repayNote: note
-        }
-
-        const result = await businessDataService.updateIncomeRecord(recordId, updatedRecord)
-
-        // 更新客户赊账余额
-        if (result && record.customerId) {
-            const repaymentData = {
-                amount: collectionAmount,
-                date: date,
-                paymentMethod: paymentMethod,
-                note: note
-            }
-            await businessDataService.recordCustomerRepayment(record.customerId, repaymentData)
-        }
-
-        return result
+        return await businessDataService.recordReceivableCollection(recordId, collectionData)
     }
 
     /**

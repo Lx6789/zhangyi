@@ -24,15 +24,14 @@
                   v-model="form.name"
                   type="text"
                   class="form-input"
-                  :placeholder="formConfig.name.placeholder"
+                  placeholder="例如：苹果、大米..."
                   required
                   autofocus
               >
-              <div class="input-focus-effect"></div>
             </div>
           </div>
 
-          <!-- 商品分类 -->
+          <!-- 商品分类 - 直接使用 props.categories -->
           <div class="form-group">
             <label>
               <i class="fas fa-folder"></i>
@@ -40,8 +39,12 @@
             </label>
             <div class="category-select-wrapper">
               <select v-model="form.category" class="form-select" required>
-                <option value="" disabled selected>{{ formConfig.category.placeholder }}</option>
-                <option v-for="category in categoryOptions" :key="category.id" :value="category.name">
+                <option value="" disabled>请选择商品分类</option>
+                <option
+                    v-for="category in props.categories"
+                    :key="category.id"
+                    :value="category.name"
+                >
                   {{ category.name }}
                   <span v-if="category.isDefault" class="default-badge">默认</span>
                 </option>
@@ -55,7 +58,7 @@
                 <i class="fas fa-cog"></i>
               </button>
             </div>
-            <div v-if="categories.length === 0" class="field-hint">
+            <div v-if="props.categories.length === 0" class="field-hint">
               <i class="fas fa-info-circle"></i>
               暂无分类，请先
               <button type="button" class="text-link" @click="openCategoryManagement">添加分类</button>
@@ -69,10 +72,15 @@
               <span>单位 <span class="required">*</span></span>
             </label>
             <select v-model="form.unit" class="form-select" required>
-              <option value="" disabled selected>{{ formConfig.unit.placeholder }}</option>
-              <option v-for="unit in unitOptions" :key="unit.value" :value="unit.value">
-                {{ unit.label }}
-              </option>
+              <option value="" disabled>请选择单位</option>
+              <option value="斤">斤</option>
+              <option value="公斤">公斤</option>
+              <option value="个">个</option>
+              <option value="份">份</option>
+              <option value="箱">箱</option>
+              <option value="袋">袋</option>
+              <option value="瓶">瓶</option>
+              <option value="包">包</option>
             </select>
           </div>
 
@@ -80,7 +88,7 @@
           <div class="form-group">
             <label>
               <i class="fas fa-yen-sign"></i>
-              <span>{{ formConfig.defaultPrice.label }}</span>
+              <span>参考售价（可选）</span>
             </label>
             <div class="input-wrapper with-prefix">
               <span class="input-prefix">¥</span>
@@ -88,14 +96,10 @@
                   v-model="form.defaultPrice"
                   type="number"
                   class="form-input with-prefix-input"
-                  :placeholder="formConfig.defaultPrice.placeholder"
+                  placeholder="例如：5.00"
                   min="0"
                   step="0.01"
               >
-              <div class="input-focus-effect"></div>
-            </div>
-            <div class="field-hint" v-if="formConfig.defaultPrice.hint">
-              <i class="fas fa-lightbulb"></i> {{ formConfig.defaultPrice.hint }}
             </div>
           </div>
 
@@ -103,17 +107,14 @@
           <div class="form-group">
             <label>
               <i class="fas fa-align-left"></i>
-              <span>{{ formConfig.description.label }}</span>
+              <span>备注（可选）</span>
             </label>
-            <div class="textarea-wrapper">
-              <textarea
-                  v-model="form.description"
-                  class="form-input form-textarea"
-                  :placeholder="formConfig.description.placeholder"
-                  rows="2"
-              ></textarea>
-              <div class="textarea-focus-effect"></div>
-            </div>
+            <textarea
+                v-model="form.description"
+                class="form-input form-textarea"
+                placeholder="商品描述、产地、规格等信息..."
+                rows="2"
+            ></textarea>
           </div>
 
           <!-- 表单操作按钮 -->
@@ -134,7 +135,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import productService from '@/services/api/business/product.service.js'
 import { notificationService } from "@/services/index.js"
 
@@ -154,29 +155,7 @@ const emit = defineEmits(['update:visible', 'success', 'open-category'])
 // ==================== 状态 ====================
 const saving = ref(false)
 
-// ==================== 计算属性 ====================
-
-// 获取表单配置
-const formConfig = computed(() => {
-  return productService.getQuickProductFormConfig()
-})
-
-// 获取分类选项（使用 productService）
-const categoryOptions = computed(() => {
-  return productService.getProductCategoryOptions(props.categories)
-})
-
-// 获取单位选项（使用 productService）
-const unitOptions = computed(() => {
-  return productService.getUnitOptions()
-})
-
-// 获取快速添加按钮提示（使用 productService）
-const addButtonHint = computed(() => {
-  return productService.getQuickAddButtonHint(props.categories)
-})
-
-// ==================== 表单数据 ====================
+// 表单数据
 const form = reactive({
   name: '',
   category: '',
@@ -189,47 +168,64 @@ const form = reactive({
 
 // 重置表单
 const resetForm = () => {
-  const defaultForm = productService.getQuickProductFormDefault()
-  form.name = defaultForm.name
-  form.category = defaultForm.category
-  form.unit = defaultForm.unit
-  form.defaultPrice = defaultForm.defaultPrice
-  form.description = defaultForm.description
+  form.name = ''
+  form.category = ''
+  form.unit = ''
+  form.defaultPrice = ''
+  form.description = ''
 }
 
 // 保存商品
 const saveProduct = async () => {
-  // 验证表单（使用 productService）
-  const validation = productService.validateQuickProductForm(form)
-  if (!validation.valid) {
-    notificationService.showNotification(validation.errors.join('，'), 'error')
+  // 验证表单
+  if (!form.name.trim()) {
+    notificationService.showNotification('请输入商品名称', 'error')
+    return
+  }
+
+  if (!form.category) {
+    notificationService.showNotification('请选择商品分类', 'error')
+    return
+  }
+
+  if (!form.unit) {
+    notificationService.showNotification('请选择单位', 'error')
     return
   }
 
   // 检查商品名称是否重复
   const existingProducts = await productService.getAllProducts()
-  if (productService.isProductNameDuplicate(existingProducts, form.name)) {
+  const isDuplicate = existingProducts.some(
+      p => p.name.toLowerCase() === form.name.trim().toLowerCase()
+  )
+
+  if (isDuplicate) {
     notificationService.showNotification(`商品 "${form.name.trim()}" 已存在，请勿重复添加`, 'error')
     return
   }
 
   saving.value = true
   try {
-    // 创建商品数据（使用 productService）
-    const productData = productService.createQuickProduct(form)
+    // 创建商品数据
+    const productData = {
+      name: form.name.trim(),
+      category: form.category,
+      unit: form.unit,
+      defaultPrice: form.defaultPrice ? parseFloat(form.defaultPrice) : null,
+      description: form.description.trim() || null,
+      createTime: new Date().toISOString()
+    }
 
-    // 添加商品 - 直接调用 productService 的 addProduct 方法
+    // 添加商品
     await productService.addProduct(productData)
 
     emit('success')
     close()
 
-    const successMsg = productService.getQuickProductSuccessMessage(form.name)
-    notificationService.showNotification(successMsg, 'success')
+    notificationService.showNotification(`商品 "${form.name}" 添加成功`, 'success')
   } catch (error) {
     console.error('添加商品失败:', error)
-    const errorMsg = productService.getQuickProductErrorMessage(error.message)
-    notificationService.showNotification(errorMsg, 'error')
+    notificationService.showNotification('添加商品失败，请重试', 'error')
   } finally {
     saving.value = false
   }
@@ -266,15 +262,15 @@ watch(() => props.visible, (newVal) => {
   }
 })
 
-// 监听分类变化，当有新的分类时自动选中
+// 监听分类变化，当有新分类时自动选中
 watch(() => props.categories, (newCategories, oldCategories) => {
-  if (newCategories.length > 0 && !form.category && newCategories.length !== (oldCategories?.length || 0)) {
-    const newestCategory = newCategories[newCategories.length - 1]
-    if (newestCategory) {
-      form.category = newestCategory.name
-    }
+  console.log('QuickAddProductModal - categories 更新:', newCategories?.length)
+  if (newCategories && newCategories.length > 0 && !form.category) {
+    // 自动选中第一个分类
+    form.category = newCategories[0].name
+    console.log('自动选中分类:', form.category)
   }
-}, { deep: true })
+}, { immediate: true, deep: true })
 </script>
 
 <style scoped>
@@ -292,16 +288,6 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   opacity: 0;
   visibility: hidden;
   transition: all 0.3s;
-}
-
-/* 添加默认分类徽章样式 */
-.default-badge {
-  font-size: 10px;
-  background: rgba(128, 164, 146, 0.2);
-  padding: 2px 6px;
-  border-radius: 12px;
-  margin-left: 6px;
-  color: #80A492;
 }
 
 .modal.active {
@@ -428,7 +414,15 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   margin-left: 2px;
 }
 
-/* 输入框样式 */
+.default-badge {
+  font-size: 10px;
+  background: rgba(128, 164, 146, 0.2);
+  padding: 2px 6px;
+  border-radius: 12px;
+  margin-left: 6px;
+  color: #80A492;
+}
+
 .input-wrapper {
   position: relative;
   border-radius: 12px;
@@ -483,24 +477,6 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   font-family: inherit;
 }
 
-.input-focus-effect,
-.textarea-focus-effect {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 0;
-  height: 2px;
-  background: linear-gradient(90deg, #80A492, #B1D5C8);
-  transition: width 0.3s ease;
-  pointer-events: none;
-}
-
-.input-wrapper:focus-within .input-focus-effect,
-.textarea-wrapper:focus-within .textarea-focus-effect {
-  width: 100%;
-}
-
-/* 选择框样式 */
 .category-select-wrapper {
   display: flex;
   gap: 8px;
@@ -552,7 +528,6 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   border-color: #80A492;
 }
 
-/* 字段提示 */
 .field-hint {
   font-size: 11px;
   color: #99BCAC;
@@ -576,7 +551,10 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   font-size: 11px;
 }
 
-/* 按钮样式 */
+.text-link:hover {
+  color: #608070;
+}
+
 .form-actions {
   display: flex;
   gap: 15px;
@@ -630,7 +608,6 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   border-color: #80A492;
 }
 
-/* 响应式 */
 @media (max-width: 480px) {
   .modal-content {
     padding: 20px;
@@ -654,7 +631,6 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   }
 }
 
-/* 自定义滚动条 */
 .modal-content::-webkit-scrollbar {
   width: 6px;
 }

@@ -20,7 +20,6 @@
                   type="text"
                   class="search-input"
                   :placeholder="`搜索客户名称、电话、类型...`"
-                  @input="searchCustomers"
               >
             </div>
           </div>
@@ -294,7 +293,7 @@
 
           <!-- 时间筛选 -->
           <div class="date-filter">
-            <select v-model="transactionDateRange" class="form-select" @change="filterTransactions">
+            <select v-model="transactionDateRange" class="form-select">
               <option value="all">全部记录</option>
               <option value="month">最近一个月</option>
               <option value="quarter">最近三个月</option>
@@ -445,8 +444,8 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import dateHelper from '@/services/utils/date-helper.service.js'
 import { notificationService } from "@/services/index.js"
-import customerService from "@/services/api/business/customer.service.js";
-import baseService from "@/services/api/business/base.service.js";
+import customerService from "@/services/api/business/customer.service.js"
+import baseService from "@/services/api/business/base.service.js"
 
 const props = defineProps({
   visible: {
@@ -459,11 +458,19 @@ const emit = defineEmits(['update:visible', 'update', 'record-income'])
 
 // ==================== 状态 ====================
 const customers = ref([])
-const filteredCustomers = ref([])
 const searchKeyword = ref('')
 const selectedType = ref('全部')
 const loading = ref(false)
 const customerTypes = ref([])
+
+// 使用 computed 进行本地筛选（性能优化，避免频繁调用 API）
+const filteredCustomers = computed(() => {
+  // 调用 service 的本地筛选方法
+  return customerService.filterCustomersLocal(customers.value, {
+    type: selectedType.value,
+    keyword: searchKeyword.value
+  })
+})
 
 // 新增/编辑相关
 const addEditModalVisible = ref(false)
@@ -503,12 +510,15 @@ const deleteConfirmCustomer = ref(null)
 
 // ==================== 方法 ====================
 
-// 加载客户数据
+/**
+ * 加载客户数据
+ */
 const loadCustomers = async () => {
   loading.value = true
   try {
+    console.log('开始加载客户数据...')
     customers.value = await customerService.getAllCustomers()
-    filterCustomers()
+    console.log('加载到的客户数量:', customers.value.length)
   } catch (error) {
     console.error('加载客户失败:', error)
     notificationService.showNotification('加载客户失败', 'error')
@@ -517,20 +527,9 @@ const loadCustomers = async () => {
   }
 }
 
-// 筛选客户
-const filterCustomers = () => {
-  filteredCustomers.value = customerService.filterCustomers(customers.value, {
-    type: selectedType.value,
-    keyword: searchKeyword.value
-  })
-}
-
-// 搜索客户
-const searchCustomers = () => {
-  filterCustomers()
-}
-
-// 打开新增客户模态框
+/**
+ * 打开新增客户模态框
+ */
 const openAddCustomerModal = () => {
   editingCustomerId.value = ''
   customerForm.name = ''
@@ -545,7 +544,9 @@ const openAddCustomerModal = () => {
   addEditModalVisible.value = true
 }
 
-// 编辑客户
+/**
+ * 编辑客户
+ */
 const editCustomer = (customer) => {
   editingCustomerId.value = customer.id
   customerForm.name = customer.name
@@ -560,7 +561,9 @@ const editCustomer = (customer) => {
   addEditModalVisible.value = true
 }
 
-// 保存客户
+/**
+ * 保存客户
+ */
 const saveCustomer = async () => {
   if (!customerForm.name) {
     notificationService.showNotification('请输入客户名称', 'error')
@@ -585,14 +588,18 @@ const saveCustomer = async () => {
   }
 }
 
-// 确认删除客户
+/**
+ * 确认删除客户
+ */
 const confirmDeleteCustomer = (customer) => {
   deleteConfirmMessage.value = `确定要删除客户 "${customer.name}" 吗？`
   deleteConfirmCustomer.value = customer
   deleteConfirmVisible.value = true
 }
 
-// 执行删除
+/**
+ * 执行删除
+ */
 const confirmDelete = async () => {
   if (!deleteConfirmCustomer.value) return
 
@@ -610,20 +617,26 @@ const confirmDelete = async () => {
   }
 }
 
-// 快速记账
+/**
+ * 快速记账
+ */
 const quickRecordIncome = (customer) => {
   emit('record-income', customer)
   close()
 }
 
-// 查看交易记录
+/**
+ * 查看交易记录
+ */
 const viewTransactions = async (customer) => {
   selectedCustomer.value = customer
   await loadCustomerTransactions(customer.id)
   transactionModalVisible.value = true
 }
 
-// 加载客户交易记录
+/**
+ * 加载客户交易记录
+ */
 const loadCustomerTransactions = async (customerId) => {
   loadingTransactions.value = true
   try {
@@ -636,14 +649,9 @@ const loadCustomerTransactions = async (customerId) => {
   }
 }
 
-// 筛选交易记录
-const filterTransactions = () => {
-  if (selectedCustomer.value) {
-    loadCustomerTransactions(selectedCustomer.value.id)
-  }
-}
-
-// 记录还款
+/**
+ * 记录还款
+ */
 const recordRepayment = (customer) => {
   selectedCustomer.value = customer
   repaymentForm.amount = ''
@@ -653,7 +661,9 @@ const recordRepayment = (customer) => {
   repaymentModalVisible.value = true
 }
 
-// 提交还款
+/**
+ * 提交还款
+ */
 const submitRepayment = async () => {
   if (!repaymentForm.amount || parseFloat(repaymentForm.amount) <= 0) {
     notificationService.showNotification('请输入有效的还款金额', 'error')
@@ -683,16 +693,24 @@ const submitRepayment = async () => {
   }
 }
 
-// 关闭模态框
+/**
+ * 关闭主模态框
+ */
 const close = () => {
   emit('update:visible', false)
 }
 
+/**
+ * 关闭新增/编辑模态框
+ */
 const closeAddEditModal = () => {
   addEditModalVisible.value = false
   editingCustomerId.value = ''
 }
 
+/**
+ * 点击遮罩层关闭
+ */
 const closeOnOverlay = (event) => {
   if (event.target.classList.contains('modal')) {
     close()
@@ -723,19 +741,21 @@ const closeConfirmOnOverlay = (event) => {
   }
 }
 
-// ==================== 辅助函数 ====================
+// ==================== 格式化工具函数（委托给 service） ====================
 
+/**
+ * 格式化数字金额
+ */
 const formatNumber = (num) => {
   return baseService.formatNumber(num)
 }
 
+/**
+ * 格式化日期
+ */
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  return `${year}.${month}.${day}`
+  return dateHelper.formatDate(dateStr)
 }
 
 // ==================== 监听器 ====================
@@ -746,10 +766,7 @@ watch(() => props.visible, (newVal) => {
   }
 })
 
-watch([selectedType, searchKeyword], () => {
-  filterCustomers()
-})
-
+// 监听筛选条件变化（computed 会自动响应，无需手动调用）
 watch(transactionDateRange, () => {
   if (transactionModalVisible.value && selectedCustomer.value) {
     loadCustomerTransactions(selectedCustomer.value.id)
@@ -758,7 +775,7 @@ watch(transactionDateRange, () => {
 
 // ==================== 初始化 ====================
 onMounted(async () => {
-  // 获取客户类型列表
+  // 从 service 获取客户类型列表
   customerTypes.value = customerService.getCustomerTypes()
 
   if (props.visible) {

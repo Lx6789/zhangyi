@@ -723,27 +723,43 @@ const submitForm = async () => {
 
   const totalAmount = IncomeService.calculateIncomeTotal(form.quantity, form.price)
 
-  // 处理客户赊账
+  // 处理客户赊账 - 使用实例方法并添加 await
   let updatedCustomer = null
   if (form.paymentMethod === '赊账' && selectedCustomer.value) {
-    updatedCustomer = IncomeService.updateCustomerCreditBalance(selectedCustomer.value, totalAmount)
-    if (updatedCustomer) {
-      const customers = [...props.customers]
-      const index = customers.findIndex(c => c.id === selectedCustomer.value.id)
-      if (index !== -1) {
-        customers[index] = updatedCustomer
-        userDataService.saveCustomers(customers)
+    try {
+      console.log('开始更新客户赊账信息，客户:', selectedCustomer.value.name)
+      console.log('赊账金额:', totalAmount)
+
+      // 使用实例方法（注意是 incomeService 不是 IncomeService）
+      updatedCustomer = await incomeService.updateCustomerCreditBalance(selectedCustomer.value, totalAmount)
+
+      console.log('客户赊账信息更新成功:', updatedCustomer)
+
+      // 更新本地 props 中的客户数据
+      if (updatedCustomer) {
+        const customers = [...props.customers]
+        const index = customers.findIndex(c => c.id === selectedCustomer.value.id)
+        if (index !== -1) {
+          customers[index] = updatedCustomer
+          // 注意：这里不需要再调用 userDataService.saveCustomers，因为数据已经通过 businessDataService 保存到 IndexedDB
+        }
       }
+    } catch (error) {
+      console.error('更新客户赊账信息失败:', error)
+      notificationService.showNotification('更新客户赊账信息失败: ' + error.message, 'error')
+      return
     }
   }
 
   // 创建记录
-  const record = IncomeService.createIncomeRecord(
+  const record = incomeService.createIncomeRecord(
       { ...form, autoUpdateInventory: autoUpdateInventory.value },
       selectedProduct.value,
       updatedCustomer || selectedCustomer.value,
       totalAmount
   )
+
+  console.log('创建的收入记录:', record)
 
   try {
     await businessDataService.addIncomeRecord(record)
@@ -752,7 +768,7 @@ const submitForm = async () => {
     if (form.channel === '批发' && autoUpdateInventory.value && selectedProduct.value) {
       const inventoryItems = await businessDataService.getInventoryByProductId(selectedProduct.value.id)
       if (inventoryItems.length > 0) {
-        const updateData = IncomeService.processWholesaleStockUpdate(inventoryItems[0], form.quantity)
+        const updateData = incomeService.processWholesaleStockUpdate(inventoryItems[0], form.quantity)
         if (!updateData.error) {
           await businessDataService.updateInventoryItem(updateData.id, updateData)
           console.log(`库存已更新: 减少 ${form.quantity} ${form.unit}`)
@@ -763,8 +779,9 @@ const submitForm = async () => {
     emit('success')
     close()
 
-    const successMsg = IncomeService.formatIncomeSuccessMessage(
-        selectedProduct.value.name,
+    const productName = selectedProduct.value?.name || form.category || '商品'
+    const successMsg = incomeService.formatIncomeSuccessMessage(
+        productName,
         totalAmount,
         selectedCustomer.value?.name,
         form.paymentMethod === '赊账'
@@ -874,6 +891,10 @@ watch(() => props.visible, (newVal) => {
     loadInventoryData()
   }
 })
+
+watch(() => props.categories, (newVal) => {
+  console.log('IncomeModal - categories props:', newVal)
+}, { immediate: true })
 </script>
 
 <style scoped>
