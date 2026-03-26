@@ -472,6 +472,8 @@ import indexedDBService from '@/services/db/indexed-db.service.js'
 import dateHelper from '@/services/utils/date-helper.service.js'
 import idGenerator from '@/services/id-generator.service.js'
 import DataTransferModal from '@/components/sidebar/DataTransferModal.vue'
+import incomeService from "@/services/api/business/income.service.js";
+import expenseService from "@/services/api/business/expense.service.js";
 
 const router = useRouter()
 
@@ -625,9 +627,9 @@ const getAllRecords = async () => {
 
     // 分别从三个表获取数据
     const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
-      businessDataService.getDailyRecords(),
-      businessDataService.getIncomeRecords(),
-      businessDataService.getExpenseRecords()
+      businessDataService.getDailyRecordsWithDecrypt(),
+      incomeService.getIncomeRecords(),
+      expenseService.getExpenseRecords()
     ])
 
     // 合并所有记录
@@ -651,9 +653,9 @@ const getAllRecords = async () => {
       await businessDataService.init(businessDataService.getCurrentUserId())
 
       const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
-        businessDataService.getDailyRecords(),
-        businessDataService.getIncomeRecords(),
-        businessDataService.getExpenseRecords()
+        businessDataService.getDailyRecordsWithDecrypt(),
+        incomeService.getIncomeRecords(),
+        expenseService.getExpenseRecords()
       ])
 
       const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]

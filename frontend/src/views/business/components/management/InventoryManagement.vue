@@ -625,6 +625,7 @@ import { notificationService } from "@/services/index.js"
 import inventoryService from "@/services/api/business/inventory.service.js";
 import baseService from "@/services/api/business/base.service.js";
 import businessCacheService from "@/services/cache/business-cache.service.js";
+import { Export } from '@/services/data_migration/export.js'
 
 const props = defineProps({
   visible: {
@@ -1081,25 +1082,18 @@ const confirmDelete = async () => {
 }
 
 // 导出库存数据 - 使用业务服务
-const exportInventoryData = () => {
+const exportInventoryData = async () => {
   try {
-    const csvContent = inventoryService.exportInventoryToCSV(filteredInventory.value)
+    const exportModule = Export()
+    const data = await exportModule.exportInventory()
 
-    if (!csvContent) {
+    if (!data || data.length === 0) {
       notificationService.showNotification('没有可导出的数据', 'warning')
       return
     }
 
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `库存报表_${dateHelper.getTodayString()}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-
+    const fileName = exportModule.generateFileName('库存报表')
+    await exportModule.exportToExcel(data, fileName, '库存数据')
     notificationService.showNotification('导出成功', 'success')
   } catch (error) {
     console.error('导出失败:', error)

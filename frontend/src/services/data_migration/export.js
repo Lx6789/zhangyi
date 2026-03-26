@@ -231,8 +231,11 @@ export function Export() {
                     '分类': item.category || '',
                     '库存数量': item.quantity || 0,
                     '单位': item.unit || '',
-                    '进货价': formatMoney(item.purchasePrice),
+                    '成本价': formatMoney(item.costPrice),
                     '售价': formatMoney(item.sellingPrice),
+                    '最低库存预警': item.minStock || '',
+                    '供应商': item.supplier || '',
+                    '存放位置': item.location || '',
                     '过期日期': item.expiryDate || '',
                     '状态': item.status || '正常',
                     '备注': item.note || ''
@@ -292,9 +295,15 @@ export function Export() {
             for (const supplier of suppliers) {
                 data.push({
                     '供应商名称': supplier.name,
-                    '联系人': supplier.contact || '',
+                    '联系人': supplier.contactPerson || supplier.contact || '',
                     '电话': supplier.phone || '',
+                    '邮箱': supplier.email || '',
+                    '类别': supplier.category || '',
                     '地址': supplier.address || '',
+                    '结算方式': supplier.paymentTerms || '',
+                    '账期(天)': supplier.paymentDays || '',
+                    '采购次数': supplier.purchaseCount || 0,
+                    '采购总额': formatMoney(supplier.totalAmount || 0),
                     '备注': supplier.note || ''
                 })
             }
@@ -308,7 +317,7 @@ export function Export() {
     const getCustomersData = async () => {
         const data = []
         try {
-            const customers = JSON.parse(localStorage.getItem('customers') || '[]')
+            const customers = await businessDataService.getAllCustomers()
             for (const customer of customers) {
                 data.push({
                     '客户名称': customer.name,
@@ -316,8 +325,13 @@ export function Export() {
                     '联系人': customer.contact || '',
                     '电话': customer.phone || '',
                     '地址': customer.address || '',
-                    '信用额度': formatMoney(customer.creditLimit),
-                    '当前欠款': formatMoney(customer.currentDebt),
+                    '是否有赊账': customer.creditInfo?.hasCredit ? '是' : '否',
+                    '当前欠款': formatMoney(customer.creditInfo?.balance || 0),
+                    '信用额度': formatMoney(customer.creditInfo?.creditLimit || 0),
+                    '结算天数': customer.creditInfo?.settlementDays || '',
+                    '交易次数': customer.stats?.transactionCount || 0,
+                    '交易总额': formatMoney(customer.stats?.totalAmount || 0),
+                    '最后交易日期': customer.stats?.lastTransactionDate || '',
                     '备注': customer.note || ''
                 })
             }
@@ -327,7 +341,240 @@ export function Export() {
         return data
     }
 
-    // ==================== 导出所有数据（分别导出每个表） ====================
+    // ==================== 采购订单数据 ====================
+    const getPurchaseOrdersData = async () => {
+        const data = []
+        try {
+            const orders = await businessDataService.getAllPurchaseOrders()
+            const suppliers = await businessDataService.getAllSuppliers()
+
+            const getSupplierName = (supplierId) => {
+                const supplier = suppliers.find(s => s.id === supplierId)
+                return supplier?.name || '未知供应商'
+            }
+
+            for (const order of orders) {
+                data.push({
+                    '订单号': order.orderNo,
+                    '供应商': getSupplierName(order.supplierId),
+                    '采购日期': order.orderDate,
+                    '预计送达': order.expectedDate || '',
+                    '收货日期': order.receiveDate || '',
+                    '状态': order.status === 'pending' ? '待处理' : (order.status === 'completed' ? '已完成' : '已取消'),
+                    '商品种类': order.items?.length || 0,
+                    '订单总额': formatMoney(order.totalAmount),
+                    '备注': order.note || ''
+                })
+            }
+        } catch (error) {
+            console.error('获取采购订单数据失败:', error)
+        }
+        return data
+    }
+
+    // ==================== 采购历史数据 ====================
+    const getPurchaseHistoryData = async () => {
+        const data = []
+        try {
+            const history = await businessDataService.getAllPurchaseHistory()
+            const suppliers = await businessDataService.getAllSuppliers()
+
+            const getSupplierName = (supplierId) => {
+                const supplier = suppliers.find(s => s.id === supplierId)
+                return supplier?.name || '未知供应商'
+            }
+
+            for (const record of history) {
+                data.push({
+                    '采购日期': record.purchaseDate,
+                    '订单号': record.orderNo,
+                    '供应商': getSupplierName(record.supplierId),
+                    '商品名称': record.productName,
+                    '数量': record.quantity,
+                    '单位': record.unit,
+                    '单价': formatMoney(record.price),
+                    '总额': formatMoney(record.totalAmount),
+                    '备注': record.note || ''
+                })
+            }
+        } catch (error) {
+            console.error('获取采购历史数据失败:', error)
+        }
+        return data
+    }
+
+    // ==================== 收入报表数据 ====================
+    const getIncomeReportData = async (dateRange) => {
+        const records = await businessDataService.getAllIncomeRecords()
+
+        let filteredRecords = records.filter(r => r.businessType === 'business')
+        if (dateRange && dateRange.start && dateRange.end) {
+            filteredRecords = filteredRecords.filter(r =>
+                r.date >= dateRange.start && r.date <= dateRange.end
+            )
+        }
+
+        const grouped = {}
+        let total = 0
+
+        filteredRecords.forEach(record => {
+            const channel = record.channel || record.source || '其他'
+            if (!grouped[channel]) grouped[channel] = { name: channel, amount: 0, count: 0 }
+            grouped[channel].amount += record.amount || 0
+            grouped[channel].count++
+            total += record.amount || 0
+        })
+
+        const data = Object.values(grouped).map(item => ({
+            '销售渠道': item.name,
+            '交易笔数': item.count,
+            '金额': formatMoney(item.amount),
+            '占比': total > 0 ? ((item.amount / total) * 100).toFixed(1) + '%' : '0%'
+        })).sort((a, b) => parseFloat(b['金额']) - parseFloat(a['金额']))
+
+        return data
+    }
+
+    // ==================== 支出报表数据 ====================
+    const getExpenseReportData = async (dateRange) => {
+        const records = await businessDataService.getAllExpenseRecords()
+
+        let filteredRecords = records.filter(r => r.businessType === 'business')
+        if (dateRange && dateRange.start && dateRange.end) {
+            filteredRecords = filteredRecords.filter(r =>
+                r.date >= dateRange.start && r.date <= dateRange.end
+            )
+        }
+
+        const grouped = {}
+        let total = 0
+
+        filteredRecords.forEach(record => {
+            const category = record.category || '其他'
+            const subtype = record.subtype || '其他'
+            const key = `${category}-${subtype}`
+
+            if (!grouped[key]) grouped[key] = { category, subtype, amount: 0, count: 0 }
+            grouped[key].amount += record.amount || 0
+            grouped[key].count++
+            total += record.amount || 0
+        })
+
+        const data = Object.values(grouped).map(item => ({
+            '支出类型': item.category,
+            '具体项目': item.subtype,
+            '交易笔数': item.count,
+            '金额': formatMoney(item.amount),
+            '占比': total > 0 ? ((item.amount / total) * 100).toFixed(1) + '%' : '0%'
+        })).sort((a, b) => parseFloat(b['金额']) - parseFloat(a['金额']))
+
+        return data
+    }
+
+    // ==================== 利润报表数据 ====================
+    const getProfitReportData = async (dateRange) => {
+        const [incomeRecords, expenseRecords] = await Promise.all([
+            businessDataService.getAllIncomeRecords(),
+            businessDataService.getAllExpenseRecords()
+        ])
+
+        let businessIncome = incomeRecords.filter(r => r.businessType === 'business')
+        let businessExpense = expenseRecords.filter(r => r.businessType === 'business')
+
+        if (dateRange && dateRange.start && dateRange.end) {
+            businessIncome = businessIncome.filter(r =>
+                r.date >= dateRange.start && r.date <= dateRange.end
+            )
+            businessExpense = businessExpense.filter(r =>
+                r.date >= dateRange.start && r.date <= dateRange.end
+            )
+        }
+
+        const dailyData = {}
+
+        businessIncome.forEach(record => {
+            const date = record.date
+            if (!dailyData[date]) dailyData[date] = { date, income: 0, expense: 0, profit: 0, count: 0 }
+            dailyData[date].income += record.amount || 0
+            dailyData[date].count++
+            dailyData[date].profit = dailyData[date].income - dailyData[date].expense
+        })
+
+        businessExpense.forEach(record => {
+            const date = record.date
+            if (!dailyData[date]) dailyData[date] = { date, income: 0, expense: 0, profit: 0, count: 0 }
+            dailyData[date].expense += record.amount || 0
+            dailyData[date].count++
+            dailyData[date].profit = dailyData[date].income - dailyData[date].expense
+        })
+
+        const data = Object.values(dailyData)
+            .sort((a, b) => b.date.localeCompare(a.date))
+            .map(item => ({
+                '日期': item.date,
+                '收入': formatMoney(item.income),
+                '支出': formatMoney(item.expense),
+                '利润': formatMoney(item.profit),
+                '交易笔数': item.count
+            }))
+
+        return data
+    }
+
+    // ==================== 导出通用方法 ====================
+    const exportToCSV = (data, fileName, headers = null) => {
+        if (!data || data.length === 0) return false
+
+        let csvContent = ''
+
+        // 如果有自定义表头，先写入表头
+        if (headers) {
+            csvContent += headers.map(h => `"${h}"`).join(',') + '\n'
+        } else {
+            // 否则使用数据的键作为表头
+            const firstRow = data[0]
+            const keys = Object.keys(firstRow)
+            csvContent += keys.map(key => `"${key}"`).join(',') + '\n'
+        }
+
+        // 写入数据行
+        data.forEach(row => {
+            const values = Object.values(row).map(value => {
+                if (value === undefined || value === null) return '""'
+                const strValue = String(value)
+                if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
+                    return `"${strValue.replace(/"/g, '""')}"`
+                }
+                return `"${strValue}"`
+            })
+            csvContent += values.join(',') + '\n'
+        })
+
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
+        const link = document.createElement('a')
+        const url = URL.createObjectURL(blob)
+        link.setAttribute('href', url)
+        link.setAttribute('download', `${fileName}.csv`)
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+
+        return true
+    }
+
+    const exportToExcel = async (data, fileName, sheetName = 'Sheet1') => {
+        if (!data || data.length === 0) return false
+
+        const worksheet = XLSX.utils.json_to_sheet(data)
+        const workbook = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName)
+        XLSX.writeFile(workbook, `${fileName}.xlsx`)
+
+        return true
+    }
+
+    // 导出所有数据（分别导出每个表）
     const exportAllData = async (userId, options, dateRange, onProgress) => {
         const exportedFiles = []
 
@@ -484,17 +731,77 @@ export function Export() {
             }
         }
 
+        // 10. 导出采购订单
+        if (options.purchaseOrders) {
+            if (onProgress) onProgress('正在导出采购订单...')
+            const data = await getPurchaseOrdersData()
+            if (data.length > 0) {
+                const fileName = generateFileName('采购订单')
+                const worksheet = XLSX.utils.json_to_sheet(data)
+                const workbook = XLSX.utils.book_new()
+                XLSX.utils.book_append_sheet(workbook, worksheet, '采购订单')
+                XLSX.writeFile(workbook, fileName)
+                exportedFiles.push(fileName)
+                console.log(`【导出】已导出采购订单，共 ${data.length} 条，文件: ${fileName}`)
+            } else {
+                console.log('【导出】没有采购订单数据')
+            }
+        }
+
         return { exportedFiles, count: exportedFiles.length }
     }
 
-    // 导出为 Excel（兼容旧接口，导出到单个文件）
-    const exportToExcel = async (userId, options, dateRange, onProgress) => {
-        // 使用新的多文件导出方式
-        return exportAllData(userId, options, dateRange, onProgress)
+    // ==================== 报表导出方法 ====================
+    const exportIncomeReport = async (dateRange) => {
+        const data = await getIncomeReportData(dateRange)
+        if (data.length === 0) return false
+        const fileName = generateFileName('收入报表')
+        return exportToExcel(data, fileName, '收入报表')
+    }
+
+    const exportExpenseReport = async (dateRange) => {
+        const data = await getExpenseReportData(dateRange)
+        if (data.length === 0) return false
+        const fileName = generateFileName('支出报表')
+        return exportToExcel(data, fileName, '支出报表')
+    }
+
+    const exportProfitReport = async (dateRange) => {
+        const data = await getProfitReportData(dateRange)
+        if (data.length === 0) return false
+        const fileName = generateFileName('利润报表')
+        return exportToExcel(data, fileName, '利润报表')
+    }
+
+    const exportReport = async (reportType, records, dateRange) => {
+        let data = []
+        let sheetName = ''
+
+        switch (reportType) {
+            case 'income':
+                data = await getIncomeReportData(dateRange)
+                sheetName = '收入报表'
+                break
+            case 'expense':
+                data = await getExpenseReportData(dateRange)
+                sheetName = '支出报表'
+                break
+            case 'profit':
+                data = await getProfitReportData(dateRange)
+                sheetName = '利润报表'
+                break
+            default:
+                return false
+        }
+
+        if (data.length === 0) return false
+        const fileName = generateFileName(sheetName)
+        return exportToExcel(data, fileName, sheetName)
     }
 
     return {
         exportToExcel,
+        exportToCSV,
         generateFileName,
         formatDate,
         formatDateTime,
@@ -509,6 +816,13 @@ export function Export() {
         exportProducts: getProductsData,
         exportCategories: getCategoriesData,
         exportSuppliers: getSuppliersData,
-        exportCustomers: getCustomersData
+        exportCustomers: getCustomersData,
+        exportPurchaseOrders: getPurchaseOrdersData,
+        exportPurchaseHistory: getPurchaseHistoryData,
+        exportIncomeReport: getIncomeReportData,
+        exportExpenseReport: getExpenseReportData,
+        exportProfitReport: getProfitReportData,
+        exportReport,
+        exportAllData
     }
 }

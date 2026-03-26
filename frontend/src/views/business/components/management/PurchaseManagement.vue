@@ -60,9 +60,14 @@
           <div v-if="activeTab === 'orders'" class="orders-section">
             <div class="section-header">
               <h3><i class="fas fa-file-invoice"></i> 采购订单列表</h3>
-              <button class="btn-small btn-primary" @click="openAddOrderModal">
-                <i class="fas fa-plus"></i> 新建采购单
-              </button>
+              <div class="header-buttons">
+                <button class="btn-small btn-secondary" @click="exportPurchaseOrders">
+                  <i class="fas fa-download"></i> 导出订单
+                </button>
+                <button class="btn-small btn-primary" @click="openAddOrderModal">
+                  <i class="fas fa-plus"></i> 新建采购单
+                </button>
+              </div>
             </div>
 
             <!-- 订单筛选 -->
@@ -191,9 +196,14 @@
           <div v-if="activeTab === 'suppliers'" class="suppliers-section">
             <div class="section-header">
               <h3><i class="fas fa-truck"></i> 供应商列表</h3>
-              <button class="btn-small btn-primary" @click="openAddSupplierModal">
-                <i class="fas fa-plus"></i> 新增供应商
-              </button>
+              <div class="header-buttons">
+                <button class="btn-small btn-secondary" @click="exportSuppliers">
+                  <i class="fas fa-download"></i> 导出供应商
+                </button>
+                <button class="btn-small btn-primary" @click="openAddSupplierModal">
+                  <i class="fas fa-plus"></i> 新增供应商
+                </button>
+              </div>
             </div>
 
             <!-- 供应商搜索 -->
@@ -290,6 +300,11 @@
           <div v-if="activeTab === 'history'" class="history-section">
             <div class="section-header">
               <h3><i class="fas fa-history"></i> 采购历史记录</h3>
+              <div class="header-buttons">
+                <button class="btn-small btn-secondary" @click="exportPurchaseHistory">
+                  <i class="fas fa-download"></i> 导出历史
+                </button>
+              </div>
             </div>
 
             <!-- 历史记录筛选 -->
@@ -944,6 +959,7 @@ import purchaseService from "@/services/api/business/purchase.service.js"
 import baseService from "@/services/api/business/base.service.js"
 import supplierService from "@/services/api/business/supplier.service.js"
 import expenseService from "@/services/api/business/expense.service.js"
+import { Export } from '@/services/data_migration/export.js'
 
 const props = defineProps({
   visible: {
@@ -1147,6 +1163,68 @@ const formatDate = (dateStr) => {
 // 格式化数字（使用 baseService）
 const formatNumber = (num) => {
   return baseService.formatNumber(num)
+}
+
+// ==================== 导出功能 ====================
+
+// 导出采购订单
+const exportPurchaseOrders = async () => {
+  try {
+    const exportModule = Export()
+    const data = await exportModule.exportPurchaseOrders()
+
+    if (!data || data.length === 0) {
+      notificationService.showNotification('没有可导出的采购订单', 'warning')
+      return
+    }
+
+    const fileName = exportModule.generateFileName('采购订单')
+    await exportModule.exportToExcel(data, fileName, '采购订单')
+    notificationService.showNotification('导出成功', 'success')
+  } catch (error) {
+    console.error('导出采购订单失败:', error)
+    notificationService.showNotification('导出失败', 'error')
+  }
+}
+
+// 导出供应商
+const exportSuppliers = async () => {
+  try {
+    const exportModule = Export()
+    const data = await exportModule.exportSuppliers()
+
+    if (!data || data.length === 0) {
+      notificationService.showNotification('没有可导出的供应商', 'warning')
+      return
+    }
+
+    const fileName = exportModule.generateFileName('供应商')
+    await exportModule.exportToExcel(data, fileName, '供应商')
+    notificationService.showNotification('导出成功', 'success')
+  } catch (error) {
+    console.error('导出供应商失败:', error)
+    notificationService.showNotification('导出失败', 'error')
+  }
+}
+
+// 导出采购历史
+const exportPurchaseHistory = async () => {
+  try {
+    const exportModule = Export()
+    const data = await exportModule.exportPurchaseHistory()
+
+    if (!data || data.length === 0) {
+      notificationService.showNotification('没有可导出的采购历史', 'warning')
+      return
+    }
+
+    const fileName = exportModule.generateFileName('采购历史')
+    await exportModule.exportToExcel(data, fileName, '采购历史')
+    notificationService.showNotification('导出成功', 'success')
+  } catch (error) {
+    console.error('导出采购历史失败:', error)
+    notificationService.showNotification('导出失败', 'error')
+  }
 }
 
 // ==================== 数据加载方法 ====================
@@ -1737,6 +1815,109 @@ onMounted(() => {
   gap: 15px;
 }
 
+/* ==================== 按钮样式 ==================== */
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.btn-primary {
+  background-color: #D5EBE1;
+  color: #80A492;
+  border: none;
+}
+
+.btn-primary:hover {
+  background-color: #B1D5C8;
+}
+
+.btn-primary:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.btn-secondary {
+  background-color: white;
+  color: #80A492;
+  border: 1px solid #B1D5C8;
+}
+
+.btn-secondary:hover {
+  background-color: #f8fafc;
+  border-color: #80A492;
+}
+
+.btn-secondary:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.btn-danger {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+}
+
+.btn-danger:hover {
+  background-color: #c0392b;
+}
+
+.btn-danger:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.btn-small {
+  padding: 8px 16px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: none;
+  background-color: #D5EBE1;
+  color: #80A492;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-small:hover {
+  background-color: #B1D5C8;
+}
+
+.btn-small:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* 确保采购管理中的按钮没有边框 */
+.purchase-management .btn-primary,
+.purchase-management .btn-small,
+.purchase-management .action-btn {
+  border: none;
+  outline: none;
+}
+
+/* ==================== 头部按钮组 ==================== */
+.header-buttons {
+  display: flex;
+  gap: 10px;
+}
+
 /* ==================== 统计卡片 ==================== */
 .purchase-stats {
   display: grid;
@@ -2171,7 +2352,7 @@ onMounted(() => {
 .action-btn {
   flex: 1;
   padding: 8px;
-  border: 1px solid #B1D5C8;
+  border: none;
   border-radius: 20px;
   background: white;
   color: #666;
@@ -2186,7 +2367,6 @@ onMounted(() => {
 
 .action-btn.receive {
   background: rgba(46, 204, 113, 0.1);
-  border-color: rgba(46, 204, 113, 0.3);
   color: #2ecc71;
 }
 
@@ -2197,7 +2377,6 @@ onMounted(() => {
 .action-btn.view:hover {
   background: #D5EBE1;
   color: #80A492;
-  border-color: #80A492;
 }
 
 /* ==================== 供应商卡片 ==================== */
@@ -2815,56 +2994,6 @@ onMounted(() => {
   color: white;
 }
 
-/* ==================== 按钮样式 ==================== */
-.btn {
-  padding: 12px 24px;
-  border: none;
-  border-radius: 12px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.btn-primary {
-  background-color: #D5EBE1;
-  color: #80A492;
-}
-
-.btn-primary:hover {
-  background-color: #B1D5C8;
-}
-
-.btn-secondary {
-  background-color: white;
-  color: #80A492;
-  border: 1px solid #B1D5C8;
-}
-
-.btn-secondary:hover {
-  background-color: #f8fafc;
-  border-color: #80A492;
-}
-
-.btn-danger {
-  background-color: #e74c3c;
-  color: white;
-}
-
-.btn-danger:hover {
-  background-color: #c0392b;
-}
-
-.btn-small {
-  padding: 8px 16px;
-  font-size: 13px;
-  border-radius: 8px;
-}
-
 /* ==================== 空状态和加载状态 ==================== */
 .empty-state {
   text-align: center;
@@ -3050,6 +3179,10 @@ onMounted(() => {
 
   .btn {
     width: 100%;
+  }
+
+  .header-buttons {
+    flex-direction: column;
   }
 }
 

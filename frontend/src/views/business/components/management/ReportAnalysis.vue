@@ -260,6 +260,10 @@ const summary = ref({
 // 记录上次加载的时间段
 const lastLoadedRange = ref('')
 
+// 防止重复加载的标志
+const isLoading = ref(false)
+const isPreloading = ref(false)
+
 // ==================== 计算属性 ====================
 
 // 报表类型列表
@@ -291,7 +295,7 @@ const tableDataExceedsLimit = computed(() => {
 // 计算表格容器高度
 const tableContainerStyle = computed(() => {
   const dataLength = reportService.getReportDataRowCount(currentReportData.value)
-  const height =reportService.calculateTableHeight(dataLength, 52, 48, 5)
+  const height = reportService.calculateTableHeight(dataLength, 52, 48, 5)
   return { height: `${height}px` }
 })
 
@@ -350,6 +354,7 @@ const handleRefresh = () => {
 
 // 刷新数据
 const refreshData = (showLoading = true) => {
+  // 清空缓存，强制重新加载
   reportDataCache.value = {
     income: [],
     expense: [],
@@ -410,13 +415,26 @@ const restoreCacheFromStorage = () => {
 
 // 预加载其他报表类型的数据
 const preloadOtherReports = async () => {
-  const currentType = reportType.value
-  const otherTypes = ['income', 'expense', 'profit', 'category'].filter(t => t !== currentType)
+  // 防止重复预加载
+  if (isPreloading.value) return
+  if (hasValidCache()) return
 
-  for (const type of otherTypes) {
-    if (!reportDataCache.value[type] || reportDataCache.value[type].length === 0) {
+  isPreloading.value = true
+
+  try {
+    const currentType = reportType.value
+    const otherTypes = ['income', 'expense', 'profit', 'category'].filter(t => t !== currentType)
+
+    // 只预加载未缓存的数据
+    const typesToLoad = otherTypes.filter(type => !reportDataCache.value[type] || reportDataCache.value[type].length === 0)
+
+    for (const type of typesToLoad) {
       await loadReportDataForType(type)
     }
+  } catch (error) {
+    console.error('预加载其他报表失败:', error)
+  } finally {
+    isPreloading.value = false
   }
 }
 
@@ -427,6 +445,7 @@ const loadReportDataForType = async (type) => {
     const records = await reportService.getBusinessRecords(range)
 
     const data = reportService.getReportData(type, records)
+    // 直接赋值，避免不必要的响应式触发
     reportDataCache.value[type] = data
   } catch (error) {
     console.error(`预加载${type}数据失败:`, error)
@@ -435,11 +454,12 @@ const loadReportDataForType = async (type) => {
 
 // 加载报表数据
 const loadReportData = async (showLoading = true) => {
-  if (loading.value) return
+  if (isLoading.value) return
 
   if (showLoading) {
     loading.value = true
   }
+  isLoading.value = true
 
   try {
     const range = getDateRange()
@@ -448,6 +468,7 @@ const loadReportData = async (showLoading = true) => {
     if (lastLoadedRange.value === rangeKey && hasValidCache()) {
       currentDisplayData.value = reportDataCache.value[reportType.value] || []
       loading.value = false
+      isLoading.value = false
       return
     }
 
@@ -463,6 +484,7 @@ const loadReportData = async (showLoading = true) => {
       currentDisplayData.value = []
       summary.value = reportService.calculateReportSummary([])
       loading.value = false
+      isLoading.value = false
       return
     }
 
@@ -474,6 +496,7 @@ const loadReportData = async (showLoading = true) => {
       Promise.resolve(reportService.processCategoryReportData(records))
     ])
 
+    // 批量更新缓存，减少响应式触发
     reportDataCache.value = {
       income: incomeData,
       expense: expenseData,
@@ -493,6 +516,7 @@ const loadReportData = async (showLoading = true) => {
     if (showLoading) {
       loading.value = false
     }
+    isLoading.value = false
   }
 }
 
@@ -507,10 +531,16 @@ const exportReport = async () => {
       return
     }
 
-    const exportData = reportService.prepareExportData(reportType.value, records, range)
-    await reportExportService.exportReport(reportType.value, records, range)
-    emit('export', exportData)
-    notificationService.showNotification('导出成功', 'success')
+    const exportModule = Export()
+    const success = await exportModule.exportReport(reportType.value, records, range)
+
+    if (success) {
+      const exportData = reportService.prepareExportData(reportType.value, records, range)
+      emit('export', exportData)
+      notificationService.showNotification('导出成功', 'success')
+    } else {
+      notificationService.showNotification('没有数据可导出', 'warning')
+    }
   } catch (error) {
     console.error('导出失败:', error)
     notificationService.showNotification('导出失败，请重试', 'error')
@@ -546,7 +576,7 @@ watch(reportType, (newType) => {
 }, { immediate: true })
 
 watch([dateRange, customStartDate, customEndDate], () => {
-  if (props.visible) {
+  if (props.visible && !isLoading.value) {
     const range = getDateRange()
     const rangeKey = `${range.start}_${range.end}`
 
@@ -558,21 +588,19 @@ watch([dateRange, customStartDate, customEndDate], () => {
   }
 })
 
-watch(reportDataCache, () => {
-  if (hasValidCache()) {
-    return
-  }
-  setTimeout(() => {
-    preloadOtherReports()
-  }, 500)
-}, { deep: true })
-
+// 监听模态框显示
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     setDefaultDates()
     if (!restoreCacheFromStorage()) {
       refreshData(true)
     }
+    // 延迟预加载其他报表类型，避免影响当前视图的加载速度
+    setTimeout(() => {
+      if (props.visible && !isLoading.value && !hasValidCache()) {
+        preloadOtherReports()
+      }
+    }, 1000)
   }
 })
 

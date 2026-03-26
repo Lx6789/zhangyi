@@ -226,6 +226,8 @@ import {authHelperService, notificationService} from '@/services/index.js'
 import userDataService from '@/services/user-data.service.js'
 import businessDataService from '@/services/cache/business-cache.service.js'
 import dateHelper from '@/services/utils/date-helper.service.js'
+import incomeService from "@/services/api/business/income.service.js";
+import expenseService from "@/services/api/business/expense.service.js";
 
 const router = useRouter()
 
@@ -324,8 +326,17 @@ const categoryStyleMap = {
  */
 const getAllRecords = async () => {
   try {
-    const records = await businessDataService.getAllBusinessRecords()
-    return records
+    // 使用正确的方法名获取记录
+    const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
+      businessDataService.getDailyRecordsWithDecrypt(),  // 日常记账（带解密）
+      incomeService.getIncomeRecords(),
+      expenseService.getExpenseRecords()
+    ])
+
+    // 合并所有记录
+    const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]
+    console.log('获取所有记录成功，总数:', allRecords.length)
+    return allRecords
   } catch (error) {
     console.error('获取记录失败:', error)
     return []
