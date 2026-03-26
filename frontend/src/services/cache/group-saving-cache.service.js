@@ -159,8 +159,8 @@ class GroupSavingCacheService {
     }
 
     /**
-     * 清除指定计划的所有成员缓存
-     * @param {string} userId - 用户ID
+     * 清除指定计划的所有成员缓存（根据 groupSavingId）
+     * @param {string} userId - 用户ID（用于缓存隔离）
      * @param {number|string} planId - 计划ID
      * @returns {Promise<boolean>}
      */
@@ -168,22 +168,25 @@ class GroupSavingCacheService {
         try {
             await indexedDBService.ensureInitialized();
 
-            const members = await indexedDBService.query(
-                'savings_members_cache',
-                'groupSavingId',
-                planId
-            );
-
-            for (const member of members) {
-                if (member.userId === userId) {
-                    await indexedDBService.delete('savings_members_cache', member.id);
-                }
+            if (!indexedDBService.db.objectStoreNames.contains('savings_members_cache')) {
+                console.log('【缓存】savings_members_cache 表不存在');
+                return true;
             }
 
-            console.log(`已清除计划 ${planId} 的成员缓存`);
+            // 查询该计划的所有成员
+            const members = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
+
+            // 🔥 注意：这里不需要根据 userId 过滤，因为成员数据属于不同用户
+            // 直接删除该计划的所有成员缓存
+            for (const member of members) {
+                await indexedDBService.delete('savings_members_cache', member.id);
+            }
+
+            console.log(`【缓存】已清除计划 ${planId} 的 ${members.length} 条成员缓存`);
             return true;
+
         } catch (error) {
-            console.error('清除计划成员缓存失败:', error);
+            console.error('【缓存】清除计划成员缓存失败:', error);
             return false;
         }
     }
@@ -900,12 +903,28 @@ class GroupSavingCacheService {
             await indexedDBService.bulkPut('group_savings_cache', [planCache]);
 
             if (planDetail.members && planDetail.members.length > 0) {
+                // 🔥 关键修复：只保存当前用户的成员记录（成员数据也应该有 userId）
+                // 从 planDetail.members 中筛选出属于当前用户的成员
+                // 注意：members 中的 userId 字段是 member.userId（成员的用户ID）
+                // 而我们要保存的 userId 是当前登录用户的ID（用于缓存隔离）
+
+                // 🔥 但是！成员数据中的 userId 应该是成员的用户ID，而缓存的 userId 是当前登录用户的ID
+                // 这两个是不同的概念。我们需要将当前登录用户的ID作为缓存索引，成员的用户ID作为成员标识
+
+                // 方案：保存所有成员数据，但每条成员数据都有自己独立的 userId（成员的用户ID）
+                // 这样在查询时，我们通过 userId（当前用户ID）和 groupSavingId 来过滤
+                // 但需要确保在查询时能正确过滤
+
+                // 由于当前设计是将当前用户ID作为缓存隔离，但成员数据可能属于其他用户，
+                // 所以保存时应该使用成员自己的 userId，而不是当前登录用户的ID
+
                 const membersCache = planDetail.members.map(member => {
                     const memberCacheId = idGenerator.generateMemberId(userId, planDetail.id, member.userId);
                     return {
                         id: memberCacheId,
                         originalId: member.id,
-                        userId: userId,
+                        // 🔥 关键：这里保存的是成员自己的用户ID，不是当前登录用户ID
+                        userId: member.userId,  // 成员的用户ID
                         groupSavingId: planDetail.id,
                         memberId: member.userId,
                         memberName: member.memberName || member.name || `用户${member.userId}`,
@@ -921,7 +940,12 @@ class GroupSavingCacheService {
                     };
                 });
 
+                // 先清除该计划的所有成员缓存（根据 groupSavingId）
+                await this.clearPlanMembersCache(userId, planDetail.id);
+
+                // 保存所有成员数据
                 await indexedDBService.bulkPut('savings_members_cache', membersCache);
+                console.log(`【缓存】保存了 ${membersCache.length} 条成员数据到计划 ${planDetail.id}`);
             }
 
             console.log('【缓存】计划详情保存成功:', planDetail.name);
@@ -951,8 +975,18 @@ class GroupSavingCacheService {
                 return null;
             }
 
-            const members = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
-            const userMembers = members.filter(m => m.userId === userId);
+            // 🔥 关键修复：查询成员时同时根据 groupSavingId 和 userId 过滤
+            // 由于 savings_members_cache 表没有 userId 和 groupSavingId 的复合索引，
+            // 我们需要先按 groupSavingId 查询，再过滤 userId
+            const allMembers = await indexedDBService.query('savings_members_cache', 'groupSavingId', planId);
+
+            // 🔥 只保留属于当前用户的成员记录（通过 userId 过滤）
+            const members = allMembers.filter(m => m.userId === userId);
+
+            // 🔥 同时也要过滤掉已删除的成员（可选，根据需求决定）
+            // 如果需要显示已删除成员，可以保留，但需要标记
+
+            console.log(`【缓存】计划 ${planId} 的成员总数: ${allMembers.length}, 当前用户成员数: ${members.length}`);
 
             return {
                 id: plan.originalId || plan.id,
@@ -988,8 +1022,8 @@ class GroupSavingCacheService {
                     avatar: m.avatar
                 })),
                 memberCount: members.filter(m => m.deleted !== 1).length,
-                isMember: userMembers.length > 0,
-                userMember: userMembers[0] || null
+                isMember: members.length > 0,
+                userMember: members[0] || null
             };
 
         } catch (error) {
