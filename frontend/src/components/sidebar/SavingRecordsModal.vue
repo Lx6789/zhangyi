@@ -52,16 +52,22 @@
               v-for="plan in personalPlans"
               :key="plan.id"
               class="plan-card"
-              :class="{ expanded: expandedPersonalPlanId === plan.id }"
+              :class="{
+                expanded: expandedPersonalPlanId === plan.id,
+                'deleted-plan': plan.deleted === 1
+              }"
           >
             <!-- 计划卡片头部 - 点击展开/收起 -->
             <div class="plan-header" @click="togglePersonalPlan(plan.id)">
               <div class="plan-header-left">
-                <div class="plan-icon" :style="{ backgroundColor: plan.color || '#2ecc71' }">
+                <div class="plan-icon" :style="{ backgroundColor: plan.color || '#2ecc71', opacity: plan.deleted === 1 ? 0.6 : 1 }">
                   <i :class="plan.icon || getIconByType(plan.type)"></i>
                 </div>
                 <div class="plan-info">
-                  <div class="plan-name">{{ plan.name }}</div>
+                  <div class="plan-name">
+                    {{ plan.name }}
+                    <span v-if="plan.deleted === 1" class="deleted-badge">已删除</span>
+                  </div>
                   <div class="plan-meta">
                     <span class="plan-type">{{ plan.type || '日常储蓄' }}</span>
                     <span class="plan-deadline" v-if="plan.deadline">
@@ -75,7 +81,7 @@
                 <div class="plan-progress-info">
                   <span class="progress-text">{{ plan.progress || 0 }}%</span>
                   <div class="progress-bar-small">
-                    <div class="progress-fill-small" :style="{ width: (plan.progress || 0) + '%', backgroundColor: plan.color || '#2ecc71' }"></div>
+                    <div class="progress-fill-small" :style="{ width: (plan.progress || 0) + '%', backgroundColor: plan.color || '#2ecc71', opacity: plan.deleted === 1 ? 0.6 : 1 }"></div>
                   </div>
                 </div>
                 <div class="plan-amount">
@@ -104,14 +110,15 @@
                       v-for="record in plan.records"
                       :key="record.id"
                       class="record-item"
+                      :class="{ 'record-deleted': record.deleted === 1 }"
                       @click.stop="showRecordDetail(record, plan)"
                   >
                     <div class="record-time">
                       <i class="far fa-clock"></i>
                       {{ formatDateTime(record.depositTime) }}
                     </div>
-                    <div class="record-amount positive">
-                      +¥{{ formatNumber(record.amount) }}
+                    <div class="record-amount" :class="{ 'positive': record.deleted !== 1, 'deleted-amount': record.deleted === 1 }">
+                      {{ record.deleted === 1 ? '已删除' : '+¥' + formatNumber(record.amount) }}
                     </div>
                     <div v-if="record.note" class="record-note">
                       <i class="fas fa-comment"></i>
@@ -145,21 +152,27 @@
               v-for="plan in groupPlans"
               :key="plan.id"
               class="plan-card group-plan-card"
-              :class="{ expanded: expandedGroupPlanId === plan.id }"
+              :class="{
+                expanded: expandedGroupPlanId === plan.id,
+                'deleted-plan': plan.deleted === 1
+              }"
           >
             <!-- 计划卡片头部 - 点击展开/收起 -->
             <div class="plan-header" @click="toggleGroupPlan(plan.id)">
               <div class="plan-header-left">
-                <div class="plan-icon" :style="{ backgroundColor: plan.color || '#3498db' }">
+                <div class="plan-icon" :style="{ backgroundColor: plan.color || '#3498db', opacity: plan.deleted === 1 ? 0.6 : 1 }">
                   <i :class="plan.icon || getIconByType(plan.type)"></i>
                 </div>
                 <div class="plan-info">
-                  <div class="plan-name">{{ plan.name }}</div>
+                  <div class="plan-name">
+                    {{ plan.name }}
+                    <span v-if="plan.deleted === 1" class="deleted-badge">已删除</span>
+                  </div>
                   <div class="plan-meta">
                     <span class="plan-type">{{ plan.type || '日常储蓄' }}</span>
                     <span class="plan-member-count">
                       <i class="fas fa-users"></i>
-                      {{ plan.members?.length || 0 }}人
+                      {{ getActiveMemberCount(plan.members) }}/{{ plan.members?.length || 0 }}人
                     </span>
                     <span class="plan-deadline" v-if="plan.deadline">
                       <i class="far fa-calendar-alt"></i>
@@ -172,7 +185,7 @@
                 <div class="plan-progress-info">
                   <span class="progress-text">{{ plan.progress || 0 }}%</span>
                   <div class="progress-bar-small">
-                    <div class="progress-fill-small" :style="{ width: (plan.progress || 0) + '%', backgroundColor: plan.color || '#3498db' }"></div>
+                    <div class="progress-fill-small" :style="{ width: (plan.progress || 0) + '%', backgroundColor: plan.color || '#3498db', opacity: plan.deleted === 1 ? 0.6 : 1 }"></div>
                   </div>
                 </div>
                 <div class="plan-amount">
@@ -201,20 +214,22 @@
                       v-for="record in plan.records"
                       :key="record.id"
                       class="record-item group-record"
+                      :class="{ 'record-deleted': record.deleted === 1 }"
                       @click.stop="showRecordDetail(record, plan)"
                   >
                     <div class="record-member">
-                      <span class="member-avatar" :style="{ backgroundColor: getMemberColor(record.memberId) + '20', color: getMemberColor(record.memberId) }">
+                      <span class="member-avatar" :style="{ backgroundColor: getMemberColor(record.memberId) + '20', color: getMemberColor(record.memberId), opacity: record.deleted === 1 ? 0.6 : 1 }">
                         {{ (record.memberName || '用户').charAt(0).toUpperCase() }}
                       </span>
-                      <span class="member-name">{{ record.memberName }}</span>
+                      <span class="member-name" :class="{ 'deleted-text': record.deleted === 1 }">{{ record.memberName }}</span>
+                      <span v-if="record.deleted === 1" class="deleted-badge-small">已退出</span>
                     </div>
                     <div class="record-time">
                       <i class="far fa-clock"></i>
                       {{ formatDateTime(record.depositTime) }}
                     </div>
-                    <div class="record-amount positive">
-                      +¥{{ formatNumber(record.amount) }}
+                    <div class="record-amount" :class="{ 'positive': record.deleted !== 1, 'deleted-amount': record.deleted === 1 }">
+                      {{ record.deleted === 1 ? '已删除' : '+¥' + formatNumber(record.amount) }}
                     </div>
                     <div v-if="record.note" class="record-note">
                       <i class="fas fa-comment"></i>
@@ -239,10 +254,10 @@
 
     <!-- 记录详情弹窗 - 淡色风格 -->
     <div v-if="showDetailModal" class="detail-modal-overlay" @click.self="closeDetailModal">
-      <div class="detail-modal-content" :class="currentDetailPlan?.type === 'personal' ? 'personal-detail' : 'group-detail'">
+      <div class="detail-modal-content" :class="[currentDetailPlan?.type === 'personal' ? 'personal-detail' : 'group-detail', { 'deleted-detail': selectedRecord?.deleted === 1 }]">
         <div class="detail-header">
           <div class="detail-header-left">
-            <div class="detail-plan-icon" :style="{ backgroundColor: currentDetailPlan?.color || (currentDetailPlan?.type === 'personal' ? '#2ecc71' : '#3498db') }">
+            <div class="detail-plan-icon" :style="{ backgroundColor: currentDetailPlan?.color || (currentDetailPlan?.type === 'personal' ? '#2ecc71' : '#3498db'), opacity: selectedRecord?.deleted === 1 ? 0.6 : 1 }">
               <i :class="currentDetailPlan?.icon || getIconByType(currentDetailPlan?.type)"></i>
             </div>
             <div>
@@ -256,10 +271,18 @@
         </div>
 
         <div class="detail-body" v-if="selectedRecord">
+          <!-- 状态提示 -->
+          <div v-if="selectedRecord.deleted === 1" class="deleted-status-card">
+            <i class="fas fa-trash-alt"></i>
+            <span>此记录已被删除/退出</span>
+          </div>
+
           <!-- 存入信息 -->
-          <div class="detail-amount-card">
-            <span class="amount-label">存入金额</span>
-            <span class="amount-value positive">+¥{{ formatNumber(selectedRecord.amount) }}</span>
+          <div class="detail-amount-card" :class="{ 'deleted-card': selectedRecord.deleted === 1 }">
+            <span class="amount-label">{{ selectedRecord.deleted === 1 ? '删除金额' : '存入金额' }}</span>
+            <span class="amount-value" :class="selectedRecord.deleted === 1 ? 'deleted-amount' : 'positive'">
+              {{ selectedRecord.deleted === 1 ? '已删除' : '+¥' + formatNumber(selectedRecord.amount) }}
+            </span>
             <span class="amount-time">{{ formatFullDateTime(selectedRecord.depositTime) }}</span>
           </div>
 
@@ -270,12 +293,13 @@
             </div>
             <div class="info-content">
               <span class="info-label">存入成员</span>
-              <span class="info-value">{{ selectedRecord.memberName }}</span>
+              <span class="info-value" :class="{ 'deleted-text': selectedRecord.deleted === 1 }">{{ selectedRecord.memberName }}</span>
+              <span v-if="selectedRecord.deleted === 1" class="deleted-badge-small">已退出</span>
             </div>
           </div>
 
           <!-- 金额变化 -->
-          <div class="detail-compare-row">
+          <div class="detail-compare-row" :class="{ 'deleted-row': selectedRecord.deleted === 1 }">
             <div class="compare-item">
               <span class="compare-label">存前金额</span>
               <span class="compare-value">¥{{ formatNumber(selectedRecord.beforeAmount || 0) }}</span>
@@ -310,7 +334,7 @@
 </template>
 
 <script setup>
-import {ref, reactive, computed, onMounted, watch} from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import {
   savingService,
   personalSavingCache,
@@ -318,6 +342,8 @@ import {
   authHelperService,
   notificationService
 } from '@/services'
+
+import indexedDBService from '@/services/db/indexed-db.service.js'
 
 const props = defineProps({
   visible: {
@@ -406,6 +432,14 @@ const formatFullDateTime = (dateTimeStr) => {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
+/**
+ * 获取活跃成员数量（未删除的）
+ */
+const getActiveMemberCount = (members) => {
+  if (!members) return 0
+  return members.filter(m => m.deleted !== 1).length
+}
+
 // ==================== 获取当前用户 ====================
 const fetchCurrentUser = async () => {
   const token = authHelperService.getToken()
@@ -434,24 +468,28 @@ const fetchCurrentUser = async () => {
   }
 }
 
-// ==================== 加载个人计划及记录 ====================
+// ==================== 加载个人计划及记录（包含已删除的计划） ====================
 const loadPersonalPlansWithRecords = async () => {
   if (!currentUser.value?.id) return []
 
   try {
     await personalSavingCache.init(currentUser.value.id)
-    const plans = await personalSavingCache.getAllPlans(currentUser.value.id)
-    const activePlans = plans.filter(p => p.deleted !== 1)
+    // 🔥 获取所有计划，不过滤 deleted
+    const allPlans = await personalSavingCache.getAllPlans(currentUser.value.id)
+    // 包括已删除的计划
+    const plans = allPlans
 
     const plansWithRecords = []
-    for (const plan of activePlans) {
+    for (const plan of plans) {
       const result = await personalSavingCache.getDepositRecords(
           currentUser.value.id,
           plan.id,
           {page: 1, size: 500}
       )
 
-      const records = result.records || []
+      const allRecords = result.records || []
+      // 🔥 包含已删除的记录
+      const records = allRecords
       const totalDeposited = records.reduce((sum, r) => sum + (r.amount || 0), 0)
 
       plansWithRecords.push({
@@ -463,11 +501,13 @@ const loadPersonalPlansWithRecords = async () => {
           ...r,
           depositTime: r.depositTime,
           afterAmount: r.afterAmount,
-          beforeAmount: r.beforeAmount
+          beforeAmount: r.beforeAmount,
+          deleted: r.deleted || 0
         })),
         recordsLoading: false,
         totalDeposited: totalDeposited,
-        type: 'personal'
+        type: 'personal',
+        deleted: plan.deleted || 0
       })
     }
 
@@ -479,7 +519,7 @@ const loadPersonalPlansWithRecords = async () => {
   }
 }
 
-// ==================== 加载多人计划及记录 ====================
+// ==================== 加载多人计划及记录（包含已删除的计划和成员） ====================
 const loadGroupPlansWithRecords = async () => {
   if (!currentUser.value?.id) return []
 
@@ -487,7 +527,7 @@ const loadGroupPlansWithRecords = async () => {
     // 初始化多人存钱缓存服务
     await groupSavingCache.init(currentUser.value.id)
 
-    // 获取多人计划列表
+    // 🔥 获取多人计划列表（包含已删除的）
     const response = await savingService.getGroupSavingsList({}, false)
     const plans = response.code === 200 ? (response.data || []) : []
 
@@ -495,37 +535,47 @@ const loadGroupPlansWithRecords = async () => {
 
     const plansWithRecords = []
     for (const plan of plans) {
-      // 获取该计划的存钱记录
-      const result = await groupSavingCache.getDepositRecords(
-          currentUser.value.id,
-          plan.id,
-          {page: 1, size: 500}
-      )
+      // 🔥 修改：获取该计划的存钱记录时，不传入 userId 限制
+      // 或者传入 plan.id 和 includeAllMembers 标志
+      // 这里需要修改 groupSavingCache.getDepositRecords 方法来支持获取所有成员的记录
 
-      const records = (result && result.records) ? result.records : []
+      // 方案1：使用 getAll 而不是 query，然后手动过滤
+      const allRecords = await indexedDBService.getAll('saving_deposit_records_cache')
+      const planRecords = allRecords.filter(r => r.groupSavingId === plan.id)
+
+      // 🔥 包含已删除的记录
+      const records = planRecords.map(r => ({
+        id: r.originalId || r.id,
+        memberId: r.memberId,
+        memberName: r.memberName,
+        amount: r.amount,
+        note: r.note,
+        createTime: r.depositTime,
+        depositTime: r.depositTime,
+        afterAmount: r.afterAmount,
+        beforeAmount: r.beforeAmount,
+        deleted: r.deleted || 0,
+        deletedAt: r.deletedAt
+      }))
+
       const totalDeposited = records.reduce((sum, r) => sum + (r.amount || 0), 0)
 
-      // 获取成员列表
-      const members = await groupSavingCache.getTableDataById('groupSavingId', plan.id, 'savings_members_cache', false)
+      // 🔥 获取成员列表（包含已删除的成员）
+      const allMembers = await groupSavingCache.getTableDataById('groupSavingId', plan.id, 'savings_members_cache', true)
 
-      console.log(`计划 ${plan.name} 的记录数:`, records.length)
+      console.log(`计划 ${plan.name} 的记录数:`, records.length, '成员数:', allMembers.length)
 
       plansWithRecords.push({
         ...plan,
         progress: plan.targetAmount > 0 ? Math.round((plan.currentAmount / plan.targetAmount) * 100) : 0,
         icon: plan.icon || getIconByType(plan.type),
         color: plan.color || getColorByType(plan.type),
-        records: records.map(r => ({
-          ...r,
-          depositTime: r.depositTime || r.createTime,
-          afterAmount: r.afterAmount,
-          beforeAmount: r.beforeAmount,
-          memberName: r.memberName
-        })),
-        members: members,
+        records: records,
+        members: allMembers,
         recordsLoading: false,
         totalDeposited: totalDeposited,
-        type: 'group'
+        type: 'group',
+        deleted: plan.deleted || 0
       })
     }
 
@@ -550,16 +600,18 @@ const loadGroupPlanRecords = async (plan) => {
         {page: 1, size: 500}
     )
 
-    const records = (result && result.records) ? result.records : []
-    plan.records = records.map(r => ({
+    const allRecords = (result && result.records) ? result.records : []
+    // 🔥 包含已删除的记录
+    plan.records = allRecords.map(r => ({
       ...r,
       depositTime: r.depositTime || r.createTime,
       afterAmount: r.afterAmount,
       beforeAmount: r.beforeAmount,
-      memberName: r.memberName
+      memberName: r.memberName,
+      deleted: r.deleted || 0
     }))
-    plan.totalDeposited = records.reduce((sum, r) => sum + (r.amount || 0), 0)
-    console.log(`加载计划 ${plan.name} 的记录: ${records.length}条`)
+    plan.totalDeposited = plan.records.reduce((sum, r) => sum + (r.amount || 0), 0)
+    console.log(`加载计划 ${plan.name} 的记录: ${plan.records.length}条`)
   } catch (error) {
     console.error('加载多人计划记录失败:', error)
     plan.records = []
@@ -1392,6 +1444,136 @@ watch(() => props.visible, async (newVal) => {
 }
 
 /* 响应式 */
+@media (max-width: 600px) {
+  .plan-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .plan-header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .record-item {
+    flex-wrap: wrap;
+  }
+
+  .record-time,
+  .record-amount,
+  .record-balance {
+    width: auto;
+  }
+
+  .record-note {
+    width: 100%;
+    order: 1;
+    margin-top: 8px;
+  }
+
+  .records-scroll-area {
+    max-height: 280px;
+  }
+}
+
+.deleted-plan {
+  opacity: 0.8;
+  background: #f8f9fa;
+}
+
+.deleted-plan .plan-header {
+  background: #f8f9fa;
+}
+
+.deleted-badge {
+  display: inline-block;
+  background: #e74c3c;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.deleted-badge-small {
+  display: inline-block;
+  background: #e74c3c;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 6px;
+}
+
+/* 已删除记录的样式 */
+.record-item.record-deleted {
+  background: #f8f9fa;
+  opacity: 0.7;
+}
+
+.record-item.record-deleted:hover {
+  background: #f0f0f0;
+}
+
+.record-deleted .record-amount {
+  color: #999;
+  font-style: italic;
+}
+
+.record-deleted .record-amount.positive {
+  color: #999;
+}
+
+.deleted-amount {
+  color: #999 !important;
+  text-decoration: line-through;
+}
+
+.deleted-text {
+  color: #999;
+  text-decoration: line-through;
+}
+
+/* 已删除记录详情样式 */
+.deleted-status-card {
+  background: #fff3cd;
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #856404;
+  font-size: 14px;
+}
+
+.deleted-status-card i {
+  font-size: 18px;
+}
+
+.deleted-card {
+  background: #f8f9fa !important;
+  border: 1px solid #e0e0e0;
+}
+
+.deleted-row {
+  background: #f8f9fa;
+}
+
+.deleted-detail .detail-amount-card {
+  background: #f8f9fa;
+}
+
+.deleted-detail .detail-amount-card .amount-value {
+  color: #999;
+  text-decoration: line-through;
+}
+
+/* 响应式调整 */
 @media (max-width: 600px) {
   .plan-header {
     flex-direction: column;

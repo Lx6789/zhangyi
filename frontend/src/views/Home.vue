@@ -1,15 +1,5 @@
 <template>
   <div class="home">
-    <!-- 顶部工具栏（可选） -->
-    <div class="toolbar">
-      <button class="refresh-btn" @click="handleManualRefresh" title="刷新数据">
-        <i class="fas fa-sync-alt"></i>
-      </button>
-      <button class="data-transfer-btn" @click="openDataTransferModal" title="数据迁移">
-        <i class="fas fa-exchange-alt"></i>
-      </button>
-    </div>
-
     <!-- 总收支情况 -->
     <section class="total-summary">
       <div class="section-title">
@@ -452,13 +442,6 @@
         </form>
       </div>
     </div>
-
-    <!-- 数据迁移弹窗 -->
-    <DataTransferModal
-        :visible="dataTransferVisible"
-        @update:visible="dataTransferVisible = $event"
-        @data-imported="onDataImported"
-    />
   </div>
 </template>
 
@@ -471,7 +454,6 @@ import businessDataService from '@/services/cache/business-cache.service.js'
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import dateHelper from '@/services/utils/date-helper.service.js'
 import idGenerator from '@/services/id-generator.service.js'
-import DataTransferModal from '@/components/sidebar/DataTransferModal.vue'
 import incomeService from "@/services/api/business/income.service.js";
 import expenseService from "@/services/api/business/expense.service.js";
 
@@ -483,9 +465,6 @@ const loading = ref(false)
 // 模态框状态
 const recordModalVisible = ref(false)
 const recordType = ref('收入')
-
-// 数据迁移弹窗状态
-const dataTransferVisible = ref(false)
 
 // 收入表单
 const incomeForm = reactive({
@@ -695,7 +674,7 @@ const getTotalData = async () => {
   totalIncome.value = '¥ ' + totalIncomeAmount.toFixed(2)
   totalExpense.value = '¥ ' + totalExpenseAmount.toFixed(2)
 
-  return { income: totalIncomeAmount, expense: totalExpenseAmount }
+  return {income: totalIncomeAmount, expense: totalExpenseAmount}
 }
 
 /**
@@ -729,7 +708,7 @@ const getTodayData = async () => {
   todayIncome.value = '¥ ' + todayIncomeTotal.toFixed(2)
   todayExpense.value = '¥ ' + todayExpenseTotal.toFixed(2)
 
-  return { income: todayIncomeTotal, expense: todayExpenseTotal }
+  return {income: todayIncomeTotal, expense: todayExpenseTotal}
 }
 
 /**
@@ -763,7 +742,7 @@ const loadHistoryData = async () => {
       // 根据周偏移量计算日期范围
       const baseDate = new Date()
       baseDate.setDate(baseDate.getDate() + (selectedWeekOffset.value * 7))
-      const { startDate, endDate } = dateHelper.getWeekRange(baseDate)
+      const {startDate, endDate} = dateHelper.getWeekRange(baseDate)
 
       filtered = typeFiltered.filter(record => {
         return record.date >= startDate && record.date <= endDate
@@ -825,7 +804,7 @@ const getStatsTitle = () => {
     case 'week':
       const baseDate = new Date()
       baseDate.setDate(baseDate.getDate() + (selectedWeekOffset.value * 7))
-      const { startDate, endDate } = dateHelper.getWeekRange(baseDate)
+      const {startDate, endDate} = dateHelper.getWeekRange(baseDate)
       const startParts = startDate.split('-')
       const endParts = endDate.split('-')
       return `${startParts[1]}/${startParts[2]} - ${endParts[1]}/${endParts[2]}`
@@ -1382,51 +1361,6 @@ const submitRecord = async () => {
 const formatNumber = (num) => {
   return parseFloat(num).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})
 }
-
-// ==================== 数据迁移相关 ====================
-
-/**
- * 打开数据迁移弹窗
- */
-const openDataTransferModal = () => {
-  dataTransferVisible.value = true
-}
-
-/**
- * 数据导入成功后的回调
- * 刷新页面数据
- */
-const onDataImported = async (result) => {
-  console.log('收到数据导入成功通知:', result)
-
-  try {
-    // 显示加载提示
-    notificationService.showNotification('数据导入成功，正在刷新页面...', 'info')
-
-    // 刷新所有数据
-    await refreshData()
-
-    // 可选：重新加载配置数据（如果导入的是配置类数据）
-    await loadData()
-
-    // 显示成功提示
-    notificationService.showNotification(`数据刷新完成！共导入 ${result.successCount} 条记录`, 'success')
-
-    console.log('数据刷新完成')
-  } catch (error) {
-    console.error('刷新数据失败:', error)
-    notificationService.showNotification('数据刷新失败，请手动刷新页面', 'error')
-  }
-}
-
-/**
- * 手动刷新数据
- */
-const handleManualRefresh = async () => {
-  notificationService.showNotification('正在刷新数据...', 'info')
-  await refreshData()
-  notificationService.showNotification('数据刷新完成', 'success')
-}
 </script>
 
 <style scoped>
@@ -1446,45 +1380,6 @@ const handleManualRefresh = async () => {
   padding: 0;
   max-width: 100%;
   position: relative;
-}
-
-/* 顶部工具栏 */
-.toolbar {
-  position: fixed;
-  bottom: 80px;
-  right: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  z-index: 100;
-}
-
-.refresh-btn,
-.data-transfer-btn {
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  background-color: var(--primary-color);
-  border: none;
-  color: var(--accent-color);
-  font-size: 20px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s;
-}
-
-.refresh-btn:hover,
-.data-transfer-btn:hover {
-  background-color: var(--accent-color);
-  color: white;
-  transform: scale(1.05);
-}
-
-.refresh-btn:active {
-  transform: scale(0.95);
 }
 
 /* 总收支情况 */
@@ -2410,19 +2305,6 @@ form {
 
   .action-btn {
     width: 100%;
-  }
-
-  /* 工具栏响应式 */
-  .toolbar {
-    bottom: 70px;
-    right: 15px;
-  }
-
-  .refresh-btn,
-  .data-transfer-btn {
-    width: 45px;
-    height: 45px;
-    font-size: 18px;
   }
 }
 </style>

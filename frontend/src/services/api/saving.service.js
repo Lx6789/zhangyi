@@ -208,15 +208,16 @@ class SavingService {
                     // 后端返回成功，更新前端数据库
                     console.log('【Service】后端数据获取成功，开始更新前端数据库');
 
-                    // 🔥 关键修改：在后端返回的数据中过滤掉已删除的计划和成员
-                    const filteredData = this.filterDeletedPlansAndMembers(responseData);
-                    console.log('【Service】过滤后活跃计划数:', filteredData.length);
+                    // 🔥 修改：保存所有数据（包括已删除的计划和成员），不过滤
+                    const allData = responseData;
+                    console.log('【Service】保存所有计划到缓存，计划数:', allData.length);
+                    console.log('【Service】计划详情:', allData.map(p => ({ id: p.id, name: p.name, deleted: p.deleted })));
 
                     // 清除旧缓存
                     await groupSavingCacheService.clearUserCache(userId);
 
-                    // 保存新数据到缓存（保存过滤后的数据）
-                    const saveSuccess = await groupSavingCacheService.saveData(userId, filteredData, true);
+                    // 保存新数据到缓存（保存所有数据，不过滤）
+                    const saveSuccess = await groupSavingCacheService.saveData(userId, allData, true);
 
                     if (saveSuccess) {
                         console.log('【Service】前端数据库更新成功');
@@ -224,28 +225,29 @@ class SavingService {
                         console.warn('【Service】前端数据库更新失败，但后端数据获取成功');
                     }
 
-                    // 返回过滤后的数据
+                    // 返回所有数据（包括已删除的）
                     return {
                         code: 200,
                         message: '获取成功',
-                        data: filteredData
+                        data: allData
                     };
                 }
                 // 如果后端返回的是包含 code 和 data 的对象（兼容处理）
                 else if (responseData && responseData.code === 200 && responseData.data) {
                     console.log('【Service】后端数据获取成功（包装格式），开始更新前端数据库');
 
-                    // 🔥 关键修改：在后端返回的数据中过滤掉已删除的计划和成员
-                    const filteredData = this.filterDeletedPlansAndMembers(responseData.data);
-                    console.log('【Service】过滤后活跃计划数:', filteredData.length);
+                    // 🔥 修改：保存所有数据（包括已删除的计划和成员），不过滤
+                    const allData = responseData.data;
+                    console.log('【Service】保存所有计划到缓存，计划数:', allData.length);
+                    console.log('【Service】计划详情:', allData.map(p => ({ id: p.id, name: p.name, deleted: p.deleted })));
 
                     await groupSavingCacheService.clearUserCache(userId);
-                    await groupSavingCacheService.saveData(userId, filteredData, true);
+                    await groupSavingCacheService.saveData(userId, allData, true);
 
                     return {
                         code: 200,
                         message: responseData.message || '获取成功',
-                        data: filteredData
+                        data: allData
                     };
                 }
                 // 后端返回格式异常
@@ -270,12 +272,20 @@ class SavingService {
             console.log('【Service】从缓存获取数据, userId:', userId);
 
             try {
-                // 查询成员表，获取当前用户参与的所有计划（包含已删除的）
-                const allMembersCache = await indexedDBService.query('savings_members_cache', 'memberId', parseInt(userId));
+                // 🔥 修复：查询当前用户的成员记录（按 userId 过滤）
+                const allMembersCache = await indexedDBService.query('savings_members_cache', 'userId', parseInt(userId));
 
                 console.log('【Service】缓存中查询到的所有成员记录数:', allMembersCache.length);
+                console.log('【Service】缓存成员记录详情:', allMembersCache.map(m => ({
+                    memberId: m.memberId,
+                    groupSavingId: m.groupSavingId,
+                    memberName: m.memberName,
+                    deleted: m.deleted,
+                    amount: m.amount,
+                    userId: m.userId
+                })));
 
-                // 🔥 关键修改：只保留当前用户未删除的成员记录（deleted !== 1）
+                // 获取所有成员记录（包括已删除的），用于后续过滤
                 const userActiveMembers = allMembersCache.filter(member => member.deleted !== 1);
 
                 console.log('【Service】缓存中用户参与的活跃成员记录:', userActiveMembers.length);
@@ -294,32 +304,50 @@ class SavingService {
                 const userPlanIds = [...new Set(userActiveMembers.map(member => member.groupSavingId))];
                 console.log('【Service】缓存中用户参与的计划ID:', userPlanIds);
 
-                // 查询计划表，获取所有计划详情（包含deleted字段）
-                const allGroupSavings = await groupSavingCacheService.getTableDataById('userId', userId, 'group_savings_cache', true);
+                // 🔥 修复：查询计划表时，只查询当前用户的计划
+                const allGroupSavings = await indexedDBService.query('group_savings_cache', 'userId', parseInt(userId));
 
-                // 🔥 关键修改：过滤出用户参与的计划，且计划未被删除（plan.deleted !== 1）
-                const activeGroups = allGroupSavings.filter(group =>
-                    userPlanIds.includes(group.id) && group.deleted !== 1
-                );
+                console.log('【Service】缓存中当前用户计划数量:', allGroupSavings.length);
+                console.log('【Service】缓存中计划详情:', allGroupSavings.map(p => ({
+                    id: p.id,
+                    originalId: p.originalId,
+                    planName: p.planName,
+                    userId: p.userId,
+                    deleted: p.deleted
+                })));
 
-                console.log('【Service】缓存中找到活跃计划:', activeGroups.length);
+                // 过滤出用户参与的计划（包括已删除的计划，但会在组装时标记）
+                const userPlans = allGroupSavings.filter(group => {
+                    const groupId = group.originalId || group.id;
+                    return userPlanIds.includes(groupId);
+                });
 
-                if (activeGroups.length === 0) {
+                console.log('【Service】缓存中找到用户参与的计划:', userPlans.length);
+                console.log('【Service】用户计划详情:', userPlans.map(g => ({
+                    id: g.originalId || g.id,
+                    name: g.planName,
+                    creatorId: g.creatorId,
+                    deleted: g.deleted
+                })));
+
+                if (userPlans.length === 0) {
+                    console.log('【Service】缓存中没有用户参与的计划');
                     return {
                         code: 200,
-                        message: '获取成功（缓存无活跃计划）',
+                        message: '获取成功（缓存无用户计划）',
                         data: []
                     };
                 }
 
-                // 🔥 关键修改：获取所有成员缓存，用于组装数据
-                const allMembers = await indexedDBService.query('savings_members_cache', 'userId', userId);
+                // 🔥 修复：查询成员数据时，也只查询当前用户的成员
+                const allMembers = await indexedDBService.query('savings_members_cache', 'userId', parseInt(userId));
 
-                // 将成员信息按计划ID分组，🔥 只包含未删除的成员（member.deleted !== 1）
+                console.log('【Service】当前用户成员缓存总数:', allMembers.length);
+
+                // 将成员信息按计划ID分组，保留所有成员（包括已删除的）
                 const membersByPlanId = {};
-                allMembers.forEach(member => {
-                    // 只添加未删除的成员 (deleted !== 1) 且 成员属于活跃计划
-                    if (member.deleted !== 1 && userPlanIds.includes(member.groupSavingId)) {
+                for (const member of allMembers) {
+                    if (userPlanIds.includes(member.groupSavingId)) {
                         if (!membersByPlanId[member.groupSavingId]) {
                             membersByPlanId[member.groupSavingId] = [];
                         }
@@ -333,16 +361,21 @@ class SavingService {
                             deletedAt: member.deletedAt || null
                         });
                     }
-                });
+                }
 
-                // 组装每个计划的数据
-                const assembledData = activeGroups.map(group => {
-                    const members = membersByPlanId[group.id] || [];
+                console.log('【Service】按计划分组的成员:', Object.keys(membersByPlanId).map(planId => ({
+                    planId: planId,
+                    memberCount: membersByPlanId[planId]?.length || 0
+                })));
 
-                    // 🔥 重要：如果计划没有任何活跃成员，则跳过该计划（不显示）
-                    if (members.length === 0) {
-                        console.log('【Service】计划', group.id, '没有活跃成员，跳过');
-                        return null;
+                // 组装每个计划的数据（包括已删除的计划和成员）
+                const assembledData = userPlans.map(group => {
+                    const groupId = group.originalId || group.id;
+                    const members = membersByPlanId[groupId] || [];
+
+                    // 🔥 重要：即使计划没有成员（已删除所有成员），也显示计划，但标记为已删除
+                    if (members.length === 0 && group.deleted !== 1) {
+                        console.log('【Service】计划', group.planName, '没有成员，但计划未删除，保留显示');
                     }
 
                     const totalAmount = members.reduce((sum, member) => sum + (member.amount || 0), 0);
@@ -352,7 +385,7 @@ class SavingService {
                         : 0;
 
                     return {
-                        id: group.id,
+                        id: groupId,
                         name: group.planName,
                         reason: group.reason || '',
                         description: group.description || '',
@@ -373,7 +406,7 @@ class SavingService {
                         deleted: group.deleted || 0,
                         deletedAt: group.deletedAt || null
                     };
-                }).filter(plan => plan !== null); // 🔥 过滤掉没有活跃成员的计划
+                });
 
                 // 按更新时间排序（最新的在前）
                 assembledData.sort((a, b) => {
@@ -383,6 +416,7 @@ class SavingService {
                 });
 
                 console.log('【Service】从缓存返回组装后的计划数:', assembledData.length);
+                console.log('【Service】组装后的计划:', assembledData.map(p => ({ id: p.id, name: p.name, memberCount: p.memberCount, deleted: p.deleted })));
 
                 return {
                     code: 200,
@@ -409,43 +443,23 @@ class SavingService {
     }
 
     /**
-     * 过滤已删除的计划和成员
-     * @param {Array} plansData - 计划数据数组
-     * @returns {Array} 过滤后的计划数据
+     * 获取活跃计划（过滤掉已删除的计划和成员）
+     * 用于需要只显示活跃计划的场景
      */
-    filterDeletedPlansAndMembers(plansData) {
+    getActivePlans(plansData) {
         if (!plansData || !Array.isArray(plansData)) {
             return [];
         }
 
         return plansData
             .filter(plan => {
-                // 1. 过滤掉已删除的计划
-                if (plan.deleted === 1) {
-                    console.log(`【Service】过滤掉已删除的计划: ${plan.name} (ID: ${plan.id})`);
-                    return false;
-                }
-
-                // 2. 过滤掉没有活跃成员的计划
-                if (!plan.members || plan.members.length === 0) {
-                    console.log(`【Service】过滤掉无成员的计划: ${plan.name} (ID: ${plan.id})`);
-                    return false;
-                }
-
-                // 3. 检查是否有活跃成员（deleted !== 1）
+                if (plan.deleted === 1) return false;
+                if (!plan.members || plan.members.length === 0) return false;
                 const hasActiveMembers = plan.members.some(member => member.deleted !== 1);
-                if (!hasActiveMembers) {
-                    console.log(`【Service】过滤掉无活跃成员的计划: ${plan.name} (ID: ${plan.id})`);
-                    return false;
-                }
-
-                return true;
+                return hasActiveMembers;
             })
             .map(plan => {
-                // 4. 过滤掉成员中的已删除成员
                 const activeMembers = plan.members.filter(member => member.deleted !== 1);
-
-                // 5. 重新计算计划的总金额和进度
                 const totalAmount = activeMembers.reduce((sum, member) => sum + (member.amount || 0), 0);
                 const progress = plan.targetAmount > 0
                     ? Math.min(Math.round((totalAmount / plan.targetAmount) * 100), 100)
