@@ -1,5 +1,6 @@
 package org.lx.mapper;
 
+import org.apache.ibatis.annotations.Select;
 import org.lx.pojo.BackupInventory;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
@@ -22,4 +23,12 @@ public interface BackupInventoryMapper extends BaseMapper<BackupInventory> {
      * @return 插入成功的条数
      */
     int insertBatch(@Param("list") List<BackupInventory> inventory);
+
+    /**
+     * 根据备份id查询数据
+     * @param backupIdentifier
+     * @return
+     */
+    @Select("SELECT * from backup_inventory where backup_id = #{backupIdentifier}")
+    List<BackupInventory> selectByBackupId(String backupIdentifier);
 }

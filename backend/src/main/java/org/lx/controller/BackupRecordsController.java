@@ -77,4 +77,10 @@ public class BackupRecordsController {
     public RespBean delete(@PathVariable Integer backupId) {
         return backupRecordsService.delete(backupId);
     }
+
+    @ApiOperation(value = "恢复指定备份数据")
+    @PostMapping("/restore/{backupId}")
+    public RespBean restore(@PathVariable Integer backupId) {
+        return backupRecordsService.restore(backupId);
+    }
 }

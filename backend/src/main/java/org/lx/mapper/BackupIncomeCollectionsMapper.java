@@ -1,5 +1,6 @@
 package org.lx.mapper;
 
+import org.apache.ibatis.annotations.Select;
 import org.lx.pojo.BackupIncomeCollections;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
@@ -22,4 +23,12 @@ public interface BackupIncomeCollectionsMapper extends BaseMapper<BackupIncomeCo
      * @return 插入成功的条数
      */
     int insertBatch(@Param("list") List<BackupIncomeCollections> collections);
+
+    /**
+     * 根据备份id查询数据
+     * @param backupIdentifier
+     * @return
+     */
+    @Select("SELECT * from backup_income_collections where backup_id = #{backupIdentifier}")
+    List<BackupIncomeCollections> selectByBackupId(String backupIdentifier);
 }

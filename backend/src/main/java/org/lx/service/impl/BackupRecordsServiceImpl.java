@@ -245,6 +245,195 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
     }
 
     /**
+     * 恢复指定备份数据
+     * @param backupId 备份记录ID（主键）
+     * @return 返回备份数据，供前端恢复
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RespBean restore(Integer backupId) {
+        try {
+            // 1. 验证用户权限
+            Integer currentUserId = userUtil.getUserFromSecurityContext().getId();
+
+            // 2. 查询备份记录是否存在
+            BackupRecords backupRecord = backupRecordsMapper.selectById(backupId);
+            if (backupRecord == null) {
+                return RespBean.error(RespCode.DATA_NOT_FOUND, "备份不存在");
+            }
+
+            // 3. 验证用户权限：只能恢复自己的备份
+            if (!backupRecord.getUserId().equals(currentUserId.longValue())) {
+                return RespBean.error(RespCode.UNAUTHORIZED, "无权恢复此备份");
+            }
+
+            // 4. 获取备份ID（关联标识）
+            String backupIdentifier = backupRecord.getBackupId();
+            log.info("开始恢复备份: backupId={}, backupIdentifier={}, userId={}",
+                    backupId, backupIdentifier, currentUserId);
+
+            // 5. 组装备份数据
+            BackupDataDTO backupData = new BackupDataDTO();
+
+            // 解析备份中包含的数据类型
+            List<String> dataTypes = JSON.parseArray(backupRecord.getDataTypes(), String.class);
+            if (dataTypes == null) {
+                dataTypes = new ArrayList<>();
+            }
+            log.info("备份包含的数据类型: {}", dataTypes);
+
+            // 6. 根据数据类型查询对应的备份数据
+            for (String dataType : dataTypes) {
+                switch (dataType) {
+                    case "personal":
+                        List<BackupDailyRecords> personalRecords = backupDailyRecordsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setPersonal(personalRecords);
+                        log.info("加载个人记账备份数据: {} 条", personalRecords != null ? personalRecords.size() : 0);
+                        break;
+
+                    case "business":
+                        List<BackupBusinessRecords> businessRecords = backupBusinessRecordsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setBusiness(businessRecords);
+                        log.info("加载生意记账备份数据: {} 条", businessRecords != null ? businessRecords.size() : 0);
+                        break;
+
+                    case "personal_saving":
+                        // 个人存钱计划
+                        List<BackupPersonalSavings> personalSavings = backupPersonalSavingsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setPersonalSavings(personalSavings);
+
+                        // 个人存钱记录
+                        List<BackupPersonalSavingRecords> personalSavingRecords = backupPersonalSavingRecordsMapper
+                                .selectByBackupId(backupIdentifier);
+                        Map<String, List<BackupPersonalSavingRecords>> recordsMap = new HashMap<>();
+                        if (personalSavingRecords != null) {
+                            for (BackupPersonalSavingRecords record : personalSavingRecords) {
+                                recordsMap.computeIfAbsent(record.getPlanId(), k -> new ArrayList<>()).add(record);
+                            }
+                        }
+                        backupData.setPersonalSavingRecords(recordsMap);
+                        log.info("加载个人存钱计划备份数据: {} 条计划, {} 条记录",
+                                personalSavings != null ? personalSavings.size() : 0,
+                                personalSavingRecords != null ? personalSavingRecords.size() : 0);
+                        break;
+
+                    case "customer":
+                        List<BackupCustomers> customers = backupCustomersMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setCustomers(customers);
+                        log.info("加载客户备份数据: {} 条", customers != null ? customers.size() : 0);
+                        break;
+
+                    case "customer_repayment":
+                        List<BackupCustomerRepayments> customerRepayments = backupCustomerRepaymentsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setCustomerRepayments(customerRepayments);
+                        log.info("加载客户还款记录备份数据: {} 条", customerRepayments != null ? customerRepayments.size() : 0);
+                        break;
+
+                    case "product":
+                        List<BackupProducts> products = backupProductsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setProducts(products);
+                        log.info("加载商品备份数据: {} 条", products != null ? products.size() : 0);
+                        break;
+
+                    case "category":
+                        List<BackupProductCategories> categories = backupProductCategoriesMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setCategories(categories);
+                        log.info("加载商品分类备份数据: {} 条", categories != null ? categories.size() : 0);
+                        break;
+
+                    case "supplier":
+                        List<BackupSuppliers> suppliers = backupSuppliersMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setSuppliers(suppliers);
+                        log.info("加载供应商备份数据: {} 条", suppliers != null ? suppliers.size() : 0);
+                        break;
+
+                    case "inventory":
+                        List<BackupInventory> inventory = backupInventoryMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setInventory(inventory);
+                        log.info("加载库存备份数据: {} 条", inventory != null ? inventory.size() : 0);
+                        break;
+
+                    case "purchase_order":
+                        List<BackupPurchaseOrders> purchaseOrders = backupPurchaseOrdersMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setPurchaseOrders(purchaseOrders);
+                        log.info("加载采购订单备份数据: {} 条", purchaseOrders != null ? purchaseOrders.size() : 0);
+                        break;
+
+                    case "purchase_history":
+                        List<BackupPurchaseHistory> purchaseHistory = backupPurchaseHistoryMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setPurchaseHistory(purchaseHistory);
+                        log.info("加载采购历史备份数据: {} 条", purchaseHistory != null ? purchaseHistory.size() : 0);
+                        break;
+
+                    case "expense":
+                        List<BackupExpenseRecords> expenseRecords = backupExpenseRecordsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setExpense(expenseRecords);
+                        log.info("加载支出记录备份数据: {} 条", expenseRecords != null ? expenseRecords.size() : 0);
+                        break;
+
+                    case "expense_repayment":
+                        List<BackupExpenseRepayments> expenseRepayments = backupExpenseRepaymentsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setExpenseRepayments(expenseRepayments);
+                        log.info("加载支出还款记录备份数据: {} 条", expenseRepayments != null ? expenseRepayments.size() : 0);
+                        break;
+
+                    case "income":
+                        List<BackupIncomeRecords> incomeRecords = backupIncomeRecordsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setIncome(incomeRecords);
+                        log.info("加载收入记录备份数据: {} 条", incomeRecords != null ? incomeRecords.size() : 0);
+                        break;
+
+                    case "income_collection":
+                        List<BackupIncomeCollections> incomeCollections = backupIncomeCollectionsMapper
+                                .selectByBackupId(backupIdentifier);
+                        backupData.setIncomeCollections(incomeCollections);
+                        log.info("加载收入收款记录备份数据: {} 条", incomeCollections != null ? incomeCollections.size() : 0);
+                        break;
+
+                    default:
+                        log.warn("未处理的数据类型: {}", dataType);
+                        break;
+                }
+            }
+
+            // 7. 统计总数据条数
+            int totalCount = calculateTotalCount(backupData);
+            log.info("恢复备份完成: backupId={}, 总数据条数={}", backupId, totalCount);
+
+            // 8. 返回备份数据给前端
+            Map<String, Object> result = new HashMap<>();
+            result.put("backupId", backupRecord.getId());
+            result.put("backupIdentifier", backupRecord.getBackupId());
+            result.put("backupTime", backupRecord.getBackupTime());
+            result.put("dataSize", backupRecord.getDataSize());
+            result.put("dataTypes", dataTypes);
+            result.put("note", backupRecord.getNote());
+            result.put("data", backupData);
+            result.put("totalCount", totalCount);
+
+            return RespBean.success(RespCode.SUCCESS, "获取备份数据成功", result);
+
+        } catch (Exception e) {
+            log.error("恢复备份失败: backupId={}", backupId, e);
+            return RespBean.error(RespCode.DATA_NOT_FOUND, "恢复备份失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 获取用户备份数量
      */
     private long getBackupCount(Long userId) {
@@ -345,6 +534,35 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
         }
 
         return dataCountMap;
+    }
+
+    /**
+     * 统计备份数据总条数
+     */
+    private int calculateTotalCount(BackupDataDTO backupData) {
+        int total = 0;
+
+        total += backupData.getPersonal() != null ? backupData.getPersonal().size() : 0;
+        total += backupData.getBusiness() != null ? backupData.getBusiness().size() : 0;
+        total += backupData.getPersonalSavings() != null ? backupData.getPersonalSavings().size() : 0;
+        if (backupData.getPersonalSavingRecords() != null) {
+            total += backupData.getPersonalSavingRecords().values().stream()
+                    .mapToInt(List::size).sum();
+        }
+        total += backupData.getCustomers() != null ? backupData.getCustomers().size() : 0;
+        total += backupData.getCustomerRepayments() != null ? backupData.getCustomerRepayments().size() : 0;
+        total += backupData.getProducts() != null ? backupData.getProducts().size() : 0;
+        total += backupData.getCategories() != null ? backupData.getCategories().size() : 0;
+        total += backupData.getSuppliers() != null ? backupData.getSuppliers().size() : 0;
+        total += backupData.getInventory() != null ? backupData.getInventory().size() : 0;
+        total += backupData.getPurchaseOrders() != null ? backupData.getPurchaseOrders().size() : 0;
+        total += backupData.getPurchaseHistory() != null ? backupData.getPurchaseHistory().size() : 0;
+        total += backupData.getExpense() != null ? backupData.getExpense().size() : 0;
+        total += backupData.getExpenseRepayments() != null ? backupData.getExpenseRepayments().size() : 0;
+        total += backupData.getIncome() != null ? backupData.getIncome().size() : 0;
+        total += backupData.getIncomeCollections() != null ? backupData.getIncomeCollections().size() : 0;
+
+        return total;
     }
 
     /**

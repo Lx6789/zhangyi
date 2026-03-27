@@ -28,4 +28,11 @@ public interface IBackupRecordsService extends IService<BackupRecords> {
      * @return
      */
     RespBean delete(Integer backupId);
+
+    /**
+     * 恢复指定备份数据
+     * @param backupId
+     * @return
+     */
+    RespBean restore(Integer backupId);
 }

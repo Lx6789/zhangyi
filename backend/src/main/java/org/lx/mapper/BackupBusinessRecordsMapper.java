@@ -1,5 +1,6 @@
 package org.lx.mapper;
 
+import org.apache.ibatis.annotations.Select;
 import org.lx.pojo.BackupBusinessRecords;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
@@ -22,4 +23,12 @@ public interface BackupBusinessRecordsMapper extends BaseMapper<BackupBusinessRe
      * @return 插入成功的条数
      */
     int insertBatch(@Param("list") List<BackupBusinessRecords> records);
+
+    /**
+     * 根据备份id查询数据
+     * @param backupIdentifier
+     * @return
+     */
+    @Select("SELECT * from backup_business_records where backup_id = #{backupIdentifier}")
+    List<BackupBusinessRecords> selectByBackupId(String backupIdentifier);
 }

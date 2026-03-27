@@ -1,5 +1,6 @@
 package org.lx.mapper;
 
+import org.apache.ibatis.annotations.Select;
 import org.lx.pojo.BackupExpenseRecords;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
@@ -22,4 +23,12 @@ public interface BackupExpenseRecordsMapper extends BaseMapper<BackupExpenseReco
      * @return 插入成功的条数
      */
     int insertBatch(@Param("list") List<BackupExpenseRecords> records);
+
+    /**
+     * 根据备份id查询数据
+     * @param backupIdentifier
+     * @return
+     */
+    @Select("SELECT * from backup_expense_records where backup_id = #{backupIdentifier}")
+    List<BackupExpenseRecords> selectByBackupId(String backupIdentifier);
 }

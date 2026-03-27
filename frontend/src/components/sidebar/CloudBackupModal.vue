@@ -665,15 +665,26 @@ const restoreBackup = async (backup) => {
   const confirm = window.confirm(
       `确定要恢复 ${formatDateTime(backup.backupTime)} 的备份吗？\n` +
       `包含数据类型：${backup.dataTypes.map(t => getDataTypeName(t)).join('、')}\n\n` +
-      `⚠️ 警告：当前数据将被覆盖！`
+      `⚠️ 警告：当前数据将被覆盖！\n` +
+      `⚠️ 建议：恢复前请先备份当前数据！`
   )
   if (!confirm) return
+
+  // 可选：再确认一次是否清空现有数据
+  const clearConfirm = window.confirm(
+      `恢复操作将清空当前数据并用备份数据替换。\n` +
+      `是否继续？`
+  )
+  if (!clearConfirm) return
 
   restoringBackupId.value = backup.id
 
   try {
+    // 注意：现在 restoreBackup 会返回数据并写入 IndexedDB
     const result = await backupService.restoreBackup(backup)
     notificationService.showNotification(result.message, 'success')
+
+    // 延迟刷新页面，让用户看到成功提示
     setTimeout(() => {
       window.location.reload()
     }, 1500)

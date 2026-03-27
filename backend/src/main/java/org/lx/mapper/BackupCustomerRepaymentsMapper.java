@@ -1,5 +1,6 @@
 package org.lx.mapper;
 
+import org.apache.ibatis.annotations.Select;
 import org.lx.pojo.BackupCustomerRepayments;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
@@ -22,4 +23,12 @@ public interface BackupCustomerRepaymentsMapper extends BaseMapper<BackupCustome
      * @return 插入成功的条数
      */
     int insertBatch(@Param("list") List<BackupCustomerRepayments> repayments);
+
+    /**
+     * 根据备份id查询数据
+     * @param backupIdentifier
+     * @return
+     */
+    @Select("SELECT * from backup_customer_repayments where backup_id = #{backupIdentifier}")
+    List<BackupCustomerRepayments> selectByBackupId(String backupIdentifier);
 }

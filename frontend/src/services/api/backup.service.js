@@ -350,9 +350,10 @@ class BackupService {
     /**
      * 恢复备份
      * @param {Object} backup - 备份记录
+     * @param {boolean} clearExisting - 是否清空现有数据（默认 true）
      * @returns {Promise<Object>} 恢复结果
      */
-    async restoreBackup(backup) {
+    async restoreBackup(backup, clearExisting = true) {
         // 使用 id 作为备份标识
         if (!backup || (!backup.id && !backup.backupId)) {
             throw new Error('无效的备份记录')
@@ -361,20 +362,298 @@ class BackupService {
         const backupIdentifier = backup.id || backup.backupId
 
         try {
-            const response = await apiRestoreBackup(backupIdentifier)
+            console.log('【BackupService】开始恢复备份:', backupIdentifier)
 
-            if (response) {
-                return {
-                    success: true,
-                    message: '数据恢复成功，请刷新页面'
-                }
+            // 1. 从后端获取备份数据
+            const response = await apiRestoreBackup(backupIdentifier)
+            console.log('【BackupService】获取备份数据成功:', response)
+
+            // 2. 获取备份数据中的 data 部分
+            const backupData = response.data
+
+            if (!backupData) {
+                throw new Error('备份数据为空')
+            }
+
+            // 3. 如果需要清空现有数据，先清空
+            if (clearExisting) {
+                console.log('【BackupService】开始清空现有数据...')
+                await this.clearUserData()
+                console.log('【BackupService】清空现有数据完成')
             } else {
-                throw new Error(response?.message || '恢复失败')
+                console.log('【BackupService】保留现有数据，将进行数据合并')
+            }
+
+            // 4. 将备份数据写入 IndexedDB
+            await this.writeBackupDataToIndexedDB(backupData)
+
+            console.log('【BackupService】备份数据写入 IndexedDB 成功')
+
+            return {
+                success: true,
+                message: '数据恢复成功，请刷新页面'
             }
         } catch (error) {
             console.error('【BackupService】恢复备份失败:', error)
             throw error
         }
+    }
+
+    /**
+     * 清空当前用户的所有数据
+     * @returns {Promise<boolean>} 清空结果
+     */
+    async clearUserData() {
+        try {
+            const userId = this.getCurrentUserId()
+            const stores = [
+                'daily_records',
+                'income_records',
+                'expense_records',
+                'products',
+                'personal_savings',
+                'chart_data_cache',
+                'sync_status',
+                'product_categories',
+                'inventory',
+                'suppliers',
+                'purchase_orders',
+                'purchase_history',
+                'customers',
+                'customer_repayments',
+                'expense_repayments',
+                'income_collections'
+            ]
+
+            for (const storeName of stores) {
+                // 检查表是否存在
+                if (await indexedDBService.hasStore(storeName)) {
+                    // 如果表存在，获取所有记录并删除当前用户的
+                    const records = await indexedDBService.getAll(storeName)
+                    const userRecords = records.filter(r => r.userId === userId)
+
+                    for (const record of userRecords) {
+                        await indexedDBService.delete(storeName, record.id)
+                    }
+                    console.log(`清空 ${storeName} 中用户 ${userId} 的数据: ${userRecords.length} 条`)
+                }
+            }
+
+            return true
+        } catch (error) {
+            console.error('【BackupService】清空用户数据失败:', error)
+            throw error
+        }
+    }
+
+    /**
+     * 将备份数据写入 IndexedDB
+     * @param {Object} backupData - 备份数据对象
+     */
+    async writeBackupDataToIndexedDB(backupData) {
+        const userId = this.getCurrentUserId()
+
+        console.log('【BackupService】开始写入备份数据到 IndexedDB...')
+
+        // 1. 写入个人记账数据
+        if (backupData.personal && backupData.personal.length > 0) {
+            // 为每条记录设置正确的 userId 和业务类型
+            const personalRecords = backupData.personal.map(record => ({
+                ...record,
+                userId: userId,
+                businessType: 'personal',
+                syncStatus: 'pending'
+            }))
+            await businessDataService.addDailyRecords(personalRecords)
+            console.log(`✅ 恢复个人记账数据: ${personalRecords.length} 条`)
+        }
+
+        // 2. 写入生意记账数据
+        if (backupData.business && backupData.business.length > 0) {
+            const businessRecords = backupData.business.map(record => ({
+                ...record,
+                userId: userId,
+                businessType: 'business',
+                syncStatus: 'pending'
+            }))
+            await businessDataService.addDailyRecords(businessRecords)
+            console.log(`✅ 恢复生意记账数据: ${businessRecords.length} 条`)
+        }
+
+        // 3. 写入个人存钱计划
+        if (backupData.personalSavings && backupData.personalSavings.length > 0) {
+            for (const plan of backupData.personalSavings) {
+                // 确保计划有正确的 userId
+                const planWithUserId = {
+                    ...plan,
+                    userId: userId,
+                    records: []  // 清空记录，后面单独恢复
+                }
+                await personalSavingCache.createPlan(userId, planWithUserId)
+            }
+            console.log(`✅ 恢复个人存钱计划: ${backupData.personalSavings.length} 条`)
+        }
+
+        // 4. 写入个人存钱记录
+        if (backupData.personalSavingRecords && Object.keys(backupData.personalSavingRecords).length > 0) {
+            let totalRecords = 0
+            for (const [planId, records] of Object.entries(backupData.personalSavingRecords)) {
+                if (records && records.length > 0) {
+                    for (const record of records) {
+                        // 将存钱记录添加到对应的计划中
+                        const plan = await personalSavingCache.getPlanById(userId, planId)
+                        if (plan) {
+                            if (!plan.records) plan.records = []
+                            plan.records.push(record)
+                            plan.currentAmount = (plan.currentAmount || 0) + record.amount
+                            plan.progress = (plan.currentAmount / plan.targetAmount) * 100
+                            plan.completed = plan.currentAmount >= plan.targetAmount
+                            await personalSavingCache.updatePlan(userId, planId, plan)
+                            totalRecords++
+                        }
+                    }
+                }
+            }
+            console.log(`✅ 恢复个人存钱记录: ${totalRecords} 条`)
+        }
+
+        // 5. 写入客户数据
+        if (backupData.customers && backupData.customers.length > 0) {
+            const customersWithUserId = backupData.customers.map(customer => ({
+                ...customer,
+                userId: userId
+            }))
+            await businessDataService.addCustomers(customersWithUserId)
+            console.log(`✅ 恢复客户数据: ${customersWithUserId.length} 条`)
+        }
+
+        // 6. 写入客户还款记录
+        if (backupData.customerRepayments && backupData.customerRepayments.length > 0) {
+            for (const repayment of backupData.customerRepayments) {
+                const repaymentWithUserId = {
+                    ...repayment,
+                    userId: userId
+                }
+                await businessDataService.addCustomerRepayment(repaymentWithUserId)
+            }
+            console.log(`✅ 恢复客户还款记录: ${backupData.customerRepayments.length} 条`)
+        }
+
+        // 7. 写入商品数据
+        if (backupData.products && backupData.products.length > 0) {
+            const productsWithUserId = backupData.products.map(product => ({
+                ...product,
+                userId: userId
+            }))
+            await businessDataService.addProducts(productsWithUserId)
+            console.log(`✅ 恢复商品数据: ${productsWithUserId.length} 条`)
+        }
+
+        // 8. 写入商品分类
+        if (backupData.categories && backupData.categories.length > 0) {
+            const categoriesWithUserId = backupData.categories.map(category => ({
+                ...category,
+                userId: userId,
+                isDefault: category.isDefault || false
+            }))
+            await businessDataService.addCategories(categoriesWithUserId)
+            console.log(`✅ 恢复商品分类: ${categoriesWithUserId.length} 条`)
+        }
+
+        // 9. 写入供应商数据
+        if (backupData.suppliers && backupData.suppliers.length > 0) {
+            for (const supplier of backupData.suppliers) {
+                const supplierWithUserId = {
+                    ...supplier,
+                    userId: userId
+                }
+                await businessDataService.addSupplier(supplierWithUserId)
+            }
+            console.log(`✅ 恢复供应商数据: ${backupData.suppliers.length} 条`)
+        }
+
+        // 10. 写入库存数据
+        if (backupData.inventory && backupData.inventory.length > 0) {
+            const inventoryWithUserId = backupData.inventory.map(item => ({
+                ...item,
+                userId: userId
+            }))
+            await businessDataService.addInventoryItems(inventoryWithUserId)
+            console.log(`✅ 恢复库存数据: ${inventoryWithUserId.length} 条`)
+        }
+
+        // 11. 写入采购订单
+        if (backupData.purchaseOrders && backupData.purchaseOrders.length > 0) {
+            for (const order of backupData.purchaseOrders) {
+                const orderWithUserId = {
+                    ...order,
+                    userId: userId
+                }
+                await businessDataService.addPurchaseOrder(orderWithUserId)
+            }
+            console.log(`✅ 恢复采购订单: ${backupData.purchaseOrders.length} 条`)
+        }
+
+        // 12. 写入采购历史
+        if (backupData.purchaseHistory && backupData.purchaseHistory.length > 0) {
+            for (const history of backupData.purchaseHistory) {
+                const historyWithUserId = {
+                    ...history,
+                    userId: userId
+                }
+                await businessDataService.addPurchaseHistory(historyWithUserId)
+            }
+            console.log(`✅ 恢复采购历史: ${backupData.purchaseHistory.length} 条`)
+        }
+
+        // 13. 写入支出记录
+        if (backupData.expense && backupData.expense.length > 0) {
+            const expenseWithUserId = backupData.expense.map(record => ({
+                ...record,
+                userId: userId,
+                type: '支出'
+            }))
+            await businessDataService.addExpenseRecords(expenseWithUserId)
+            console.log(`✅ 恢复支出记录: ${expenseWithUserId.length} 条`)
+        }
+
+        // 14. 写入支出还款记录
+        if (backupData.expenseRepayments && backupData.expenseRepayments.length > 0) {
+            for (const repayment of backupData.expenseRepayments) {
+                const repaymentWithUserId = {
+                    ...repayment,
+                    userId: userId
+                }
+                await businessDataService.addExpenseRepayment(repaymentWithUserId)
+            }
+            console.log(`✅ 恢复支出还款记录: ${backupData.expenseRepayments.length} 条`)
+        }
+
+        // 15. 写入收入记录
+        if (backupData.income && backupData.income.length > 0) {
+            const incomeWithUserId = backupData.income.map(record => ({
+                ...record,
+                userId: userId,
+                type: '收入'
+            }))
+            await businessDataService.addIncomeRecords(incomeWithUserId)
+            console.log(`✅ 恢复收入记录: ${incomeWithUserId.length} 条`)
+        }
+
+        // 16. 写入收入收款记录
+        if (backupData.incomeCollections && backupData.incomeCollections.length > 0) {
+            for (const collection of backupData.incomeCollections) {
+                const collectionWithUserId = {
+                    ...collection,
+                    userId: userId
+                }
+                await businessDataService.addIncomeCollection(collectionWithUserId)
+            }
+            console.log(`✅ 恢复收入收款记录: ${backupData.incomeCollections.length} 条`)
+        }
+
+        console.log('【BackupService】所有备份数据写入完成')
+        return true
     }
 
     /**
