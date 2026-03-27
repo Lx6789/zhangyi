@@ -71,4 +71,10 @@ public class BackupRecordsController {
             return RespBean.error(RespCode.DATA_NOT_FOUND, "获取备份数量失败");
         }
     }
+
+    @ApiOperation(value = "删除指定备份数据")
+    @DeleteMapping("/delete/{backupId}")
+    public RespBean delete(@PathVariable Integer backupId) {
+        return backupRecordsService.delete(backupId);
+    }
 }

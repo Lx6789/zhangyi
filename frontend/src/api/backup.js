@@ -39,10 +39,19 @@ export async function uploadBackup(data) {
  * @returns {Promise<Object>} 返回备份列表
  */
 export async function getBackupList(params) {
-    console.log('【API】获取备份列表，用户ID:', params.userId);
+    console.log('【API】请求备份列表，参数:', params);
     try {
         const response = await request.get(API.BACKUP.LIST, params);
-        console.log('【API】获取备份列表响应:', response);
+        console.log('【API】原始响应:', response);
+        console.log('【API】响应类型:', typeof response);
+        console.log('【API】是否是数组:', Array.isArray(response));
+
+        // 如果响应有 data 字段，打印出来
+        if (response && response.data) {
+            console.log('【API】response.data:', response.data);
+            console.log('【API】response.data 是否是数组:', Array.isArray(response.data));
+        }
+
         return response;
     } catch (error) {
         console.error('【API】获取备份列表失败:', error);
@@ -68,27 +77,11 @@ export async function getBackupDetail(backupId) {
     }
 }
 
-/**
- * 恢复备份数据
- * @param {string} backupId - 备份ID
- * @returns {Promise<Object>} 返回恢复结果
- */
-export async function restoreBackup(backupId) {
-    console.log('【API】恢复备份，ID:', backupId);
-    try {
-        const url = API.BACKUP.RESTORE.replace('{backupId}', backupId);
-        const response = await request.post(url);
-        console.log('【API】恢复备份响应:', response);
-        return response;
-    } catch (error) {
-        console.error('【API】恢复备份失败:', error);
-        throw error;
-    }
-}
+// src/api/backup.js
 
 /**
  * 删除备份
- * @param {string} backupId - 备份ID
+ * @param {number|string} backupId - 备份ID（可以是 id 或 backupId）
  * @returns {Promise<Object>} 返回删除结果
  */
 export async function deleteBackup(backupId) {
@@ -100,6 +93,24 @@ export async function deleteBackup(backupId) {
         return response;
     } catch (error) {
         console.error('【API】删除备份失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 恢复备份
+ * @param {number|string} backupId - 备份ID
+ * @returns {Promise<Object>} 返回恢复结果
+ */
+export async function restoreBackup(backupId) {
+    console.log('【API】恢复备份，ID:', backupId);
+    try {
+        const url = API.BACKUP.RESTORE.replace('{backupId}', backupId);
+        const response = await request.post(url);
+        console.log('【API】恢复备份响应:', response);
+        return response;
+    } catch (error) {
+        console.error('【API】恢复备份失败:', error);
         throw error;
     }
 }

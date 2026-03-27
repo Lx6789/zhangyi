@@ -21,4 +21,11 @@ public interface IBackupRecordsService extends IService<BackupRecords> {
      * @return
      */
     RespBean upload(BackupDTO backupDTO);
+
+    /**
+     * 删除指定备份数据
+     * @param backupId
+     * @return
+     */
+    RespBean delete(Integer backupId);
 }

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.lx.common.RespBean;
 import org.lx.common.RespCode;
+import org.lx.config.UserUtil;
 import org.lx.mapper.*;
 import org.lx.pojo.*;
 import org.lx.pojo.dto.BackupDTO;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -54,7 +56,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
     // 备份数量限制
     private static final int MAX_BACKUP_COUNT = 10;
 
-    // 现有 Mapper
+    @Autowired
+    private BackupRecordsMapper backupRecordsMapper;
+
     @Autowired
     private BackupDailyRecordsMapper backupDailyRecordsMapper;
 
@@ -91,7 +95,6 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
     @Autowired
     private BackupPurchaseHistoryMapper backupPurchaseHistoryMapper;
 
-    // 新增 Mapper
     @Autowired
     private BackupExpenseRecordsMapper backupExpenseRecordsMapper;
 
@@ -104,6 +107,14 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
     @Autowired
     private BackupIncomeCollectionsMapper backupIncomeCollectionsMapper;
 
+    @Autowired
+    private UserUtil userUtil;
+
+    /**
+     * 上传备份数据
+     * @param backupDTO
+     * @return
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public RespBean upload(BackupDTO backupDTO) {
@@ -137,7 +148,7 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             return RespBean.error(RespCode.DATA_NOT_FOUND, "备份数据内容不能为空");
         }
 
-        // 4. 检查备份数量限制
+        // 4. 检查备份数量限制（如果超过10条，删除最早的备份）
         long backupCount = getBackupCount(backupDTO.getUserId());
         if (backupCount >= MAX_BACKUP_COUNT) {
             log.warn("用户 {} 备份数量已达到 {} 条，将删除最早的备份", backupDTO.getUserId(), backupCount);
@@ -197,6 +208,43 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
     }
 
     /**
+     * 删除指定备份数据
+     * 由于数据库设置了 ON DELETE CASCADE，只需删除主表记录，所有关联的子表数据会自动删除
+     * @param backupId 备份记录ID（主键）
+     * @return 删除结果
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RespBean delete(Integer backupId) {
+        try {
+            // 1. 判断备份是否存在
+            BackupRecords backupRecords = backupRecordsMapper.selectById(backupId);
+            if (backupRecords == null) {
+                return RespBean.error(RespCode.DATA_NOT_FOUND, "备份不存在");
+            }
+
+            // 2. 验证用户权限
+            Integer userId = userUtil.getUserFromSecurityContext().getId();
+            if (!backupRecords.getUserId().equals(userId.longValue())) {
+                return RespBean.error(RespCode.UNAUTHORIZED, "无权删除此备份");
+            }
+
+            // 3. 删除备份主记录（由于数据库设置了 ON DELETE CASCADE，所有关联的子表数据会自动删除）
+            int result = backupRecordsMapper.deleteById(backupId);
+
+            if (result > 0) {
+                log.info("删除备份成功: backupId={}, userId={}", backupId, userId);
+                return RespBean.success(RespCode.SUCCESS, "删除成功");
+            } else {
+                return RespBean.error(RespCode.DATA_NOT_FOUND, "删除失败");
+            }
+        } catch (Exception e) {
+            log.error("删除备份失败: backupId={}", backupId, e);
+            return RespBean.error(RespCode.DATA_NOT_FOUND, "删除失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 获取用户备份数量
      */
     private long getBackupCount(Long userId) {
@@ -208,6 +256,7 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
 
     /**
      * 删除最早的备份
+     * 利用数据库级联删除，只需删除主表记录，所有关联子表数据会自动删除
      */
     private void deleteOldestBackup(Long userId) {
         // 获取最早的备份（按备份时间升序排列）
@@ -219,98 +268,18 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
         BackupRecords oldestBackup = this.getOne(wrapper);
 
         if (oldestBackup != null) {
-            log.info("开始删除最早的备份: backupId={}, backupTime={}",
-                    oldestBackup.getBackupId(), oldestBackup.getBackupTime());
-            deleteBackupAndRelatedData(oldestBackup);
+            log.info("开始删除最早的备份: backupId={}, backupTime={}, id={}",
+                    oldestBackup.getBackupId(), oldestBackup.getBackupTime(), oldestBackup.getId());
+
+            // 直接删除主表记录，由于数据库设置了 ON DELETE CASCADE，所有关联子表数据会自动删除
+            this.removeById(oldestBackup.getId());
+
             log.info("最早备份删除成功: backupId={}", oldestBackup.getBackupId());
         }
     }
 
     /**
-     * 删除备份及其所有关联数据
-     */
-    private void deleteBackupAndRelatedData(BackupRecords backupRecord) {
-        String backupId = backupRecord.getBackupId();
-
-        try {
-            // 删除各备份表中的数据
-            LambdaQueryWrapper<BackupDailyRecords> dailyWrapper = new LambdaQueryWrapper<>();
-            dailyWrapper.eq(BackupDailyRecords::getBackupId, backupId);
-            backupDailyRecordsMapper.delete(dailyWrapper);
-
-            LambdaQueryWrapper<BackupBusinessRecords> businessWrapper = new LambdaQueryWrapper<>();
-            businessWrapper.eq(BackupBusinessRecords::getBackupId, backupId);
-            backupBusinessRecordsMapper.delete(businessWrapper);
-
-            LambdaQueryWrapper<BackupPersonalSavings> savingWrapper = new LambdaQueryWrapper<>();
-            savingWrapper.eq(BackupPersonalSavings::getBackupId, backupId);
-            backupPersonalSavingsMapper.delete(savingWrapper);
-
-            LambdaQueryWrapper<BackupPersonalSavingRecords> savingRecordWrapper = new LambdaQueryWrapper<>();
-            savingRecordWrapper.eq(BackupPersonalSavingRecords::getBackupId, backupId);
-            backupPersonalSavingRecordsMapper.delete(savingRecordWrapper);
-
-            LambdaQueryWrapper<BackupCustomers> customerWrapper = new LambdaQueryWrapper<>();
-            customerWrapper.eq(BackupCustomers::getBackupId, backupId);
-            backupCustomersMapper.delete(customerWrapper);
-
-            LambdaQueryWrapper<BackupCustomerRepayments> customerRepaymentWrapper = new LambdaQueryWrapper<>();
-            customerRepaymentWrapper.eq(BackupCustomerRepayments::getBackupId, backupId);
-            backupCustomerRepaymentsMapper.delete(customerRepaymentWrapper);
-
-            LambdaQueryWrapper<BackupProducts> productWrapper = new LambdaQueryWrapper<>();
-            productWrapper.eq(BackupProducts::getBackupId, backupId);
-            backupProductsMapper.delete(productWrapper);
-
-            LambdaQueryWrapper<BackupProductCategories> categoryWrapper = new LambdaQueryWrapper<>();
-            categoryWrapper.eq(BackupProductCategories::getBackupId, backupId);
-            backupProductCategoriesMapper.delete(categoryWrapper);
-
-            LambdaQueryWrapper<BackupSuppliers> supplierWrapper = new LambdaQueryWrapper<>();
-            supplierWrapper.eq(BackupSuppliers::getBackupId, backupId);
-            backupSuppliersMapper.delete(supplierWrapper);
-
-            LambdaQueryWrapper<BackupInventory> inventoryWrapper = new LambdaQueryWrapper<>();
-            inventoryWrapper.eq(BackupInventory::getBackupId, backupId);
-            backupInventoryMapper.delete(inventoryWrapper);
-
-            LambdaQueryWrapper<BackupPurchaseOrders> orderWrapper = new LambdaQueryWrapper<>();
-            orderWrapper.eq(BackupPurchaseOrders::getBackupId, backupId);
-            backupPurchaseOrdersMapper.delete(orderWrapper);
-
-            LambdaQueryWrapper<BackupPurchaseHistory> historyWrapper = new LambdaQueryWrapper<>();
-            historyWrapper.eq(BackupPurchaseHistory::getBackupId, backupId);
-            backupPurchaseHistoryMapper.delete(historyWrapper);
-
-            LambdaQueryWrapper<BackupExpenseRecords> expenseWrapper = new LambdaQueryWrapper<>();
-            expenseWrapper.eq(BackupExpenseRecords::getBackupId, backupId);
-            backupExpenseRecordsMapper.delete(expenseWrapper);
-
-            LambdaQueryWrapper<BackupIncomeRecords> incomeWrapper = new LambdaQueryWrapper<>();
-            incomeWrapper.eq(BackupIncomeRecords::getBackupId, backupId);
-            backupIncomeRecordsMapper.delete(incomeWrapper);
-
-            LambdaQueryWrapper<BackupExpenseRepayments> expenseRepaymentWrapper = new LambdaQueryWrapper<>();
-            expenseRepaymentWrapper.eq(BackupExpenseRepayments::getBackupId, backupId);
-            backupExpenseRepaymentsMapper.delete(expenseRepaymentWrapper);
-
-            LambdaQueryWrapper<BackupIncomeCollections> incomeCollectionWrapper = new LambdaQueryWrapper<>();
-            incomeCollectionWrapper.eq(BackupIncomeCollections::getBackupId, backupId);
-            backupIncomeCollectionsMapper.delete(incomeCollectionWrapper);
-
-            // 最后删除备份主记录
-            this.removeById(backupRecord.getId());
-
-            log.info("备份及其关联数据删除成功: backupId={}", backupId);
-
-        } catch (Exception e) {
-            log.error("删除备份及其关联数据失败: backupId={}", backupId, e);
-            throw new RuntimeException("删除旧备份失败: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 获取各类型数据的数量统计（不抛出异常，只是统计）
+     * 获取各类型数据的数量统计
      */
     private Map<String, Integer> getDataCountMap(BackupDataDTO data, List<String> dataTypes) {
         Map<String, Integer> dataCountMap = new HashMap<>();
@@ -476,19 +445,16 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
         }
     }
 
-    // ==================== 现有保存方法 ====================
+    // ==================== 保存方法 ====================
 
     /**
      * 保存个人记账备份数据
      */
     private void savePersonalRecords(String backupId, Long userId, List<BackupDailyRecords> records) {
         if (records == null || records.isEmpty()) {
-            log.warn("个人记账备份数据为空，跳过保存");
             return;
         }
-
         log.info("保存个人记账备份数据: backupId={}, count={}", backupId, records.size());
-
         records.forEach(record -> {
             record.setBackupId(backupId);
             record.setUserId(userId);
@@ -497,13 +463,8 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
                 record.setRecordDate(LocalDate.now());
             }
         });
-
-        int result = backupDailyRecordsMapper.insertBatch(records);
-        if (result != records.size()) {
-            throw new RuntimeException(String.format(
-                    "保存个人记账备份数据失败: 预期 %d 条，实际 %d 条", records.size(), result));
-        }
-        log.info("个人记账备份数据保存成功: {} 条", result);
+        backupDailyRecordsMapper.insertBatch(records);
+        log.info("个人记账备份数据保存成功: {} 条", records.size());
     }
 
     /**
@@ -511,12 +472,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
      */
     private void saveBusinessRecords(String backupId, Long userId, List<BackupBusinessRecords> records) {
         if (records == null || records.isEmpty()) {
-            log.warn("生意记账备份数据为空，跳过保存");
             return;
         }
-
         log.info("保存生意记账备份数据: backupId={}, count={}", backupId, records.size());
-
         records.forEach(record -> {
             record.setBackupId(backupId);
             record.setUserId(userId);
@@ -525,18 +483,15 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
                 record.setRecordDate(LocalDate.now());
             }
         });
-
-        int result = backupBusinessRecordsMapper.insertBatch(records);
-        if (result != records.size()) {
-            throw new RuntimeException(String.format(
-                    "保存生意记账备份数据失败: 预期 %d 条，实际 %d 条", records.size(), result));
-        }
-        log.info("生意记账备份数据保存成功: {} 条", result);
+        backupBusinessRecordsMapper.insertBatch(records);
+        log.info("生意记账备份数据保存成功: {} 条", records.size());
     }
 
+    /**
+     * 保存个人存钱计划备份数据
+     */
     private void savePersonalSavings(String backupId, Long userId, List<BackupPersonalSavings> savings) {
         if (savings == null || savings.isEmpty()) {
-            log.warn("个人存钱计划备份数据为空，跳过保存");
             return;
         }
         log.info("保存个人存钱计划备份数据: backupId={}, count={}", backupId, savings.size());
@@ -545,18 +500,16 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             saving.setUserId(userId);
             saving.setCreatedAt(LocalDateTime.now());
         });
-        int result = backupPersonalSavingsMapper.insertBatch(savings);
-        if (result != savings.size()) {
-            throw new RuntimeException(String.format(
-                    "保存个人存钱计划备份数据失败: 预期 %d 条，实际 %d 条", savings.size(), result));
-        }
-        log.info("个人存钱计划备份数据保存成功: {} 条", result);
+        backupPersonalSavingsMapper.insertBatch(savings);
+        log.info("个人存钱计划备份数据保存成功: {} 条", savings.size());
     }
 
+    /**
+     * 保存个人存钱记录备份数据
+     */
     private void savePersonalSavingRecords(String backupId, Long userId,
                                            Map<String, List<BackupPersonalSavingRecords>> recordsMap) {
         if (recordsMap == null || recordsMap.isEmpty()) {
-            log.warn("个人存钱记录备份数据为空，跳过保存");
             return;
         }
         int totalCount = recordsMap.values().stream().mapToInt(List::size).sum();
@@ -568,17 +521,15 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             record.setUserId(userId);
             record.setCreatedAt(LocalDateTime.now());
         });
-        int result = backupPersonalSavingRecordsMapper.insertBatch(allRecords);
-        if (result != totalCount) {
-            throw new RuntimeException(String.format(
-                    "保存个人存钱记录备份数据失败: 预期 %d 条，实际 %d 条", totalCount, result));
-        }
-        log.info("个人存钱记录备份数据保存成功: {} 条", result);
+        backupPersonalSavingRecordsMapper.insertBatch(allRecords);
+        log.info("个人存钱记录备份数据保存成功: {} 条", totalCount);
     }
 
+    /**
+     * 保存客户备份数据
+     */
     private void saveCustomers(String backupId, Long userId, List<BackupCustomers> customers) {
         if (customers == null || customers.isEmpty()) {
-            log.warn("客户备份数据为空，跳过保存");
             return;
         }
         log.info("保存客户备份数据: backupId={}, count={}", backupId, customers.size());
@@ -587,228 +538,8 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             customer.setUserId(userId);
             customer.setCreatedAt(LocalDateTime.now());
         });
-        int result = backupCustomersMapper.insertBatch(customers);
-        if (result != customers.size()) {
-            throw new RuntimeException(String.format(
-                    "保存客户备份数据失败: 预期 %d 条，实际 %d 条", customers.size(), result));
-        }
-        log.info("客户备份数据保存成功: {} 条", result);
-    }
-
-    private void saveProducts(String backupId, Long userId, List<BackupProducts> products) {
-        if (products == null || products.isEmpty()) {
-            log.warn("商品备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存商品备份数据: backupId={}, count={}", backupId, products.size());
-        products.forEach(product -> {
-            product.setBackupId(backupId);
-            product.setUserId(userId);
-            product.setCreatedAt(LocalDateTime.now());
-        });
-        int result = backupProductsMapper.insertBatch(products);
-        if (result != products.size()) {
-            throw new RuntimeException(String.format(
-                    "保存商品备份数据失败: 预期 %d 条，实际 %d 条", products.size(), result));
-        }
-        log.info("商品备份数据保存成功: {} 条", result);
-    }
-
-    private void saveInventory(String backupId, Long userId, List<BackupInventory> inventory) {
-        if (inventory == null || inventory.isEmpty()) {
-            log.warn("库存备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存库存备份数据: backupId={}, count={}", backupId, inventory.size());
-        inventory.forEach(item -> {
-            item.setBackupId(backupId);
-            item.setUserId(userId);
-            item.setCreatedAt(LocalDateTime.now());
-        });
-        int result = backupInventoryMapper.insertBatch(inventory);
-        if (result != inventory.size()) {
-            throw new RuntimeException(String.format(
-                    "保存库存备份数据失败: 预期 %d 条，实际 %d 条", inventory.size(), result));
-        }
-        log.info("库存备份数据保存成功: {} 条", result);
-    }
-
-    private void saveCategories(String backupId, Long userId, List<BackupProductCategories> categories) {
-        if (categories == null || categories.isEmpty()) {
-            log.warn("商品分类备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存商品分类备份数据: backupId={}, count={}", backupId, categories.size());
-        categories.forEach(category -> {
-            category.setBackupId(backupId);
-            category.setUserId(userId);
-            category.setCreatedAt(LocalDateTime.now());
-        });
-        int result = backupProductCategoriesMapper.insertBatch(categories);
-        if (result != categories.size()) {
-            throw new RuntimeException(String.format(
-                    "保存商品分类备份数据失败: 预期 %d 条，实际 %d 条", categories.size(), result));
-        }
-        log.info("商品分类备份数据保存成功: {} 条", result);
-    }
-
-    private void saveSuppliers(String backupId, Long userId, List<BackupSuppliers> suppliers) {
-        if (suppliers == null || suppliers.isEmpty()) {
-            log.warn("供应商备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存供应商备份数据: backupId={}, count={}", backupId, suppliers.size());
-        suppliers.forEach(supplier -> {
-            supplier.setBackupId(backupId);
-            supplier.setUserId(userId);
-            supplier.setCreatedAt(LocalDateTime.now());
-        });
-        int result = backupSuppliersMapper.insertBatch(suppliers);
-        if (result != suppliers.size()) {
-            throw new RuntimeException(String.format(
-                    "保存供应商备份数据失败: 预期 %d 条，实际 %d 条", suppliers.size(), result));
-        }
-        log.info("供应商备份数据保存成功: {} 条", result);
-    }
-
-    private void savePurchaseOrders(String backupId, Long userId, List<BackupPurchaseOrders> orders) {
-        if (orders == null || orders.isEmpty()) {
-            log.warn("采购订单备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存采购订单备份数据: backupId={}, count={}", backupId, orders.size());
-        orders.forEach(order -> {
-            order.setBackupId(backupId);
-            order.setUserId(userId);
-            order.setCreatedAt(LocalDateTime.now());
-        });
-        int result = backupPurchaseOrdersMapper.insertBatch(orders);
-        if (result != orders.size()) {
-            throw new RuntimeException(String.format(
-                    "保存采购订单备份数据失败: 预期 %d 条，实际 %d 条", orders.size(), result));
-        }
-        log.info("采购订单备份数据保存成功: {} 条", result);
-    }
-
-    private void savePurchaseHistory(String backupId, Long userId, List<BackupPurchaseHistory> history) {
-        if (history == null || history.isEmpty()) {
-            log.warn("采购历史备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存采购历史备份数据: backupId={}, count={}", backupId, history.size());
-        history.forEach(item -> {
-            item.setBackupId(backupId);
-            item.setUserId(userId);
-            item.setCreatedAt(LocalDateTime.now());
-        });
-        int result = backupPurchaseHistoryMapper.insertBatch(history);
-        if (result != history.size()) {
-            throw new RuntimeException(String.format(
-                    "保存采购历史备份数据失败: 预期 %d 条，实际 %d 条", history.size(), result));
-        }
-        log.info("采购历史备份数据保存成功: {} 条", result);
-    }
-
-    // ==================== 新增保存方法 ====================
-
-    /**
-     * 保存支出记录备份数据
-     */
-    private void saveExpenseRecords(String backupId, Long userId, List<BackupExpenseRecords> records) {
-        if (records == null || records.isEmpty()) {
-            log.warn("支出记录备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存支出记录备份数据: backupId={}, count={}", backupId, records.size());
-        records.forEach(record -> {
-            record.setBackupId(backupId);
-            record.setUserId(userId);
-            record.setCreatedAt(LocalDateTime.now());
-            if (record.getDate() == null) {
-                record.setDate(LocalDate.now());
-            }
-        });
-        int result = backupExpenseRecordsMapper.insertBatch(records);
-        if (result != records.size()) {
-            throw new RuntimeException(String.format(
-                    "保存支出记录备份数据失败: 预期 %d 条，实际 %d 条", records.size(), result));
-        }
-        log.info("支出记录备份数据保存成功: {} 条", result);
-    }
-
-    /**
-     * 保存收入记录备份数据
-     */
-    private void saveIncomeRecords(String backupId, Long userId, List<BackupIncomeRecords> records) {
-        if (records == null || records.isEmpty()) {
-            log.warn("收入记录备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存收入记录备份数据: backupId={}, count={}", backupId, records.size());
-        records.forEach(record -> {
-            record.setBackupId(backupId);
-            record.setUserId(userId);
-            record.setCreatedAt(LocalDateTime.now());
-            if (record.getDate() == null) {
-                record.setDate(LocalDate.now());
-            }
-        });
-        int result = backupIncomeRecordsMapper.insertBatch(records);
-        if (result != records.size()) {
-            throw new RuntimeException(String.format(
-                    "保存收入记录备份数据失败: 预期 %d 条，实际 %d 条", records.size(), result));
-        }
-        log.info("收入记录备份数据保存成功: {} 条", result);
-    }
-
-    /**
-     * 保存支出还款记录备份数据
-     */
-    private void saveExpenseRepayments(String backupId, Long userId, List<BackupExpenseRepayments> repayments) {
-        if (repayments == null || repayments.isEmpty()) {
-            log.warn("支出还款记录备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存支出还款记录备份数据: backupId={}, count={}", backupId, repayments.size());
-        repayments.forEach(repayment -> {
-            repayment.setBackupId(backupId);
-            repayment.setUserId(userId);
-            repayment.setCreatedAt(LocalDateTime.now());
-            if (repayment.getRepaymentDate() == null) {
-                repayment.setRepaymentDate(LocalDate.now());
-            }
-        });
-        int result = backupExpenseRepaymentsMapper.insertBatch(repayments);
-        if (result != repayments.size()) {
-            throw new RuntimeException(String.format(
-                    "保存支出还款记录备份数据失败: 预期 %d 条，实际 %d 条", repayments.size(), result));
-        }
-        log.info("支出还款记录备份数据保存成功: {} 条", result);
-    }
-
-    /**
-     * 保存收入收款记录备份数据
-     */
-    private void saveIncomeCollections(String backupId, Long userId, List<BackupIncomeCollections> collections) {
-        if (collections == null || collections.isEmpty()) {
-            log.warn("收入收款记录备份数据为空，跳过保存");
-            return;
-        }
-        log.info("保存收入收款记录备份数据: backupId={}, count={}", backupId, collections.size());
-        collections.forEach(collection -> {
-            collection.setBackupId(backupId);
-            collection.setUserId(userId);
-            collection.setCreatedAt(LocalDateTime.now());
-            if (collection.getCollectionDate() == null) {
-                collection.setCollectionDate(LocalDate.now());
-            }
-        });
-        int result = backupIncomeCollectionsMapper.insertBatch(collections);
-        if (result != collections.size()) {
-            throw new RuntimeException(String.format(
-                    "保存收入收款记录备份数据失败: 预期 %d 条，实际 %d 条", collections.size(), result));
-        }
-        log.info("收入收款记录备份数据保存成功: {} 条", result);
+        backupCustomersMapper.insertBatch(customers);
+        log.info("客户备份数据保存成功: {} 条", customers.size());
     }
 
     /**
@@ -816,7 +547,6 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
      */
     private void saveCustomerRepayments(String backupId, Long userId, List<BackupCustomerRepayments> repayments) {
         if (repayments == null || repayments.isEmpty()) {
-            log.warn("客户还款记录备份数据为空，跳过保存");
             return;
         }
         log.info("保存客户还款记录备份数据: backupId={}, count={}", backupId, repayments.size());
@@ -828,11 +558,242 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
                 repayment.setRepaymentDate(LocalDate.now());
             }
         });
-        int result = backupCustomerRepaymentsMapper.insertBatch(repayments);
-        if (result != repayments.size()) {
-            throw new RuntimeException(String.format(
-                    "保存客户还款记录备份数据失败: 预期 %d 条，实际 %d 条", repayments.size(), result));
+        backupCustomerRepaymentsMapper.insertBatch(repayments);
+        log.info("客户还款记录备份数据保存成功: {} 条", repayments.size());
+    }
+
+    /**
+     * 保存商品备份数据
+     */
+    private void saveProducts(String backupId, Long userId, List<BackupProducts> products) {
+        if (products == null || products.isEmpty()) {
+            return;
         }
-        log.info("客户还款记录备份数据保存成功: {} 条", result);
+        log.info("保存商品备份数据: backupId={}, count={}", backupId, products.size());
+        products.forEach(product -> {
+            product.setBackupId(backupId);
+            product.setUserId(userId);
+            product.setCreatedAt(LocalDateTime.now());
+        });
+        backupProductsMapper.insertBatch(products);
+        log.info("商品备份数据保存成功: {} 条", products.size());
+    }
+
+    /**
+     * 保存商品分类备份数据
+     */
+    private void saveCategories(String backupId, Long userId, List<BackupProductCategories> categories) {
+        if (categories == null || categories.isEmpty()) {
+            return;
+        }
+        log.info("保存商品分类备份数据: backupId={}, count={}", backupId, categories.size());
+        categories.forEach(category -> {
+            category.setBackupId(backupId);
+            category.setUserId(userId);
+            category.setCreatedAt(LocalDateTime.now());
+        });
+        backupProductCategoriesMapper.insertBatch(categories);
+        log.info("商品分类备份数据保存成功: {} 条", categories.size());
+    }
+
+    /**
+     * 保存库存备份数据
+     */
+    private void saveInventory(String backupId, Long userId, List<BackupInventory> inventory) {
+        if (inventory == null || inventory.isEmpty()) {
+            return;
+        }
+        log.info("保存库存备份数据: backupId={}, count={}", backupId, inventory.size());
+        inventory.forEach(item -> {
+            item.setBackupId(backupId);
+            item.setUserId(userId);
+            item.setCreatedAt(LocalDateTime.now());
+        });
+        backupInventoryMapper.insertBatch(inventory);
+        log.info("库存备份数据保存成功: {} 条", inventory.size());
+    }
+
+    /**
+     * 保存供应商备份数据
+     */
+    private void saveSuppliers(String backupId, Long userId, List<BackupSuppliers> suppliers) {
+        if (suppliers == null || suppliers.isEmpty()) {
+            return;
+        }
+        log.info("保存供应商备份数据: backupId={}, count={}", backupId, suppliers.size());
+        suppliers.forEach(supplier -> {
+            supplier.setBackupId(backupId);
+            supplier.setUserId(userId);
+            supplier.setCreatedAt(LocalDateTime.now());
+        });
+        backupSuppliersMapper.insertBatch(suppliers);
+        log.info("供应商备份数据保存成功: {} 条", suppliers.size());
+    }
+
+    /**
+     * 保存采购订单备份数据
+     */
+    private void savePurchaseOrders(String backupId, Long userId, List<BackupPurchaseOrders> orders) {
+        if (orders == null || orders.isEmpty()) {
+            return;
+        }
+        log.info("保存采购订单备份数据: backupId={}, count={}", backupId, orders.size());
+        orders.forEach(order -> {
+            order.setBackupId(backupId);
+            order.setUserId(userId);
+            order.setCreatedAt(LocalDateTime.now());
+            if (order.getTotalAmount() == null) {
+                order.setTotalAmount(BigDecimal.ZERO);
+            }
+        });
+        backupPurchaseOrdersMapper.insertBatch(orders);
+        log.info("采购订单备份数据保存成功: {} 条", orders.size());
+    }
+
+    /**
+     * 保存采购历史备份数据
+     */
+    private void savePurchaseHistory(String backupId, Long userId, List<BackupPurchaseHistory> history) {
+        if (history == null || history.isEmpty()) {
+            return;
+        }
+        log.info("保存采购历史备份数据: backupId={}, count={}", backupId, history.size());
+
+        // 打印第一条数据用于调试
+        if (!history.isEmpty()) {
+            log.info("第一条采购历史数据: {}", JSON.toJSONString(history.get(0)));
+        }
+
+        history.forEach(item -> {
+            item.setBackupId(backupId);
+            item.setUserId(userId);
+            item.setCreatedAt(LocalDateTime.now());
+
+            // 设置默认值，防止 null
+            if (item.getPurchaseDate() == null) {
+                item.setPurchaseDate(LocalDate.now());
+            }
+            if (item.getProductName() == null) {
+                item.setProductName("");
+            }
+            if (item.getQuantity() == null) {
+                item.setQuantity(BigDecimal.ZERO);
+            }
+            if (item.getPrice() == null) {
+                item.setPrice(BigDecimal.ZERO);
+            }
+            if (item.getTotalAmount() == null) {
+                // 如果 totalAmount 为空，尝试从 quantity 和 price 计算
+                if (item.getQuantity() != null && item.getPrice() != null) {
+                    item.setTotalAmount(item.getQuantity().multiply(item.getPrice()));
+                } else {
+                    item.setTotalAmount(BigDecimal.ZERO);
+                }
+            }
+            if (item.getUnit() == null) {
+                item.setUnit("斤");
+            }
+        });
+
+        backupPurchaseHistoryMapper.insertBatch(history);
+        log.info("采购历史备份数据保存成功: {} 条", history.size());
+    }
+
+    /**
+     * 保存支出记录备份数据
+     */
+    private void saveExpenseRecords(String backupId, Long userId, List<BackupExpenseRecords> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        log.info("保存支出记录备份数据: backupId={}, count={}", backupId, records.size());
+        records.forEach(record -> {
+            record.setBackupId(backupId);
+            record.setUserId(userId);
+            record.setCreatedAt(LocalDateTime.now());
+            if (record.getDate() == null) {
+                record.setDate(LocalDate.now());
+            }
+            if (record.getRepaidAmount() == null) {
+                record.setRepaidAmount(BigDecimal.ZERO);
+            }
+            if (record.getIsPaid() == null) {
+                record.setIsPaid(false);
+            }
+        });
+        backupExpenseRecordsMapper.insertBatch(records);
+        log.info("支出记录备份数据保存成功: {} 条", records.size());
+    }
+
+    /**
+     * 保存支出还款记录备份数据
+     */
+    private void saveExpenseRepayments(String backupId, Long userId, List<BackupExpenseRepayments> repayments) {
+        if (repayments == null || repayments.isEmpty()) {
+            return;
+        }
+        log.info("保存支出还款记录备份数据: backupId={}, count={}", backupId, repayments.size());
+        repayments.forEach(repayment -> {
+            repayment.setBackupId(backupId);
+            repayment.setUserId(userId);
+            repayment.setCreatedAt(LocalDateTime.now());
+            if (repayment.getRepaymentDate() == null) {
+                repayment.setRepaymentDate(LocalDate.now());
+            }
+            if (repayment.getAmount() == null) {
+                repayment.setAmount(BigDecimal.ZERO);
+            }
+        });
+        backupExpenseRepaymentsMapper.insertBatch(repayments);
+        log.info("支出还款记录备份数据保存成功: {} 条", repayments.size());
+    }
+
+    /**
+     * 保存收入记录备份数据
+     */
+    private void saveIncomeRecords(String backupId, Long userId, List<BackupIncomeRecords> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        log.info("保存收入记录备份数据: backupId={}, count={}", backupId, records.size());
+        records.forEach(record -> {
+            record.setBackupId(backupId);
+            record.setUserId(userId);
+            record.setCreatedAt(LocalDateTime.now());
+            if (record.getDate() == null) {
+                record.setDate(LocalDate.now());
+            }
+            if (record.getCollectedAmount() == null) {
+                record.setCollectedAmount(BigDecimal.ZERO);
+            }
+            if (record.getIsCollected() == null) {
+                record.setIsCollected(false);
+            }
+        });
+        backupIncomeRecordsMapper.insertBatch(records);
+        log.info("收入记录备份数据保存成功: {} 条", records.size());
+    }
+
+    /**
+     * 保存收入收款记录备份数据
+     */
+    private void saveIncomeCollections(String backupId, Long userId, List<BackupIncomeCollections> collections) {
+        if (collections == null || collections.isEmpty()) {
+            return;
+        }
+        log.info("保存收入收款记录备份数据: backupId={}, count={}", backupId, collections.size());
+        collections.forEach(collection -> {
+            collection.setBackupId(backupId);
+            collection.setUserId(userId);
+            collection.setCreatedAt(LocalDateTime.now());
+            if (collection.getCollectionDate() == null) {
+                collection.setCollectionDate(LocalDate.now());
+            }
+            if (collection.getAmount() == null) {
+                collection.setAmount(BigDecimal.ZERO);
+            }
+        });
+        backupIncomeCollectionsMapper.insertBatch(collections);
+        log.info("收入收款记录备份数据保存成功: {} 条", collections.size());
     }
 }

@@ -2,7 +2,8 @@
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import businessDataService from '@/services/cache/business-cache.service.js'
 import personalSavingCache from '@/services/cache/personal-saving-cache.service.js'
-import { uploadBackup as apiUploadBackup,
+import {
+    uploadBackup as apiUploadBackup,
     getBackupList as apiGetBackupList,
     restoreBackup as apiRestoreBackup,
     deleteBackup as apiDeleteBackup,
@@ -45,13 +46,16 @@ class BackupService {
             personal_saving: 0,
             customer: 0,
             product: 0,
+            category: 0,
+            supplier: 0,
             inventory: 0,
-            // ========== 新增 ==========
             expense: 0,
             income: 0,
             expense_repayment: 0,
             income_collection: 0,
-            customer_repayment: 0
+            customer_repayment: 0,
+            purchase_order: 0,
+            purchase_history: 0
         }
 
         try {
@@ -72,11 +76,18 @@ class BackupService {
             const products = await businessDataService.getAllProducts()
             counts.product = products?.length || 0
 
+            // 商品分类
+            const categories = await businessDataService.getAllCategories()
+            counts.category = categories?.length || 0
+
+            // 供应商
+            const suppliers = await businessDataService.getAllSuppliers()
+            counts.supplier = suppliers?.length || 0
+
             // 库存管理
             const inventory = await businessDataService.getAllInventory()
             counts.inventory = inventory?.length || 0
 
-            // ========== 新增统计 ==========
             // 支出记录
             const expenseRecords = await businessDataService.getAllExpenseRecords()
             counts.expense = expenseRecords?.length || 0
@@ -96,6 +107,14 @@ class BackupService {
             // 客户还款记录
             const customerRepayments = await businessDataService.getAllCustomerRepayments?.() || []
             counts.customer_repayment = customerRepayments?.length || 0
+
+            // 采购订单
+            const purchaseOrders = await businessDataService.getAllPurchaseOrders?.() || []
+            counts.purchase_order = purchaseOrders?.length || 0
+
+            // 采购历史
+            const purchaseHistory = await businessDataService.getAllPurchaseHistory?.() || []
+            counts.purchase_history = purchaseHistory?.length || 0
 
             console.log('【BackupService】数据统计加载完成:', counts)
             return counts
@@ -143,17 +162,38 @@ class BackupService {
 
                 case 'product':
                     backupData.products = await businessDataService.getAllProducts()
+                    break
+
+                case 'category':
                     backupData.categories = await businessDataService.getAllCategories()
+                    break
+
+                case 'supplier':
                     backupData.suppliers = await businessDataService.getAllSuppliers()
                     break
 
                 case 'inventory':
-                    backupData.inventory = await businessDataService.getAllInventory()
-                    backupData.purchase_orders = await businessDataService.getAllPurchaseOrders()
-                    backupData.purchase_history = await businessDataService.getAllPurchaseHistory()
+                    const inventory = await businessDataService.getAllInventory()
+                    backupData.inventory = inventory || []
                     break
 
-                // ========== 新增数据收集 ==========
+                case 'purchase_order':
+                    const purchaseOrders = await businessDataService.getAllPurchaseOrders?.() || []
+                    backupData.purchase_orders = purchaseOrders.map(item => ({
+                        ...item,
+                        totalAmount: item.totalAmount || 0
+                    }))
+                    backupData.purchase_orders = await businessDataService.getAllPurchaseOrders?.() || []
+                    break
+
+                case 'purchase_history':
+                    const purchaseHistory = await businessDataService.getAllPurchaseHistory?.() || []
+                    backupData.purchase_history = purchaseHistory.map(item => ({
+                        ...item,
+                        productName: item.productName || item.product_name || ''  // 确保 productName 不为空
+                    }))
+                    break
+
                 case 'expense':
                     backupData.expense = await businessDataService.getAllExpenseRecords()
                     break
@@ -258,16 +298,47 @@ class BackupService {
             }
 
             const response = await apiGetBackupList({ userId: parseInt(userId), ...params })
+            console.log('【BackupService】获取备份列表原始响应:', response)
 
             let backups = []
-            if (response && response.records) {
-                backups = response.records
-            } else if (Array.isArray(response)) {
+
+            // 如果 response 本身就是数组
+            if (Array.isArray(response)) {
                 backups = response
             }
+            // 如果 response 包含 data 字段且是数组
+            else if (response && response.data && Array.isArray(response.data)) {
+                backups = response.data
+            }
+            // 如果 response 是对象且包含备份数据
+            else if (response && typeof response === 'object') {
+                // 尝试获取可能的备份数组
+                backups = response.backups || response.list || []
+            }
 
-            // 按备份时间倒序排序
+            // 验证数据是否正确
+            if (backups.length > 0) {
+                console.log('第一条备份原始数据:', JSON.stringify(backups[0]))
+                console.log('备份的 id 字段值:', backups[0].id)
+                console.log('备份的 userId 字段值:', backups[0].userId)
+            }
+
+            // 解析 dataTypes
+            backups = backups.map(backup => {
+                const processedBackup = { ...backup }
+                if (processedBackup.dataTypes && typeof processedBackup.dataTypes === 'string') {
+                    try {
+                        processedBackup.dataTypes = JSON.parse(processedBackup.dataTypes)
+                    } catch (e) {
+                        processedBackup.dataTypes = []
+                    }
+                }
+                return processedBackup
+            })
+
             backups.sort((a, b) => new Date(b.backupTime) - new Date(a.backupTime))
+
+            console.log('最终备份列表:', backups.map(b => ({ id: b.id, userId: b.userId })))
 
             return backups
         } catch (error) {
@@ -282,20 +353,23 @@ class BackupService {
      * @returns {Promise<Object>} 恢复结果
      */
     async restoreBackup(backup) {
-        if (!backup || !backup.id) {
+        // 使用 id 作为备份标识
+        if (!backup || (!backup.id && !backup.backupId)) {
             throw new Error('无效的备份记录')
         }
 
-        try {
-            const response = await apiRestoreBackup(backup.id)
+        const backupIdentifier = backup.id || backup.backupId
 
-            if (response && response.code === 200) {
+        try {
+            const response = await apiRestoreBackup(backupIdentifier)
+
+            if (response) {
                 return {
                     success: true,
                     message: '数据恢复成功，请刷新页面'
                 }
             } else {
-                throw new Error(response.message || '恢复失败')
+                throw new Error(response?.message || '恢复失败')
             }
         } catch (error) {
             console.error('【BackupService】恢复备份失败:', error)
@@ -309,20 +383,22 @@ class BackupService {
      * @returns {Promise<Object>} 删除结果
      */
     async deleteBackup(backup) {
-        if (!backup || !backup.id) {
+        // 使用 id 作为备份标识
+        if (!backup || (!backup.id && !backup.backupId)) {
             throw new Error('无效的备份记录')
         }
 
-        try {
-            const response = await apiDeleteBackup(backup.id)
+        const backupIdentifier = backup.id || backup.backupId
 
-            if (response && response.code === 200) {
-                return {
-                    success: true,
-                    message: '备份删除成功'
-                }
-            } else {
-                throw new Error(response.message || '删除失败')
+        try {
+            const response = await apiDeleteBackup(backupIdentifier)
+            console.log('【BackupService】删除备份响应:', response)
+
+            // 只要没有抛出异常，就认为删除成功
+            // 因为后端返回 200 就表示操作成功
+            return {
+                success: true,
+                message: '备份删除成功'
             }
         } catch (error) {
             console.error('【BackupService】删除备份失败:', error)
@@ -341,8 +417,20 @@ class BackupService {
         }
         try {
             const response = await apiGetBackupCount(userId)
-            if (response) {
-                return response || 0
+            console.log('【BackupService】获取备份数量原始响应:', response)
+
+            // 根据返回结构解析
+            // 情况1: 直接返回数组
+            if (Array.isArray(response)) {
+                return response.length
+            }
+            // 情况2: 返回对象包含 data 数组
+            if (response && response.data && Array.isArray(response.data)) {
+                return response.data.length
+            }
+            // 情况3: 直接返回数字
+            if (typeof response === 'number') {
+                return response
             }
             return 0
         } catch (error) {
@@ -399,13 +487,16 @@ class BackupService {
             personal_saving: '个人存钱计划',
             customer: '客户管理',
             product: '商品管理',
+            category: '商品分类',
+            supplier: '供应商',
             inventory: '库存管理',
-            // ========== 新增 ==========
             expense: '支出记录',
             income: '收入记录',
             expense_repayment: '支出还款',
             income_collection: '收入收款',
-            customer_repayment: '客户还款'
+            customer_repayment: '客户还款',
+            purchase_order: '采购订单',
+            purchase_history: '采购历史'
         }
         return names[type] || type
     }

@@ -138,11 +138,43 @@
                 </div>
                 <div class="category-info">
                   <h4>商品管理</h4>
-                  <p>商品信息、分类、供应商</p>
+                  <p>商品信息</p>
                   <span class="data-count">约 {{ dataCounts.product }} 条</span>
                 </div>
                 <div class="category-check">
                   <i v-if="selectedDataTypes.includes('product')" class="fas fa-check-circle"></i>
+                  <i v-else class="far fa-circle"></i>
+                </div>
+              </div>
+
+              <!-- 商品分类 -->
+              <div class="category-card" :class="{ selected: selectedDataTypes.includes('category') }" @click="toggleDataType('category')">
+                <div class="category-icon category">
+                  <i class="fas fa-tags"></i>
+                </div>
+                <div class="category-info">
+                  <h4>商品分类</h4>
+                  <p>商品分类信息</p>
+                  <span class="data-count">约 {{ dataCounts.category }} 条</span>
+                </div>
+                <div class="category-check">
+                  <i v-if="selectedDataTypes.includes('category')" class="fas fa-check-circle"></i>
+                  <i v-else class="far fa-circle"></i>
+                </div>
+              </div>
+
+              <!-- 供应商 -->
+              <div class="category-card" :class="{ selected: selectedDataTypes.includes('supplier') }" @click="toggleDataType('supplier')">
+                <div class="category-icon supplier">
+                  <i class="fas fa-truck"></i>
+                </div>
+                <div class="category-info">
+                  <h4>供应商</h4>
+                  <p>供应商信息</p>
+                  <span class="data-count">约 {{ dataCounts.supplier }} 条</span>
+                </div>
+                <div class="category-check">
+                  <i v-if="selectedDataTypes.includes('supplier')" class="fas fa-check-circle"></i>
                   <i v-else class="far fa-circle"></i>
                 </div>
               </div>
@@ -154,11 +186,43 @@
                 </div>
                 <div class="category-info">
                   <h4>库存管理</h4>
-                  <p>库存记录、采购历史</p>
+                  <p>库存记录</p>
                   <span class="data-count">约 {{ dataCounts.inventory }} 条</span>
                 </div>
                 <div class="category-check">
                   <i v-if="selectedDataTypes.includes('inventory')" class="fas fa-check-circle"></i>
+                  <i v-else class="far fa-circle"></i>
+                </div>
+              </div>
+
+              <!-- 采购订单 -->
+              <div class="category-card" :class="{ selected: selectedDataTypes.includes('purchase_order') }" @click="toggleDataType('purchase_order')">
+                <div class="category-icon purchase_order">
+                  <i class="fas fa-shopping-cart"></i>
+                </div>
+                <div class="category-info">
+                  <h4>采购订单</h4>
+                  <p>采购订单记录</p>
+                  <span class="data-count">约 {{ dataCounts.purchase_order }} 条</span>
+                </div>
+                <div class="category-check">
+                  <i v-if="selectedDataTypes.includes('purchase_order')" class="fas fa-check-circle"></i>
+                  <i v-else class="far fa-circle"></i>
+                </div>
+              </div>
+
+              <!-- 采购历史 -->
+              <div class="category-card" :class="{ selected: selectedDataTypes.includes('purchase_history') }" @click="toggleDataType('purchase_history')">
+                <div class="category-icon purchase_history">
+                  <i class="fas fa-history"></i>
+                </div>
+                <div class="category-info">
+                  <h4>采购历史</h4>
+                  <p>采购历史记录</p>
+                  <span class="data-count">约 {{ dataCounts.purchase_history }} 条</span>
+                </div>
+                <div class="category-check">
+                  <i v-if="selectedDataTypes.includes('purchase_history')" class="fas fa-check-circle"></i>
                   <i v-else class="far fa-circle"></i>
                 </div>
               </div>
@@ -406,10 +470,11 @@ const backups = ref([])
 const restoringBackupId = ref(null)
 const backupCount = ref(0)
 
-// 选择的数据类型
+// 选择的数据类型（全选15种）
 const selectedDataTypes = ref([
   'personal', 'business', 'personal_saving',
-  'customer', 'product', 'inventory',
+  'customer', 'product', 'category', 'supplier',
+  'inventory', 'purchase_order', 'purchase_history',
   'expense', 'income', 'expense_repayment',
   'income_collection', 'customer_repayment'
 ])
@@ -421,7 +486,11 @@ const dataCounts = reactive({
   personal_saving: 0,
   customer: 0,
   product: 0,
+  category: 0,
+  supplier: 0,
   inventory: 0,
+  purchase_order: 0,
+  purchase_history: 0,
   expense: 0,
   income: 0,
   expense_repayment: 0,
@@ -618,6 +687,10 @@ const restoreBackup = async (backup) => {
 
 // 删除备份
 const deleteBackup = async (backup) => {
+  console.log('删除备份，完整的 backup 对象:', backup)
+  console.log('backup.id:', backup.id)
+  console.log('backup.backupId:', backup.backupId)
+
   const confirm = window.confirm(`确定要删除 ${formatDateTime(backup.backupTime)} 的备份吗？`)
   if (!confirm) return
 
@@ -920,7 +993,11 @@ watch(() => props.visible, async (newVal) => {
 .category-icon.personal_saving { background: #f39c12; }
 .category-icon.customer { background: #e74c3c; }
 .category-icon.product { background: #9b59b6; }
+.category-icon.category { background: #f39c12; }
+.category-icon.supplier { background: #16a085; }
 .category-icon.inventory { background: #1abc9c; }
+.category-icon.purchase_order { background: #e67e22; }
+.category-icon.purchase_history { background: #95a5a6; }
 .category-icon.expense { background: #e67e22; }
 .category-icon.income { background: #2ecc71; }
 .category-icon.expense_repayment { background: #f1c40f; }
@@ -1143,7 +1220,11 @@ watch(() => props.visible, async (newVal) => {
 .type-badge.personal_saving { background: #f39c12; }
 .type-badge.customer { background: #e74c3c; }
 .type-badge.product { background: #9b59b6; }
+.type-badge.category { background: #f39c12; }
+.type-badge.supplier { background: #16a085; }
 .type-badge.inventory { background: #1abc9c; }
+.type-badge.purchase_order { background: #e67e22; }
+.type-badge.purchase_history { background: #95a5a6; }
 .type-badge.expense { background: #e67e22; }
 .type-badge.income { background: #2ecc71; }
 .type-badge.expense_repayment { background: #f1c40f; }
