@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.lx.mapper.BackupCustomerRepaymentsMapper">
+
+    <!-- 批量插入客户还款记录备份数据 -->
+    <insert id="insertBatch" parameterType="list">
+        INSERT INTO backup_customer_repayments (
+        id, backup_id, original_id, user_id, customer_id, amount,
+        repayment_date, payment_method, note, created_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.id}, #{item.backupId}, #{item.originalId}, #{item.userId},
+            #{item.customerId}, #{item.amount}, #{item.repaymentDate},
+            #{item.paymentMethod}, #{item.note}, #{item.createdAt}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

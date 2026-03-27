@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.lx.mapper.BackupPurchaseOrdersMapper">
+
+    <!-- 批量插入采购订单备份数据 -->
+    <insert id="insertBatch" parameterType="list">
+        INSERT INTO backup_purchase_orders (
+        id, backup_id, original_id, user_id, order_no, supplier_id,
+        order_date, expected_date, receive_date, status, total_amount,
+        items, note, created_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.id}, #{item.backupId}, #{item.originalId}, #{item.userId},
+            #{item.orderNo}, #{item.supplierId}, #{item.orderDate},
+            #{item.expectedDate}, #{item.receiveDate}, #{item.status},
+            #{item.totalAmount}, #{item.items, typeHandler=com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler},
+            #{item.note}, #{item.createdAt}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.lx.mapper.BackupInventoryMapper">
+
+    <!-- 批量插入库存备份数据 -->
+    <insert id="insertBatch" parameterType="list">
+        INSERT INTO backup_inventory (
+        id, backup_id, original_id, user_id, product_id, product_name, category,
+        quantity, unit, cost_price, selling_price, supplier, location,
+        min_stock, expiry_date, status, note, created_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.id}, #{item.backupId}, #{item.originalId}, #{item.userId},
+            #{item.productId}, #{item.productName}, #{item.category},
+            #{item.quantity}, #{item.unit}, #{item.costPrice}, #{item.sellingPrice},
+            #{item.supplier}, #{item.location}, #{item.minStock}, #{item.expiryDate},
+            #{item.status}, #{item.note}, #{item.createdAt}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.lx.mapper.BackupRecordsMapper">
+
+    <!-- 批量插入备份记录（可选） -->
+    <insert id="insertBatch" parameterType="list">
+        INSERT INTO backup_records (
+        backup_id, user_id, backup_time, backup_type, data_size,
+        data_count, data_types, note, status, created_at, updated_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.backupId}, #{item.userId}, #{item.backupTime}, #{item.backupType},
+            #{item.dataSize}, #{item.dataCount}, #{item.dataTypes}, #{item.note},
+            #{item.status}, #{item.createdAt}, #{item.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

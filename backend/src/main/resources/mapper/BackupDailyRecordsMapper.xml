@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.lx.mapper.BackupDailyRecordsMapper">
+
+    <!-- 批量插入个人记账备份数据 -->
+    <insert id="insertBatch" parameterType="list">
+        INSERT INTO backup_daily_records (
+        id, backup_id, original_id, user_id, type, category, subtype, source,
+        amount, record_date, payment_method, supplier, note, business_type, created_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.id}, #{item.backupId}, #{item.originalId}, #{item.userId},
+            #{item.type}, #{item.category}, #{item.subtype}, #{item.source},
+            #{item.amount}, #{item.recordDate}, #{item.paymentMethod}, #{item.supplier},
+            #{item.note}, #{item.businessType}, #{item.createdAt}
+            )
+        </foreach>
+    </insert>
+
+</mapper>
