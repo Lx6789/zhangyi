@@ -45,6 +45,16 @@
             <span>选择要上传的数据类型，点击"开始备份"上传到云端</span>
           </div>
 
+          <!-- 备份数量限制提示 -->
+          <div v-if="backupCount >= 10" class="backup-limit-hint warning">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>您已有 {{ backupCount }} 个备份记录（最多保留10个）。继续备份将自动删除最早的备份记录。</span>
+          </div>
+          <div v-else-if="backupCount >= 8" class="backup-limit-hint">
+            <i class="fas fa-info-circle"></i>
+            <span>您的备份数量即将达到上限（{{ backupCount }}/10）。建议删除不需要的备份记录。</span>
+          </div>
+
           <!-- 数据选择区域 -->
           <div class="data-select-group">
             <div class="select-all-row">
@@ -329,6 +339,16 @@
             </div>
           </div>
 
+          <!-- 备份数量限制提示 -->
+          <div v-if="backups.length >= 10" class="backup-limit-hint warning">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>您已达到备份数量上限（10个）。继续备份将自动删除最早的备份记录。</span>
+          </div>
+          <div v-else-if="backups.length >= 8" class="backup-limit-hint">
+            <i class="fas fa-info-circle"></i>
+            <span>您的备份数量即将达到上限（{{ backups.length }}/10）。建议删除不需要的备份记录。</span>
+          </div>
+
           <div class="backup-timeline" v-if="backups.length > 0">
             <div v-for="backup in backups" :key="backup.id" class="timeline-item">
               <div class="timeline-dot"></div>
@@ -384,6 +404,7 @@ const uploadProgress = ref(0)
 const backupNote = ref('')
 const backups = ref([])
 const restoringBackupId = ref(null)
+const backupCount = ref(0)
 
 // 选择的数据类型
 const selectedDataTypes = ref([
@@ -477,12 +498,50 @@ const loadDataCounts = async () => {
   }
 }
 
+// 加载备份数量
+const loadBackupCount = async () => {
+  try {
+    backupCount.value = await backupService.getBackupCount()
+  } catch (error) {
+    console.error('加载备份数量失败:', error)
+    backupCount.value = 0
+  }
+}
+
 // 上传备份
 const uploadBackup = async () => {
   if (selectedDataTypes.value.length === 0) {
     notificationService.showNotification('请至少选择一种数据类型', 'warning')
     return
   }
+
+  // ==================== 检查备份数量限制 ====================
+  try {
+    const count = await backupService.getBackupCount()
+    backupCount.value = count
+
+    if (count >= 10) {
+      const confirm = window.confirm(
+          `您已有 ${count} 个备份记录（最多保留10个）。\n` +
+          `继续备份将自动删除最早的备份记录。\n\n` +
+          `是否继续备份？`
+      )
+
+      if (!confirm) {
+        return
+      }
+
+      notificationService.showNotification(
+          `备份数量已达上限，将自动删除最早的备份`,
+          'info'
+      )
+    }
+  } catch (error) {
+    console.error('检查备份数量失败:', error)
+    // 如果获取失败，仍然允许备份
+    notificationService.showNotification('检查备份数量失败，将直接备份', 'warning')
+  }
+  // ==================== 检查结束 ====================
 
   uploading.value = true
   uploadProgress.value = 0
@@ -503,8 +562,9 @@ const uploadBackup = async () => {
       uploadProgress.value = 0
     }, 1000)
 
-    // 刷新备份列表
+    // 刷新备份列表和数量
     await loadBackups()
+    await loadBackupCount()
 
     // 可选：切换到历史标签页
     if (activeTab.value === 'upload') {
@@ -565,6 +625,7 @@ const deleteBackup = async (backup) => {
     const result = await backupService.deleteBackup(backup)
     notificationService.showNotification(result.message, 'success')
     await loadBackups()
+    await loadBackupCount()
   } catch (error) {
     console.error('删除备份失败:', error)
     notificationService.showNotification('删除失败：' + (error.message || '网络错误'), 'error')
@@ -591,6 +652,7 @@ watch(() => props.visible, async (newVal) => {
     initService()
     await loadDataCounts()
     await loadBackups()
+    await loadBackupCount()
   }
 })
 </script>
@@ -736,6 +798,28 @@ watch(() => props.visible, async (newVal) => {
 
 .section-info i {
   font-size: 18px;
+}
+
+/* 备份数量限制提示 */
+.backup-limit-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #e8f4fd;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: #0066cc;
+}
+
+.backup-limit-hint.warning {
+  background: #fff3e0;
+  color: #e67e22;
+}
+
+.backup-limit-hint i {
+  font-size: 16px;
 }
 
 /* 数据选择区域 */

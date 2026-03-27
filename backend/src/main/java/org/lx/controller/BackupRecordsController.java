@@ -56,4 +56,19 @@ public class BackupRecordsController {
             return RespBean.error(RespCode.DATA_NOT_FOUND, "获取备份列表失败");
         }
     }
+
+    @ApiOperation(value = "获取用户备份数量")
+    @GetMapping("/count")
+    public RespBean getBackupCount(@RequestParam Long userId) {
+        try {
+            LambdaQueryWrapper<BackupRecords> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(BackupRecords::getUserId, userId)
+                    .eq(BackupRecords::getStatus, 1);
+            long count = backupRecordsService.count(wrapper);
+            return RespBean.success(RespCode.SUCCESS, "获取成功", count);
+        } catch (Exception e) {
+            log.error("获取备份数量失败", e);
+            return RespBean.error(RespCode.DATA_NOT_FOUND, "获取备份数量失败");
+        }
+    }
 }

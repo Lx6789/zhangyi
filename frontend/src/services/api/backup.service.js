@@ -2,7 +2,12 @@
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import businessDataService from '@/services/cache/business-cache.service.js'
 import personalSavingCache from '@/services/cache/personal-saving-cache.service.js'
-import { uploadBackup as apiUploadBackup, getBackupList as apiGetBackupList, restoreBackup as apiRestoreBackup, deleteBackup as apiDeleteBackup } from '@/api/backup.js'
+import { uploadBackup as apiUploadBackup,
+    getBackupList as apiGetBackupList,
+    restoreBackup as apiRestoreBackup,
+    deleteBackup as apiDeleteBackup,
+    getBackupCount as apiGetBackupCount
+} from '@/api/backup.js'
 
 /**
  * 云端备份服务
@@ -322,6 +327,27 @@ class BackupService {
         } catch (error) {
             console.error('【BackupService】删除备份失败:', error)
             throw error
+        }
+    }
+
+    /**
+     * 获取用户备份数量
+     * @returns {Promise<number>} 备份数量
+     */
+    async getBackupCount() {
+        const userId = this.getCurrentUserId()
+        if (!userId) {
+            return 0
+        }
+        try {
+            const response = await apiGetBackupCount(userId)
+            if (response) {
+                return response || 0
+            }
+            return 0
+        } catch (error) {
+            console.error('【BackupService】获取备份数量失败:', error)
+            return 0
         }
     }
 

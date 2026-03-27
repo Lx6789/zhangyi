@@ -120,3 +120,20 @@ export async function getBackupStats(userId) {
         throw error;
     }
 }
+
+/**
+ * 获取用户备份数量
+ * @param {number} userId - 用户ID
+ * @returns {Promise<Object>} 返回备份数量
+ */
+export async function getBackupCount(userId) {
+    console.log('【API】获取备份数量，用户ID:', userId);
+    try {
+        const response = await request.get(API.BACKUP.COUNT, { userId });
+        console.log('【API】获取备份数量响应:', response);
+        return response;
+    } catch (error) {
+        console.error('【API】获取备份数量失败:', error);
+        throw error;
+    }
+}

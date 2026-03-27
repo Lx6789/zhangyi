@@ -111,18 +111,13 @@ export const API = {
 
     // 云端备份相关
     BACKUP: {
-        // 上传备份
         UPLOAD: `/backup/upload`,
-        // 获取备份列表
         LIST: `/backup/list`,
-        // 获取备份详情
         DETAIL: `/backup/detail/{backupId}`,
-        // 恢复备份
         RESTORE: `/backup/restore/{backupId}`,
-        // 删除备份
         DELETE: `/backup/delete/{backupId}`,
-        // 获取备份统计信息
-        STATS: `/backup/stats`
+        STATS: `/backup/stats`,
+        COUNT: `/backup/count`
     }
 };
 

@@ -1,6 +1,7 @@
 package org.lx.service.impl;
 
 import com.alibaba.fastjson.JSON;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.lx.common.RespBean;
 import org.lx.common.RespCode;
@@ -49,6 +50,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             "income_collection",     // 收入收款记录
             "customer_repayment"     // 客户还款记录
     ));
+
+    // 备份数量限制
+    private static final int MAX_BACKUP_COUNT = 10;
 
     // 现有 Mapper
     @Autowired
@@ -133,16 +137,23 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             return RespBean.error(RespCode.DATA_NOT_FOUND, "备份数据内容不能为空");
         }
 
-        // 4. 统计并验证各类型数据
+        // 4. 检查备份数量限制
+        long backupCount = getBackupCount(backupDTO.getUserId());
+        if (backupCount >= MAX_BACKUP_COUNT) {
+            log.warn("用户 {} 备份数量已达到 {} 条，将删除最早的备份", backupDTO.getUserId(), backupCount);
+            deleteOldestBackup(backupDTO.getUserId());
+        }
+
+        // 5. 统计并验证各类型数据
         Map<String, Integer> dataCountMap = getDataCountMap(data, dataTypes);
 
-        // 5. 检查是否有实际数据
+        // 6. 检查是否有实际数据
         int totalCount = dataCountMap.values().stream().mapToInt(Integer::intValue).sum();
         if (totalCount == 0) {
             return RespBean.error(RespCode.DATA_NOT_FOUND, "所有数据类型都为空，无法备份");
         }
 
-        // 6. 记录日志，打印各类型数据统计
+        // 7. 记录日志，打印各类型数据统计
         log.info("备份数据统计: userId={}, 总条数={}", backupDTO.getUserId(), totalCount);
         for (Map.Entry<String, Integer> entry : dataCountMap.entrySet()) {
             if (entry.getValue() > 0) {
@@ -150,10 +161,10 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             }
         }
 
-        // 7. 生成备份ID
+        // 8. 生成备份ID
         String backupId = generateBackupId(backupDTO.getUserId(), backupDTO.getBackupTime());
 
-        // 8. 保存备份记录
+        // 9. 保存备份记录
         BackupRecords backupRecord = new BackupRecords();
         backupRecord.setBackupId(backupId);
         backupRecord.setUserId(backupDTO.getUserId());
@@ -172,7 +183,7 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             return RespBean.error(RespCode.DATA_NOT_FOUND, "保存备份记录失败");
         }
 
-        // 9. 保存各类型数据（只保存有数据的类型）
+        // 10. 保存各类型数据（只保存有数据的类型）
         try {
             saveBackupData(backupId, backupDTO.getUserId(), data, dataCountMap);
         } catch (Exception e) {
@@ -183,6 +194,119 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
         log.info("备份成功: backupId={}, userId={}, 总条数={}", backupId, backupDTO.getUserId(), totalCount);
 
         return RespBean.success(RespCode.SUCCESS, "备份成功", backupId);
+    }
+
+    /**
+     * 获取用户备份数量
+     */
+    private long getBackupCount(Long userId) {
+        LambdaQueryWrapper<BackupRecords> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(BackupRecords::getUserId, userId)
+                .eq(BackupRecords::getStatus, 1);
+        return this.count(wrapper);
+    }
+
+    /**
+     * 删除最早的备份
+     */
+    private void deleteOldestBackup(Long userId) {
+        // 获取最早的备份（按备份时间升序排列）
+        LambdaQueryWrapper<BackupRecords> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(BackupRecords::getUserId, userId)
+                .eq(BackupRecords::getStatus, 1)
+                .orderByAsc(BackupRecords::getBackupTime)
+                .last("limit 1");
+        BackupRecords oldestBackup = this.getOne(wrapper);
+
+        if (oldestBackup != null) {
+            log.info("开始删除最早的备份: backupId={}, backupTime={}",
+                    oldestBackup.getBackupId(), oldestBackup.getBackupTime());
+            deleteBackupAndRelatedData(oldestBackup);
+            log.info("最早备份删除成功: backupId={}", oldestBackup.getBackupId());
+        }
+    }
+
+    /**
+     * 删除备份及其所有关联数据
+     */
+    private void deleteBackupAndRelatedData(BackupRecords backupRecord) {
+        String backupId = backupRecord.getBackupId();
+
+        try {
+            // 删除各备份表中的数据
+            LambdaQueryWrapper<BackupDailyRecords> dailyWrapper = new LambdaQueryWrapper<>();
+            dailyWrapper.eq(BackupDailyRecords::getBackupId, backupId);
+            backupDailyRecordsMapper.delete(dailyWrapper);
+
+            LambdaQueryWrapper<BackupBusinessRecords> businessWrapper = new LambdaQueryWrapper<>();
+            businessWrapper.eq(BackupBusinessRecords::getBackupId, backupId);
+            backupBusinessRecordsMapper.delete(businessWrapper);
+
+            LambdaQueryWrapper<BackupPersonalSavings> savingWrapper = new LambdaQueryWrapper<>();
+            savingWrapper.eq(BackupPersonalSavings::getBackupId, backupId);
+            backupPersonalSavingsMapper.delete(savingWrapper);
+
+            LambdaQueryWrapper<BackupPersonalSavingRecords> savingRecordWrapper = new LambdaQueryWrapper<>();
+            savingRecordWrapper.eq(BackupPersonalSavingRecords::getBackupId, backupId);
+            backupPersonalSavingRecordsMapper.delete(savingRecordWrapper);
+
+            LambdaQueryWrapper<BackupCustomers> customerWrapper = new LambdaQueryWrapper<>();
+            customerWrapper.eq(BackupCustomers::getBackupId, backupId);
+            backupCustomersMapper.delete(customerWrapper);
+
+            LambdaQueryWrapper<BackupCustomerRepayments> customerRepaymentWrapper = new LambdaQueryWrapper<>();
+            customerRepaymentWrapper.eq(BackupCustomerRepayments::getBackupId, backupId);
+            backupCustomerRepaymentsMapper.delete(customerRepaymentWrapper);
+
+            LambdaQueryWrapper<BackupProducts> productWrapper = new LambdaQueryWrapper<>();
+            productWrapper.eq(BackupProducts::getBackupId, backupId);
+            backupProductsMapper.delete(productWrapper);
+
+            LambdaQueryWrapper<BackupProductCategories> categoryWrapper = new LambdaQueryWrapper<>();
+            categoryWrapper.eq(BackupProductCategories::getBackupId, backupId);
+            backupProductCategoriesMapper.delete(categoryWrapper);
+
+            LambdaQueryWrapper<BackupSuppliers> supplierWrapper = new LambdaQueryWrapper<>();
+            supplierWrapper.eq(BackupSuppliers::getBackupId, backupId);
+            backupSuppliersMapper.delete(supplierWrapper);
+
+            LambdaQueryWrapper<BackupInventory> inventoryWrapper = new LambdaQueryWrapper<>();
+            inventoryWrapper.eq(BackupInventory::getBackupId, backupId);
+            backupInventoryMapper.delete(inventoryWrapper);
+
+            LambdaQueryWrapper<BackupPurchaseOrders> orderWrapper = new LambdaQueryWrapper<>();
+            orderWrapper.eq(BackupPurchaseOrders::getBackupId, backupId);
+            backupPurchaseOrdersMapper.delete(orderWrapper);
+
+            LambdaQueryWrapper<BackupPurchaseHistory> historyWrapper = new LambdaQueryWrapper<>();
+            historyWrapper.eq(BackupPurchaseHistory::getBackupId, backupId);
+            backupPurchaseHistoryMapper.delete(historyWrapper);
+
+            LambdaQueryWrapper<BackupExpenseRecords> expenseWrapper = new LambdaQueryWrapper<>();
+            expenseWrapper.eq(BackupExpenseRecords::getBackupId, backupId);
+            backupExpenseRecordsMapper.delete(expenseWrapper);
+
+            LambdaQueryWrapper<BackupIncomeRecords> incomeWrapper = new LambdaQueryWrapper<>();
+            incomeWrapper.eq(BackupIncomeRecords::getBackupId, backupId);
+            backupIncomeRecordsMapper.delete(incomeWrapper);
+
+            LambdaQueryWrapper<BackupExpenseRepayments> expenseRepaymentWrapper = new LambdaQueryWrapper<>();
+            expenseRepaymentWrapper.eq(BackupExpenseRepayments::getBackupId, backupId);
+            backupExpenseRepaymentsMapper.delete(expenseRepaymentWrapper);
+
+            LambdaQueryWrapper<BackupIncomeCollections> incomeCollectionWrapper = new LambdaQueryWrapper<>();
+            incomeCollectionWrapper.eq(BackupIncomeCollections::getBackupId, backupId);
+            backupIncomeCollectionsMapper.delete(incomeCollectionWrapper);
+
+            // 最后删除备份主记录
+            this.removeById(backupRecord.getId());
+
+            log.info("备份及其关联数据删除成功: backupId={}", backupId);
+
+        } catch (Exception e) {
+            log.error("删除备份及其关联数据失败: backupId={}", backupId, e);
+            throw new RuntimeException("删除旧备份失败: " + e.getMessage());
+        }
     }
 
     /**
@@ -369,7 +493,6 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             record.setBackupId(backupId);
             record.setUserId(userId);
             record.setCreatedAt(LocalDateTime.now());
-            // 如果 recordDate 为空，设置为当前日期
             if (record.getRecordDate() == null) {
                 record.setRecordDate(LocalDate.now());
             }
@@ -398,7 +521,6 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             record.setBackupId(backupId);
             record.setUserId(userId);
             record.setCreatedAt(LocalDateTime.now());
-            // 如果 recordDate 为空，设置为当前日期
             if (record.getRecordDate() == null) {
                 record.setRecordDate(LocalDate.now());
             }
@@ -602,6 +724,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             record.setBackupId(backupId);
             record.setUserId(userId);
             record.setCreatedAt(LocalDateTime.now());
+            if (record.getDate() == null) {
+                record.setDate(LocalDate.now());
+            }
         });
         int result = backupExpenseRecordsMapper.insertBatch(records);
         if (result != records.size()) {
@@ -624,6 +749,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             record.setBackupId(backupId);
             record.setUserId(userId);
             record.setCreatedAt(LocalDateTime.now());
+            if (record.getDate() == null) {
+                record.setDate(LocalDate.now());
+            }
         });
         int result = backupIncomeRecordsMapper.insertBatch(records);
         if (result != records.size()) {
@@ -646,6 +774,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             repayment.setBackupId(backupId);
             repayment.setUserId(userId);
             repayment.setCreatedAt(LocalDateTime.now());
+            if (repayment.getRepaymentDate() == null) {
+                repayment.setRepaymentDate(LocalDate.now());
+            }
         });
         int result = backupExpenseRepaymentsMapper.insertBatch(repayments);
         if (result != repayments.size()) {
@@ -668,6 +799,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             collection.setBackupId(backupId);
             collection.setUserId(userId);
             collection.setCreatedAt(LocalDateTime.now());
+            if (collection.getCollectionDate() == null) {
+                collection.setCollectionDate(LocalDate.now());
+            }
         });
         int result = backupIncomeCollectionsMapper.insertBatch(collections);
         if (result != collections.size()) {
@@ -690,6 +824,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             repayment.setBackupId(backupId);
             repayment.setUserId(userId);
             repayment.setCreatedAt(LocalDateTime.now());
+            if (repayment.getRepaymentDate() == null) {
+                repayment.setRepaymentDate(LocalDate.now());
+            }
         });
         int result = backupCustomerRepaymentsMapper.insertBatch(repayments);
         if (result != repayments.size()) {
