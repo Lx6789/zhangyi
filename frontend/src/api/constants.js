@@ -106,8 +106,24 @@ export const API = {
             RECORDS: `/savings/group/records`,
             MEMBER_RECORDS: `/savings/group/{planId}/member/{memberId}/records`,
             DEPOSIT_RECORDS: `/savings/group/{planId}/deposit-records`  // 计划的所有存款记录
-        }
+        },
     },
+
+    // 云端备份相关
+    BACKUP: {
+        // 上传备份
+        UPLOAD: `/backup/upload`,
+        // 获取备份列表
+        LIST: `/backup/list`,
+        // 获取备份详情
+        DETAIL: `/backup/detail/{backupId}`,
+        // 恢复备份
+        RESTORE: `/backup/restore/{backupId}`,
+        // 删除备份
+        DELETE: `/backup/delete/{backupId}`,
+        // 获取备份统计信息
+        STATS: `/backup/stats`
+    }
 };
 
 // 扁平化导出也需要添加
@@ -164,7 +180,15 @@ export const API_FLAT = {
     FRIEND_REQUEST_SENT: `/friends/request/sent`,
     FRIEND_REQUEST_ACCEPT: `/friends/request/accept/{requestId}`,
     FRIEND_REQUEST_REJECT: `/friends/request/reject/{requestId}`,
-    FRIEND_DELETE: `/friends/{friendId}`
+    FRIEND_DELETE: `/friends/{friendId}`,
+
+    // 备份相关
+    BACKUP_UPLOAD: `/backup/upload`,
+    BACKUP_LIST: `/backup/list`,
+    BACKUP_DETAIL: `/backup/detail/{backupId}`,
+    BACKUP_RESTORE: `/backup/restore/{backupId}`,
+    BACKUP_DELETE: `/backup/delete/{backupId}`,
+    BACKUP_STATS: `/backup/stats`
 };
 
 export default API;

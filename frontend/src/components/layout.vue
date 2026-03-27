@@ -120,6 +120,14 @@
             </a>
           </li>
 
+          <!-- 云端备份 -->
+          <li>
+            <a href="#" @click.prevent="showCloudBackupModal">
+              <i class="fas fa-cloud-upload-alt"></i>
+              <span>云端备份</span>
+            </a>
+          </li>
+
           <!-- 分隔线 -->
           <li class="sidebar-divider"></li>
 
@@ -140,6 +148,7 @@
     <AnalysisModal v-model:visible="analysisModalVisible" @close="analysisModalVisible = false" />
     <FriendsModal v-model:visible="friendsModalVisible" @close="friendsModalVisible = false" />
     <SavingRecordsModal v-model:visible="savingRecordsModalVisible" @close="savingRecordsModalVisible = false" />
+    <CloudBackupModal v-model:visible="cloudBackupModalVisible" @close="cloudBackupModalVisible = false" />
   </div>
 </template>
 
@@ -152,6 +161,7 @@ import notificationService from "@/services/utils/notification.service.js";
 import friendsCacheService from '@/services/cache/friends-cache.service.js'
 import indexedDBService from '@/services/db/indexed-db.service.js'
 import SavingRecordsModal from '@/components/sidebar/SavingRecordsModal.vue'
+import CloudBackupModal from '@/components/sidebar/CloudBackupModal.vue'
 
 // 导入弹框组件
 import HistoryModal from '@/components/sidebar/HistoryModal.vue'
@@ -168,6 +178,7 @@ const dataTransferModalVisible = ref(false)
 const analysisModalVisible = ref(false)
 const friendsModalVisible = ref(false)
 const savingRecordsModalVisible = ref(false)
+const cloudBackupModalVisible = ref(false)
 
 // layout.vue
 onMounted(async () => {
@@ -192,11 +203,6 @@ onMounted(async () => {
       console.error('IndexedDB 重新初始化失败:', error)
     }
   }
-
-  const link = document.createElement('link')
-  link.rel = 'stylesheet'
-  link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
-  document.head.appendChild(link)
 })
 
 const toggleSidebar = () => {
@@ -233,6 +239,12 @@ const showSavingRecordsModal = () => {
   savingRecordsModalVisible.value = true
 }
 
+// 显示云端备份弹框
+const showCloudBackupModal = () => {
+  closeSidebar()
+  cloudBackupModalVisible.value = true
+}
+
 const handleLogout = async () => {
   try {
     const confirmLogout = confirm('确定要退出登录吗？')
@@ -249,7 +261,7 @@ const handleLogout = async () => {
 </script>
 
 <style scoped>
-/* 样式保持不变，移除原来的历史记录模态框样式 */
+/* 样式保持不变 */
 .layout {
   height: 100vh;
   display: flex;

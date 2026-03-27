@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.lx.mapper.BackupIncomeCollectionsMapper">
+
+    <!-- 批量插入收入收款记录备份数据 -->
+    <insert id="insertBatch" parameterType="list">
+        INSERT INTO backup_income_collections (
+        id, backup_id, original_id, user_id, income_record_id, amount,
+        collection_date, payment_method, before_amount, after_amount, note, created_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.id}, #{item.backupId}, #{item.originalId}, #{item.userId},
+            #{item.incomeRecordId}, #{item.amount}, #{item.collectionDate},
+            #{item.paymentMethod}, #{item.beforeAmount}, #{item.afterAmount},
+            #{item.note}, #{item.createdAt}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

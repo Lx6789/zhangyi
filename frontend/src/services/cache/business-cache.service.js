@@ -1634,6 +1634,34 @@ class BusinessCacheService {
         }
     }
 
+    /**
+     * 获取所有支出还款记录
+     */
+    async getAllExpenseRepayments() {
+        const repayments = await indexedDBService.getAll('expense_repayments')
+        const userId = this.getCurrentUserId()
+        return repayments.filter(r => r.userId === userId)
+    }
+
+    /**
+     * 获取所有收入收款记录
+     */
+    async getAllIncomeCollections() {
+        const collections = await indexedDBService.getAll('income_collections')
+        const userId = this.getCurrentUserId()
+        return collections.filter(c => c.userId === userId)
+    }
+
+    /**
+     * 获取所有客户还款记录
+     */
+    async getAllCustomerRepayments() {
+        const repayments = await indexedDBService.getAll('customer_repayments')
+        const userId = this.getCurrentUserId()
+        return repayments.filter(r => r.userId === userId)
+    }
+
+
     // ==================== 辅助方法 ====================
 
     /**
