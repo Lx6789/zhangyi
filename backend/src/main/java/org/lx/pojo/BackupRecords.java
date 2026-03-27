@@ -1,10 +1,8 @@
 package org.lx.pojo;
 
-import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.*;
+
 import java.time.LocalDateTime;
-import com.baomidou.mybatisplus.annotation.TableField;
 import java.io.Serializable;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
@@ -66,6 +64,10 @@ public class BackupRecords implements Serializable {
 
     @ApiModelProperty(value = "状态: 1-有效, 0-已删除")
     private Integer status;
+
+    @Version  // MyBatis-Plus 乐观锁注解
+    @TableField(fill = FieldFill.INSERT)  // 插入时自动填充
+    private Integer version;
 
     @ApiModelProperty(value = "创建时间")
     @TableField("created_at")
