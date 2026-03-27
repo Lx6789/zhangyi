@@ -1,19 +1,22 @@
 package org.lx.controller;
 
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiModelProperty;
 import io.swagger.annotations.ApiOperation;
 import lombok.extern.slf4j.Slf4j;
 import org.lx.common.RespBean;
+import org.lx.common.RespCode;
 import org.lx.pojo.BackupRecords;
 import org.lx.pojo.dto.BackupDTO;
 import org.lx.service.IBackupRecordsService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.*;
 
-import org.springframework.web.bind.annotation.RestController;
+import javax.servlet.http.HttpServletRequest;
+import java.security.Principal;
+import java.util.List;
 
 /**
  * <p>
@@ -39,4 +42,18 @@ public class BackupRecordsController {
         return backupRecordsService.upload(backupDTO);
     }
 
+    @ApiModelProperty(value = "获取备份列表信息")
+    @GetMapping("/list")
+    public RespBean list(@RequestParam Integer userId) {
+        try {
+            LambdaQueryWrapper<BackupRecords> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(BackupRecords::getUserId, userId);
+            List<BackupRecords> list = backupRecordsService.list(queryWrapper);
+
+            return RespBean.success(RespCode.SUCCESS, "查询成功", list);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return RespBean.error(RespCode.DATA_NOT_FOUND, "获取备份列表失败");
+        }
+    }
 }
