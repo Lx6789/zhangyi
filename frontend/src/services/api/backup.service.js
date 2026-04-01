@@ -146,14 +146,11 @@ class BackupService {
                     break
 
                 case 'personal_saving':
+                    // 获取所有个人存钱计划（已经包含 records 数组）
                     const personalSavings = await personalSavingCache.getAllPlans(userId)
+                    // 直接保存整个计划对象，因为每个计划已经包含了 records 数组
                     backupData.personal_savings = personalSavings || []
-                    for (const plan of personalSavings) {
-                        const records = await personalSavingCache.getDepositRecords(userId, plan.id, { page: 1, size: 9999 })
-                        if (records.records && records.records.length > 0) {
-                            backupData[`personal_saving_${plan.id}_records`] = records.records
-                        }
-                    }
+                    console.log('【BackupService】收集个人存钱计划:', backupData.personal_savings.length, '条，已包含存钱记录')
                     break
 
                 case 'customer':
@@ -183,14 +180,13 @@ class BackupService {
                         ...item,
                         totalAmount: item.totalAmount || 0
                     }))
-                    backupData.purchase_orders = await businessDataService.getAllPurchaseOrders?.() || []
                     break
 
                 case 'purchase_history':
                     const purchaseHistory = await businessDataService.getAllPurchaseHistory?.() || []
                     backupData.purchase_history = purchaseHistory.map(item => ({
                         ...item,
-                        productName: item.productName || item.product_name || ''  // 确保 productName 不为空
+                        productName: item.productName || item.product_name || ''
                     }))
                     break
 
@@ -480,44 +476,25 @@ class BackupService {
             console.log(`✅ 恢复生意记账数据: ${businessRecords.length} 条`)
         }
 
-        // 3. 写入个人存钱计划
-        if (backupData.personalSavings && backupData.personalSavings.length > 0) {
-            for (const plan of backupData.personalSavings) {
-                // 确保计划有正确的 userId
+        // 3. 写入个人存钱计划（包含存钱记录）
+        if (backupData.personal_savings && backupData.personal_savings.length > 0) {
+            for (const plan of backupData.personal_savings) {
+                // 确保计划有正确的 userId，并且保留原有的 records 数组
                 const planWithUserId = {
                     ...plan,
                     userId: userId,
-                    records: []  // 清空记录，后面单独恢复
+                    // 保留原有的 records 数组（已经在计划数据中）
+                    // 如果 records 不存在，初始化为空数组
+                    records: plan.records || []
                 }
+
+                // 直接创建计划，数据中已经包含存钱记录
                 await personalSavingCache.createPlan(userId, planWithUserId)
             }
-            console.log(`✅ 恢复个人存钱计划: ${backupData.personalSavings.length} 条`)
+            console.log(`✅ 恢复个人存钱计划: ${backupData.personal_savings.length} 条，包含存钱记录`)
         }
 
-        // 4. 写入个人存钱记录
-        if (backupData.personalSavingRecords && Object.keys(backupData.personalSavingRecords).length > 0) {
-            let totalRecords = 0
-            for (const [planId, records] of Object.entries(backupData.personalSavingRecords)) {
-                if (records && records.length > 0) {
-                    for (const record of records) {
-                        // 将存钱记录添加到对应的计划中
-                        const plan = await personalSavingCache.getPlanById(userId, planId)
-                        if (plan) {
-                            if (!plan.records) plan.records = []
-                            plan.records.push(record)
-                            plan.currentAmount = (plan.currentAmount || 0) + record.amount
-                            plan.progress = (plan.currentAmount / plan.targetAmount) * 100
-                            plan.completed = plan.currentAmount >= plan.targetAmount
-                            await personalSavingCache.updatePlan(userId, planId, plan)
-                            totalRecords++
-                        }
-                    }
-                }
-            }
-            console.log(`✅ 恢复个人存钱记录: ${totalRecords} 条`)
-        }
-
-        // 5. 写入客户数据
+        // 4. 写入客户数据
         if (backupData.customers && backupData.customers.length > 0) {
             const customersWithUserId = backupData.customers.map(customer => ({
                 ...customer,
@@ -527,19 +504,19 @@ class BackupService {
             console.log(`✅ 恢复客户数据: ${customersWithUserId.length} 条`)
         }
 
-        // 6. 写入客户还款记录
-        if (backupData.customerRepayments && backupData.customerRepayments.length > 0) {
-            for (const repayment of backupData.customerRepayments) {
+        // 5. 写入客户还款记录
+        if (backupData.customer_repayments && backupData.customer_repayments.length > 0) {
+            for (const repayment of backupData.customer_repayments) {
                 const repaymentWithUserId = {
                     ...repayment,
                     userId: userId
                 }
                 await businessDataService.addCustomerRepayment(repaymentWithUserId)
             }
-            console.log(`✅ 恢复客户还款记录: ${backupData.customerRepayments.length} 条`)
+            console.log(`✅ 恢复客户还款记录: ${backupData.customer_repayments.length} 条`)
         }
 
-        // 7. 写入商品数据
+        // 6. 写入商品数据
         if (backupData.products && backupData.products.length > 0) {
             const productsWithUserId = backupData.products.map(product => ({
                 ...product,
@@ -549,7 +526,7 @@ class BackupService {
             console.log(`✅ 恢复商品数据: ${productsWithUserId.length} 条`)
         }
 
-        // 8. 写入商品分类
+        // 7. 写入商品分类
         if (backupData.categories && backupData.categories.length > 0) {
             const categoriesWithUserId = backupData.categories.map(category => ({
                 ...category,
@@ -560,7 +537,7 @@ class BackupService {
             console.log(`✅ 恢复商品分类: ${categoriesWithUserId.length} 条`)
         }
 
-        // 9. 写入供应商数据
+        // 8. 写入供应商数据
         if (backupData.suppliers && backupData.suppliers.length > 0) {
             for (const supplier of backupData.suppliers) {
                 const supplierWithUserId = {
@@ -572,7 +549,7 @@ class BackupService {
             console.log(`✅ 恢复供应商数据: ${backupData.suppliers.length} 条`)
         }
 
-        // 10. 写入库存数据
+        // 9. 写入库存数据
         if (backupData.inventory && backupData.inventory.length > 0) {
             const inventoryWithUserId = backupData.inventory.map(item => ({
                 ...item,
@@ -582,31 +559,31 @@ class BackupService {
             console.log(`✅ 恢复库存数据: ${inventoryWithUserId.length} 条`)
         }
 
-        // 11. 写入采购订单
-        if (backupData.purchaseOrders && backupData.purchaseOrders.length > 0) {
-            for (const order of backupData.purchaseOrders) {
+        // 10. 写入采购订单
+        if (backupData.purchase_orders && backupData.purchase_orders.length > 0) {
+            for (const order of backupData.purchase_orders) {
                 const orderWithUserId = {
                     ...order,
                     userId: userId
                 }
                 await businessDataService.addPurchaseOrder(orderWithUserId)
             }
-            console.log(`✅ 恢复采购订单: ${backupData.purchaseOrders.length} 条`)
+            console.log(`✅ 恢复采购订单: ${backupData.purchase_orders.length} 条`)
         }
 
-        // 12. 写入采购历史
-        if (backupData.purchaseHistory && backupData.purchaseHistory.length > 0) {
-            for (const history of backupData.purchaseHistory) {
+        // 11. 写入采购历史
+        if (backupData.purchase_history && backupData.purchase_history.length > 0) {
+            for (const history of backupData.purchase_history) {
                 const historyWithUserId = {
                     ...history,
                     userId: userId
                 }
                 await businessDataService.addPurchaseHistory(historyWithUserId)
             }
-            console.log(`✅ 恢复采购历史: ${backupData.purchaseHistory.length} 条`)
+            console.log(`✅ 恢复采购历史: ${backupData.purchase_history.length} 条`)
         }
 
-        // 13. 写入支出记录
+        // 12. 写入支出记录
         if (backupData.expense && backupData.expense.length > 0) {
             const expenseWithUserId = backupData.expense.map(record => ({
                 ...record,
@@ -617,19 +594,19 @@ class BackupService {
             console.log(`✅ 恢复支出记录: ${expenseWithUserId.length} 条`)
         }
 
-        // 14. 写入支出还款记录
-        if (backupData.expenseRepayments && backupData.expenseRepayments.length > 0) {
-            for (const repayment of backupData.expenseRepayments) {
+        // 13. 写入支出还款记录
+        if (backupData.expense_repayments && backupData.expense_repayments.length > 0) {
+            for (const repayment of backupData.expense_repayments) {
                 const repaymentWithUserId = {
                     ...repayment,
                     userId: userId
                 }
                 await businessDataService.addExpenseRepayment(repaymentWithUserId)
             }
-            console.log(`✅ 恢复支出还款记录: ${backupData.expenseRepayments.length} 条`)
+            console.log(`✅ 恢复支出还款记录: ${backupData.expense_repayments.length} 条`)
         }
 
-        // 15. 写入收入记录
+        // 14. 写入收入记录
         if (backupData.income && backupData.income.length > 0) {
             const incomeWithUserId = backupData.income.map(record => ({
                 ...record,
@@ -640,16 +617,16 @@ class BackupService {
             console.log(`✅ 恢复收入记录: ${incomeWithUserId.length} 条`)
         }
 
-        // 16. 写入收入收款记录
-        if (backupData.incomeCollections && backupData.incomeCollections.length > 0) {
-            for (const collection of backupData.incomeCollections) {
+        // 15. 写入收入收款记录
+        if (backupData.income_collections && backupData.income_collections.length > 0) {
+            for (const collection of backupData.income_collections) {
                 const collectionWithUserId = {
                     ...collection,
                     userId: userId
                 }
                 await businessDataService.addIncomeCollection(collectionWithUserId)
             }
-            console.log(`✅ 恢复收入收款记录: ${backupData.incomeCollections.length} 条`)
+            console.log(`✅ 恢复收入收款记录: ${backupData.income_collections.length} 条`)
         }
 
         console.log('【BackupService】所有备份数据写入完成')

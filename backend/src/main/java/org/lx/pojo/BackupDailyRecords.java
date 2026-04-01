@@ -76,6 +76,9 @@ public class BackupDailyRecords implements Serializable {
     @ApiModelProperty(value = "备注")
     private String note;
 
+    @ApiModelProperty(value = "记录日期（前端格式）")
+    private String date;
+
     @ApiModelProperty(value = "业务类型: personal-个人, business-生意")
     @TableField("business_type")
     private String businessType;

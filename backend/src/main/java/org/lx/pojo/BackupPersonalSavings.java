@@ -8,6 +8,9 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableField;
 import java.io.Serializable;
+import java.util.List;
+import java.util.Map;
+
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
@@ -83,5 +86,7 @@ public class BackupPersonalSavings implements Serializable {
     @TableField("created_at")
     private LocalDateTime createdAt;
 
-
+    @ApiModelProperty(value = "个人存钱记录")
+    @TableField(exist = false)
+    private List<BackupPersonalSavingRecords> records;
 }

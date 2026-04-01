@@ -85,6 +85,9 @@ class PersonalSavingCacheService {
             const now = this.getCurrentTimestamp()
             const planId = this.generateId()
 
+            // 确保 deadline 是有效的日期字符串
+            const deadline = planData.deadline ? new Date(planData.deadline).toISOString().split('T')[0] : planData.deadline
+
             const newPlan = {
                 id: planId,
                 userId: userId,
@@ -92,22 +95,22 @@ class PersonalSavingCacheService {
                 reason: planData.reason || '',
                 targetAmount: planData.targetAmount,
                 currentAmount: planData.currentAmount || 0,
-                deadline: planData.deadline,
+                deadline: deadline,
                 type: planData.type || '日常储蓄',
                 icon: planData.icon || this.getIconByType(planData.type),
                 color: planData.color || this.getColorByType(planData.type),
-                status: 'active',
+                status: planData.status || 'active',
                 progress: this.calculateProgress(planData.currentAmount || 0, planData.targetAmount),
                 completed: (planData.currentAmount || 0) >= planData.targetAmount,
-                createdAt: now,
-                updatedAt: now,
-                deleted: 0,
-                deletedAt: null,
-                records: [] // 存钱记录
+                createdAt: planData.createdAt || now,        // 保留原创建时间
+                updatedAt: planData.updatedAt || now,        // 保留原更新时间
+                deleted: planData.deleted !== undefined ? planData.deleted : 0,  // 保留原 deleted 值
+                deletedAt: planData.deletedAt || null,
+                records: planData.records || [] // 保留存钱记录
             }
 
             await indexedDBService.add(this.storeName, newPlan)
-            console.log('【PersonalSavingCache】创建计划成功:', planId)
+            console.log('【PersonalSavingCache】创建计划成功:', planId, '创建时间:', newPlan.createdAt)
             return { success: true, data: newPlan }
         } catch (error) {
             console.error('【PersonalSavingCache】创建计划失败:', error)
@@ -134,22 +137,34 @@ class PersonalSavingCacheService {
                 return { success: false, error: '无权修改此计划' }
             }
 
+            // 确保 deadline 是有效的日期字符串
+            const deadline = planData.deadline ? new Date(planData.deadline).toISOString().split('T')[0] : planData.deadline
+
+            // 计算新的进度和完成状态
+            const newCurrentAmount = planData.currentAmount !== undefined ? planData.currentAmount : existingPlan.currentAmount
+            const newTargetAmount = planData.targetAmount !== undefined ? planData.targetAmount : existingPlan.targetAmount
+            const newProgress = this.calculateProgress(newCurrentAmount, newTargetAmount)
+            const newCompleted = newCurrentAmount >= newTargetAmount
+
             const updatedPlan = {
                 ...existingPlan,
-                ...planData,
-                id: planId,
-                userId: userId,
+                name: planData.name !== undefined ? planData.name : existingPlan.name,
+                reason: planData.reason !== undefined ? planData.reason : existingPlan.reason,
+                targetAmount: newTargetAmount,
+                currentAmount: newCurrentAmount,
+                deadline: deadline !== undefined ? deadline : existingPlan.deadline,
+                type: planData.type !== undefined ? planData.type : existingPlan.type,
+                icon: planData.icon !== undefined ? planData.icon : this.getIconByType(planData.type || existingPlan.type),
+                color: planData.color !== undefined ? planData.color : this.getColorByType(planData.type || existingPlan.type),
                 updatedAt: this.getCurrentTimestamp(),
-                progress: this.calculateProgress(
-                    planData.currentAmount !== undefined ? planData.currentAmount : existingPlan.currentAmount,
-                    planData.targetAmount !== undefined ? planData.targetAmount : existingPlan.targetAmount
-                ),
-                completed: (planData.currentAmount !== undefined ? planData.currentAmount : existingPlan.currentAmount) >=
-                    (planData.targetAmount !== undefined ? planData.targetAmount : existingPlan.targetAmount)
+                progress: newProgress,
+                completed: newCompleted,
+                deleted: planData.deleted !== undefined ? planData.deleted : existingPlan.deleted,  // 保留 deleted 值
+                deletedAt: planData.deletedAt !== undefined ? planData.deletedAt : existingPlan.deletedAt
             }
 
             await indexedDBService.update(this.storeName, updatedPlan)
-            console.log('【PersonalSavingCache】更新计划成功:', planId)
+            console.log('【PersonalSavingCache】更新计划成功:', planId, '更新时间:', updatedPlan.updatedAt)
             return { success: true, data: updatedPlan }
         } catch (error) {
             console.error('【PersonalSavingCache】更新计划失败:', error)
@@ -179,6 +194,7 @@ class PersonalSavingCacheService {
             existingPlan.deleted = 1
             existingPlan.deletedAt = this.getCurrentTimestamp()
             existingPlan.status = 'deleted'
+            existingPlan.updatedAt = this.getCurrentTimestamp()
 
             await indexedDBService.update(this.storeName, existingPlan)
             console.log('【PersonalSavingCache】删除计划成功:', planId)
@@ -243,20 +259,25 @@ class PersonalSavingCacheService {
                 }
             }
 
+            // 获取当前时间戳
+            const now = this.getCurrentTimestamp()
+            const nowDate = new Date()
+
             // 创建存钱记录
             const record = {
                 id: this.generateId(),
                 planId: planId,
                 amount: amount,
                 note: depositData.note || '',
-                depositTime: this.getCurrentTimestamp(),
+                depositDate: nowDate.toISOString().split('T')[0],    // 存钱日期（YYYY-MM-DD）
                 beforeAmount: plan.currentAmount || 0,
-                afterAmount: newAmount
+                afterAmount: newAmount,
+                createdAt: now,                                       // 记录创建时间
             }
 
             // 更新计划
             plan.currentAmount = newAmount
-            plan.updatedAt = this.getCurrentTimestamp()
+            plan.updatedAt = now                                      // 更新计划的更新时间
             plan.progress = this.calculateProgress(newAmount, plan.targetAmount)
             plan.completed = newAmount >= plan.targetAmount
 
@@ -267,7 +288,13 @@ class PersonalSavingCacheService {
             plan.records.unshift(record) // 最新的记录放在前面
 
             await indexedDBService.update(this.storeName, plan)
-            console.log('【PersonalSavingCache】存钱成功:', { planId, amount, newAmount })
+            console.log('【PersonalSavingCache】存钱成功:', {
+                planId,
+                amount,
+                newAmount,
+                depositTime: now,
+                depositDate: record.depositDate
+            })
 
             return {
                 success: true,
@@ -322,6 +349,77 @@ class PersonalSavingCacheService {
     }
 
     /**
+     * 按日期范围获取存钱记录
+     * @param {number} userId - 用户ID
+     * @param {string} planId - 计划ID
+     * @param {string} startDate - 开始日期 (YYYY-MM-DD)
+     * @param {string} endDate - 结束日期 (YYYY-MM-DD)
+     * @returns {Promise<Array>} 存钱记录列表
+     */
+    async getDepositRecordsByDateRange(userId, planId, startDate, endDate) {
+        try {
+            const plan = await indexedDBService.get(this.storeName, planId)
+
+            if (!plan || plan.userId !== userId || plan.deleted === 1) {
+                return []
+            }
+
+            const records = plan.records || []
+
+            // 按日期范围过滤
+            const filteredRecords = records.filter(record => {
+                const recordDate = record.depositDate || record.createdAt?.split('T')[0]
+                if (!recordDate) return false
+                return recordDate >= startDate && recordDate <= endDate
+            })
+
+            return filteredRecords
+        } catch (error) {
+            console.error('【PersonalSavingCache】按日期范围获取存钱记录失败:', error)
+            return []
+        }
+    }
+
+    /**
+     * 按月份获取存钱统计
+     * @param {number} userId - 用户ID
+     * @param {string} planId - 计划ID
+     * @param {number} year - 年份
+     * @param {number} month - 月份 (1-12)
+     * @returns {Promise<Object>} 统计信息 { totalAmount, recordCount, records }
+     */
+    async getDepositStatsByMonth(userId, planId, year, month) {
+        try {
+            const plan = await indexedDBService.get(this.storeName, planId)
+
+            if (!plan || plan.userId !== userId || plan.deleted === 1) {
+                return { totalAmount: 0, recordCount: 0, records: [] }
+            }
+
+            const records = plan.records || []
+
+            // 按年月过滤（从 depositDate 或 createdAt 中提取）
+            const filteredRecords = records.filter(record => {
+                const dateStr = record.depositDate || record.createdAt?.split('T')[0]
+                if (!dateStr) return false
+                const [recordYear, recordMonth] = dateStr.split('-')
+                return parseInt(recordYear) === year && parseInt(recordMonth) === month
+            })
+
+            const totalAmount = filteredRecords.reduce((sum, record) => sum + record.amount, 0)
+
+            return {
+                totalAmount: totalAmount,
+                recordCount: filteredRecords.length,
+                records: filteredRecords
+            }
+        } catch (error) {
+            console.error('【PersonalSavingCache】按月份获取存钱统计失败:', error)
+            return { totalAmount: 0, recordCount: 0, records: [] }
+        }
+    }
+
+    /**
      * 清除用户的所有个人计划
      * @param {number} userId - 用户ID
      * @returns {Promise<Object>} 清除结果
@@ -356,13 +454,26 @@ class PersonalSavingCacheService {
             const totalTarget = activePlans.reduce((sum, p) => sum + p.targetAmount, 0)
             const totalCurrent = activePlans.reduce((sum, p) => sum + p.currentAmount, 0)
 
+            // 计算总存钱记录数
+            const totalRecords = activePlans.reduce((sum, p) => sum + (p.records?.length || 0), 0)
+
+            // 计算总存钱金额（所有存钱记录的总和）
+            let totalDepositAmount = 0
+            for (const plan of activePlans) {
+                if (plan.records) {
+                    totalDepositAmount += plan.records.reduce((sum, record) => sum + record.amount, 0)
+                }
+            }
+
             return {
                 total: activePlans.length,
                 completed: completedPlans.length,
                 inProgress: activePlans.length - completedPlans.length,
                 totalTarget: totalTarget,
                 totalCurrent: totalCurrent,
-                overallProgress: totalTarget > 0 ? Math.round((totalCurrent / totalTarget) * 100) : 0
+                overallProgress: totalTarget > 0 ? Math.round((totalCurrent / totalTarget) * 100) : 0,
+                totalRecords: totalRecords,
+                totalDepositAmount: totalDepositAmount
             }
         } catch (error) {
             console.error('【PersonalSavingCache】获取统计信息失败:', error)
@@ -372,7 +483,9 @@ class PersonalSavingCacheService {
                 inProgress: 0,
                 totalTarget: 0,
                 totalCurrent: 0,
-                overallProgress: 0
+                overallProgress: 0,
+                totalRecords: 0,
+                totalDepositAmount: 0
             }
         }
     }

@@ -38,14 +38,6 @@ public class BackupPersonalSavingRecords implements Serializable {
     @TableField("backup_id")
     private String backupId;
 
-    @ApiModelProperty(value = "原始记录ID")
-    @TableField("original_id")
-    private String originalId;
-
-    @ApiModelProperty(value = "用户ID")
-    @TableField("user_id")
-    private Long userId;
-
     @ApiModelProperty(value = "关联的计划ID(original_id)")
     @TableField("plan_id")
     private String planId;
@@ -67,9 +59,6 @@ public class BackupPersonalSavingRecords implements Serializable {
 
     @ApiModelProperty(value = "备注")
     private String note;
-
-    @ApiModelProperty(value = "是否删除: 0-否, 1-是")
-    private Integer deleted;
 
     @ApiModelProperty(value = "备份创建时间")
     @TableField("created_at")

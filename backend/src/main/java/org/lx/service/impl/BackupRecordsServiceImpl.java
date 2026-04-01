@@ -300,21 +300,40 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
                         break;
 
                     case "personal_saving":
-                        // 个人存钱计划
+                        // 1. 从数据库查询计划和记录（两个独立的列表）
                         List<BackupPersonalSavings> personalSavings = backupPersonalSavingsMapper
                                 .selectByBackupId(backupIdentifier);
-                        backupData.setPersonalSavings(personalSavings);
 
-                        // 个人存钱记录
                         List<BackupPersonalSavingRecords> personalSavingRecords = backupPersonalSavingRecordsMapper
                                 .selectByBackupId(backupIdentifier);
+
+                        // 2. 使用 Map 临时分组（这是内存中的临时操作，不存储到数据库）
                         Map<String, List<BackupPersonalSavingRecords>> recordsMap = new HashMap<>();
-                        if (personalSavingRecords != null) {
+                        if (personalSavingRecords != null && !personalSavingRecords.isEmpty()) {
                             for (BackupPersonalSavingRecords record : personalSavingRecords) {
-                                recordsMap.computeIfAbsent(record.getPlanId(), k -> new ArrayList<>()).add(record);
+                                String planId = record.getPlanId();
+                                if (planId != null) {
+                                    // 按 planId 分组
+                                    recordsMap.computeIfAbsent(planId, k -> new ArrayList<>()).add(record);
+                                }
                             }
                         }
-                        backupData.setPersonalSavingRecords(recordsMap);
+
+                        // 3. 把分组后的记录设置到对应的计划对象中
+                        if (personalSavings != null && !personalSavings.isEmpty()) {
+                            for (BackupPersonalSavings saving : personalSavings) {
+                                if (saving.getId() != null && recordsMap.containsKey(saving.getId())) {
+                                    // 从临时 Map 中取出记录，设置到计划对象中
+                                    saving.setRecords(recordsMap.get(saving.getId()));
+                                } else {
+                                    saving.setRecords(new ArrayList<>());
+                                }
+                            }
+                        }
+
+                        // 4. 设置到 DTO 中（personalSavings 列表中的每个对象都已经包含了 records）
+                        backupData.setPersonalSavings(personalSavings);
+
                         log.info("加载个人存钱计划备份数据: {} 条计划, {} 条记录",
                                 personalSavings != null ? personalSavings.size() : 0,
                                 personalSavingRecords != null ? personalSavingRecords.size() : 0);
@@ -483,11 +502,21 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
                     count = data.getBusiness() != null ? data.getBusiness().size() : 0;
                     break;
                 case "personal_saving":
-                    count = data.getPersonalSavings() != null ? data.getPersonalSavings().size() : 0;
-                    if (data.getPersonalSavingRecords() != null) {
-                        count += data.getPersonalSavingRecords().values().stream()
-                                .mapToInt(List::size)
-                                .sum();
+                    List<BackupPersonalSavings> personalSavings = data.getPersonalSavings();
+                    if (personalSavings != null && !personalSavings.isEmpty()) {
+                        // 先加上计划数量
+                        count = personalSavings.size();
+                        // 再加上每个计划的记录数量
+                        for (BackupPersonalSavings personalSaving : personalSavings) {
+                            if (personalSaving != null) {
+                                List<BackupPersonalSavingRecords> records = personalSaving.getRecords();
+                                if (records != null && !records.isEmpty()) {
+                                    count += records.size();
+                                }
+                            }
+                        }
+                    } else {
+                        count = 0;
                     }
                     break;
                 case "customer":
@@ -542,24 +571,60 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
     private int calculateTotalCount(BackupDataDTO backupData) {
         int total = 0;
 
+        // 个人记账
         total += backupData.getPersonal() != null ? backupData.getPersonal().size() : 0;
+
+        // 生意记账
         total += backupData.getBusiness() != null ? backupData.getBusiness().size() : 0;
-        total += backupData.getPersonalSavings() != null ? backupData.getPersonalSavings().size() : 0;
-        if (backupData.getPersonalSavingRecords() != null) {
-            total += backupData.getPersonalSavingRecords().values().stream()
-                    .mapToInt(List::size).sum();
+
+        // 个人存钱计划（计划数量 + 记录数量）
+        List<BackupPersonalSavings> personalSavings = backupData.getPersonalSavings();
+        if (personalSavings != null && !personalSavings.isEmpty()) {
+            total += personalSavings.size(); // 加上计划数量
+            for (BackupPersonalSavings saving : personalSavings) {
+                if (saving != null) {
+                    List<BackupPersonalSavingRecords> records = saving.getRecords();
+                    if (records != null && !records.isEmpty()) {
+                        total += records.size(); // 加上记录数量
+                    }
+                }
+            }
         }
+
+        // 客户
         total += backupData.getCustomers() != null ? backupData.getCustomers().size() : 0;
+
+        // 客户还款记录
         total += backupData.getCustomerRepayments() != null ? backupData.getCustomerRepayments().size() : 0;
+
+        // 商品
         total += backupData.getProducts() != null ? backupData.getProducts().size() : 0;
+
+        // 商品分类
         total += backupData.getCategories() != null ? backupData.getCategories().size() : 0;
+
+        // 供应商
         total += backupData.getSuppliers() != null ? backupData.getSuppliers().size() : 0;
+
+        // 库存
         total += backupData.getInventory() != null ? backupData.getInventory().size() : 0;
+
+        // 采购订单
         total += backupData.getPurchaseOrders() != null ? backupData.getPurchaseOrders().size() : 0;
+
+        // 采购历史
         total += backupData.getPurchaseHistory() != null ? backupData.getPurchaseHistory().size() : 0;
+
+        // 支出记录
         total += backupData.getExpense() != null ? backupData.getExpense().size() : 0;
+
+        // 支出还款记录
         total += backupData.getExpenseRepayments() != null ? backupData.getExpenseRepayments().size() : 0;
+
+        // 收入记录
         total += backupData.getIncome() != null ? backupData.getIncome().size() : 0;
+
+        // 收入收款记录
         total += backupData.getIncomeCollections() != null ? backupData.getIncomeCollections().size() : 0;
 
         return total;
@@ -587,11 +652,9 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
                     saveBusinessRecords(backupId, userId, data.getBusiness());
                     break;
                 case "personal_saving":
+                    // 个人存钱计划的记录已经包含在 personalSavings 的 records 字段中
                     if (data.getPersonalSavings() != null && !data.getPersonalSavings().isEmpty()) {
                         savePersonalSavings(backupId, userId, data.getPersonalSavings());
-                    }
-                    if (data.getPersonalSavingRecords() != null && !data.getPersonalSavingRecords().isEmpty()) {
-                        savePersonalSavingRecords(backupId, userId, data.getPersonalSavingRecords());
                     }
                     break;
                 case "customer":
@@ -713,34 +776,34 @@ public class BackupRecordsServiceImpl extends ServiceImpl<BackupRecordsMapper, B
             return;
         }
         log.info("保存个人存钱计划备份数据: backupId={}, count={}", backupId, savings.size());
+
+        // 先保存计划数据
         savings.forEach(saving -> {
             saving.setBackupId(backupId);
             saving.setUserId(userId);
-            saving.setCreatedAt(LocalDateTime.now());
         });
         backupPersonalSavingsMapper.insertBatch(savings);
         log.info("个人存钱计划备份数据保存成功: {} 条", savings.size());
-    }
 
-    /**
-     * 保存个人存钱记录备份数据
-     */
-    private void savePersonalSavingRecords(String backupId, Long userId,
-                                           Map<String, List<BackupPersonalSavingRecords>> recordsMap) {
-        if (recordsMap == null || recordsMap.isEmpty()) {
-            return;
-        }
-        int totalCount = recordsMap.values().stream().mapToInt(List::size).sum();
-        log.info("保存个人存钱记录备份数据: backupId={}, count={}", backupId, totalCount);
+        // 收集所有记录，统一保存到记录表
         List<BackupPersonalSavingRecords> allRecords = new ArrayList<>();
-        recordsMap.values().forEach(allRecords::addAll);
-        allRecords.forEach(record -> {
-            record.setBackupId(backupId);
-            record.setUserId(userId);
-            record.setCreatedAt(LocalDateTime.now());
-        });
-        backupPersonalSavingRecordsMapper.insertBatch(allRecords);
-        log.info("个人存钱记录备份数据保存成功: {} 条", totalCount);
+        for (BackupPersonalSavings saving : savings) {
+            if (saving.getRecords() != null && !saving.getRecords().isEmpty()) {
+                for (BackupPersonalSavingRecords record : saving.getRecords()) {
+                    record.setBackupId(backupId);
+                    if (record.getDepositTime() == null) {
+                        record.setDepositTime(LocalDateTime.now());
+                    }
+                    allRecords.add(record);
+                }
+            }
+        }
+
+        // 批量保存记录
+        if (!allRecords.isEmpty()) {
+            backupPersonalSavingRecordsMapper.insertBatch(allRecords);
+            log.info("个人存钱记录备份数据保存成功: {} 条", allRecords.size());
+        }
     }
 
     /**

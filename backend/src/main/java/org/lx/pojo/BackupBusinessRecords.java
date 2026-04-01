@@ -80,6 +80,9 @@ public class BackupBusinessRecords implements Serializable {
     @ApiModelProperty(value = "备注")
     private String note;
 
+    @ApiModelProperty(value = "记录日期（前端格式）")
+    private String date;
+
     @ApiModelProperty(value = "备份创建时间")
     @TableField("created_at")
     private LocalDateTime createdAt;

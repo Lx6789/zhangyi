@@ -379,7 +379,7 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'close', 'data-imported'])
 
 // 使用导出和导入逻辑
-const {exportToExcel} = Export()
+const exportModule = Export()  // 修改：使用 exportModule 而不是解构 exportToExcel
 const {
   parseImportFile,
   importIncomeExpenseData,
@@ -510,11 +510,26 @@ const handleExport = async () => {
     return
   }
 
+  // 检查是否有选择任何数据
+  const hasAnyData = exportOptions.incomeExpense ||
+      exportOptions.saving ||
+      exportOptions.inventory ||
+      exportOptions.products ||
+      exportOptions.categories ||
+      exportOptions.suppliers ||
+      exportOptions.customers
+
+  if (!hasAnyData) {
+    notificationService.showNotification('请至少选择一种数据类型', 'warning')
+    return
+  }
+
   exporting.value = true
   exportProgress.value = '正在准备导出数据...'
 
   try {
-    const {workbook, sheets} = await exportToExcel(
+    // 使用 exportAllData 方法批量导出
+    const result = await exportModule.exportAllData(
         currentUser.value.id,
         exportOptions,
         dateRange,
@@ -523,17 +538,18 @@ const handleExport = async () => {
         }
     )
 
-    if (sheets.length === 0) {
-      notificationService.showNotification('没有选择任何数据或数据为空', 'warning')
+    if (result.count === 0) {
+      notificationService.showNotification('没有数据可导出', 'warning')
       return
     }
 
-    const timestamp = new Date().toISOString().split('T')[0]
-    const fileName = `账易数据导出_${currentUser.value.username}_${timestamp}.xlsx`
-
-    XLSX.writeFile(workbook, fileName)
-    notificationService.showNotification(`导出成功，共导出 ${sheets.length} 个工作表`, 'success')
+    notificationService.showNotification(`导出成功！共导出 ${result.count} 个文件`, 'success')
     exportProgress.value = ''
+
+    // 可选：延迟关闭弹窗，让用户看到成功消息
+    setTimeout(() => {
+      close()
+    }, 1500)
   } catch (error) {
     console.error('导出失败:', error)
     notificationService.showNotification('导出失败：' + (error.message || '未知错误'), 'error')
@@ -858,7 +874,7 @@ watch(importType, () => {
   importPreviewRecordCount.value = 0
 })
 
-// 动态导入 XLSX
+// 动态导入 XLSX（用于模板中的 XLSX 引用，如果模板中没有使用可以移除）
 import * as XLSX from 'xlsx'
 </script>
 

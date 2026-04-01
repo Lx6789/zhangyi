@@ -1,6 +1,7 @@
 package org.lx.config;
 
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.stereotype.Component;
 
@@ -13,12 +14,15 @@ import java.time.LocalDateTime;
  * @Date: 2026/3/11 11:49
  * @Description: MyBatis-Plus 自动填充处理器
  */
+@Slf4j
 @Component
 public class MyMetaObjectHandler implements MetaObjectHandler {
 
     @Override
     public void insertFill(MetaObject metaObject) {
         LocalDateTime now = LocalDateTime.now();
+
+        log.info("自动填充开始...");
 
         // 创建时间填充
         this.setFieldValByName("createdAt", now, metaObject);
@@ -31,6 +35,12 @@ public class MyMetaObjectHandler implements MetaObjectHandler {
 
         // 逻辑删除标记默认值（如果有需要）
         this.setFieldValByName("deleted", 0, metaObject);
+
+        // ========== 添加 version 字段填充 ==========
+        // 自动填充版本号（乐观锁），默认值为 0
+        this.setFieldValByName("version", 0, metaObject);
+        // ========================================
+        log.info("version 字段已填充为: 0");
     }
 
     @Override

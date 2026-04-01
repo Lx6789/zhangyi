@@ -36,9 +36,6 @@ public class BackupDataDTO {
     @JsonProperty("personal_savings")
     private List<BackupPersonalSavings> personalSavings;
 
-    @ApiModelProperty(value = "个人存钱记录（动态key: personal_saving_{planId}_records）")
-    private Map<String, List<BackupPersonalSavingRecords>> personalSavingRecords;
-
     @ApiModelProperty(value = "客户管理数据")
     private List<BackupCustomers> customers;
 

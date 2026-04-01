@@ -6,15 +6,15 @@
     <!-- 批量插入个人存钱记录备份数据 -->
     <insert id="insertBatch" parameterType="list">
         INSERT INTO backup_personal_saving_records (
-        id, backup_id, original_id, user_id, plan_id, amount,
-        deposit_time, before_amount, after_amount, note, deleted, created_at
+        id, backup_id, plan_id, amount,deposit_time,
+        before_amount, after_amount, note, created_at
         ) VALUES
         <foreach collection="list" item="item" separator=",">
             (
-            #{item.id}, #{item.backupId}, #{item.originalId}, #{item.userId},
+            #{item.id}, #{item.backupId},
             #{item.planId}, #{item.amount}, #{item.depositTime},
             #{item.beforeAmount}, #{item.afterAmount}, #{item.note},
-            #{item.deleted}, #{item.createdAt}
+            #{item.createdAt}
             )
         </foreach>
     </insert>
