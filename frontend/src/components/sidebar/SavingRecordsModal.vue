@@ -93,7 +93,7 @@
               </div>
             </div>
 
-            <!-- 展开的存钱记录列表 - 固定高度滚动区域 -->
+            <!-- 展开的存钱记录列表 -->
             <div v-if="expandedPersonalPlanId === plan.id" class="plan-records-wrapper">
               <div v-if="plan.recordsLoading" class="records-loading">
                 <i class="fas fa-spinner fa-spin"></i>
@@ -154,19 +154,21 @@
               class="plan-card group-plan-card"
               :class="{
                 expanded: expandedGroupPlanId === plan.id,
-                'deleted-plan': plan.deleted === 1
+                'deleted-plan': plan.deleted === 1,
+                'current-user-exited': plan.currentUserDeleted === true
               }"
           >
             <!-- 计划卡片头部 - 点击展开/收起 -->
             <div class="plan-header" @click="toggleGroupPlan(plan.id)">
               <div class="plan-header-left">
-                <div class="plan-icon" :style="{ backgroundColor: plan.color || '#3498db', opacity: plan.deleted === 1 ? 0.6 : 1 }">
+                <div class="plan-icon" :style="{ backgroundColor: plan.color || '#3498db', opacity: (plan.deleted === 1 || plan.currentUserDeleted === true) ? 0.6 : 1 }">
                   <i :class="plan.icon || getIconByType(plan.type)"></i>
                 </div>
                 <div class="plan-info">
                   <div class="plan-name">
                     {{ plan.name }}
                     <span v-if="plan.deleted === 1" class="deleted-badge">已删除</span>
+                    <span v-else-if="plan.currentUserDeleted === true" class="exited-badge">已退出</span>
                   </div>
                   <div class="plan-meta">
                     <span class="plan-type">{{ plan.type || '日常储蓄' }}</span>
@@ -185,7 +187,7 @@
                 <div class="plan-progress-info">
                   <span class="progress-text">{{ plan.progress || 0 }}%</span>
                   <div class="progress-bar-small">
-                    <div class="progress-fill-small" :style="{ width: (plan.progress || 0) + '%', backgroundColor: plan.color || '#3498db', opacity: plan.deleted === 1 ? 0.6 : 1 }"></div>
+                    <div class="progress-fill-small" :style="{ width: (plan.progress || 0) + '%', backgroundColor: plan.color || '#3498db', opacity: (plan.deleted === 1 || plan.currentUserDeleted === true) ? 0.6 : 1 }"></div>
                   </div>
                 </div>
                 <div class="plan-amount">
@@ -205,8 +207,8 @@
               </div>
               <div v-else-if="plan.records && plan.records.length === 0" class="no-records">
                 <i class="fas fa-coins"></i>
-                <span>暂无存钱记录</span>
-                <span class="hint-small">成员存入后会显示在这里</span>
+                <span>{{ plan.currentUserDeleted === true ? '您已退出此计划，暂无存钱记录' : '暂无存钱记录' }}</span>
+                <span class="hint-small" v-if="!plan.currentUserDeleted">成员存入后会显示在这里</span>
               </div>
               <div v-else class="records-scroll-area">
                 <div class="records-list group-records-list">
@@ -252,7 +254,7 @@
       </div>
     </div>
 
-    <!-- 记录详情弹窗 - 淡色风格 -->
+    <!-- 记录详情弹窗 -->
     <div v-if="showDetailModal" class="detail-modal-overlay" @click.self="closeDetailModal">
       <div class="detail-modal-content" :class="[currentDetailPlan?.type === 'personal' ? 'personal-detail' : 'group-detail', { 'deleted-detail': selectedRecord?.deleted === 1 }]">
         <div class="detail-header">
@@ -481,14 +483,9 @@ const loadPersonalPlansWithRecords = async () => {
 
     const plansWithRecords = []
     for (const plan of plans) {
-      const result = await personalSavingCache.getDepositRecords(
-          currentUser.value.id,
-          plan.id,
-          {page: 1, size: 500}
-      )
+      // 🔥 直接使用 plan.records，不再调用 getDepositRecords
+      const allRecords = plan.records || []
 
-      const allRecords = result.records || []
-      // 🔥 包含已删除的记录
       const records = allRecords
       const totalDeposited = records.reduce((sum, r) => sum + (r.amount || 0), 0)
 
@@ -499,7 +496,7 @@ const loadPersonalPlansWithRecords = async () => {
         color: plan.color || getColorByType(plan.type),
         records: records.map(r => ({
           ...r,
-          depositTime: r.depositTime,
+          depositTime: r.depositTime || r.createdAt,
           afterAmount: r.afterAmount,
           beforeAmount: r.beforeAmount,
           deleted: r.deleted || 0
@@ -535,16 +532,24 @@ const loadGroupPlansWithRecords = async () => {
 
     const plansWithRecords = []
     for (const plan of plans) {
-      // 🔥 修改：获取该计划的存钱记录时，不传入 userId 限制
-      // 或者传入 plan.id 和 includeAllMembers 标志
-      // 这里需要修改 groupSavingCache.getDepositRecords 方法来支持获取所有成员的记录
-
-      // 方案1：使用 getAll 而不是 query，然后手动过滤
+      // 获取该计划的存钱记录
       const allRecords = await indexedDBService.getAll('saving_deposit_records_cache')
       const planRecords = allRecords.filter(r => r.groupSavingId === plan.id)
 
-      // 🔥 包含已删除的记录
-      const records = planRecords.map(r => ({
+      // 🔥 获取当前用户在该计划中的成员状态
+      const currentUserMember = plan.members?.find(m => m.userId === currentUser.value?.id)
+      const currentUserDeleted = currentUserMember?.deleted === 1
+      const currentUserAmount = currentUserMember?.amount || 0
+
+      // 🔥 过滤记录：如果用户已退出，只显示自己的存钱记录
+      let filteredRecords = planRecords
+      if (currentUserDeleted) {
+        // 用户已退出，只显示自己的存钱记录
+        filteredRecords = planRecords.filter(r => r.memberId === currentUser.value?.id)
+        console.log(`用户已退出计划 ${plan.name}，只显示自己的 ${filteredRecords.length} 条记录`)
+      }
+
+      const records = filteredRecords.map(r => ({
         id: r.originalId || r.id,
         memberId: r.memberId,
         memberName: r.memberName,
@@ -563,7 +568,8 @@ const loadGroupPlansWithRecords = async () => {
       // 🔥 获取成员列表（包含已删除的成员）
       const allMembers = await groupSavingCache.getTableDataById('groupSavingId', plan.id, 'savings_members_cache', true)
 
-      console.log(`计划 ${plan.name} 的记录数:`, records.length, '成员数:', allMembers.length)
+      // 🔥 标记当前用户是否已退出
+      const isUserExited = currentUserDeleted
 
       plansWithRecords.push({
         ...plan,
@@ -575,7 +581,9 @@ const loadGroupPlansWithRecords = async () => {
         recordsLoading: false,
         totalDeposited: totalDeposited,
         type: 'group',
-        deleted: plan.deleted || 0
+        deleted: plan.deleted || 0,
+        currentUserDeleted: isUserExited,  // 🔥 新增：标记当前用户是否已退出
+        currentUserAmount: currentUserAmount  // 🔥 新增：当前用户的已存金额
       })
     }
 
@@ -1443,40 +1451,7 @@ watch(() => props.visible, async (newVal) => {
   background: #e8e8e8;
 }
 
-/* 响应式 */
-@media (max-width: 600px) {
-  .plan-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .plan-header-right {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .record-item {
-    flex-wrap: wrap;
-  }
-
-  .record-time,
-  .record-amount,
-  .record-balance {
-    width: auto;
-  }
-
-  .record-note {
-    width: 100%;
-    order: 1;
-    margin-top: 8px;
-  }
-
-  .records-scroll-area {
-    max-height: 280px;
-  }
-}
-
+/* 已删除计划的样式 */
 .deleted-plan {
   opacity: 0.8;
   background: #f8f9fa;
@@ -1505,6 +1480,42 @@ watch(() => props.visible, async (newVal) => {
   padding: 2px 6px;
   border-radius: 10px;
   margin-left: 6px;
+}
+
+/* 已退出计划的样式 */
+.current-user-exited {
+  opacity: 0.8;
+  background: #fff8e8;
+  border-left: 5px solid #f39c12;
+}
+
+.current-user-exited .plan-header {
+  background: #fff8e8;
+}
+
+.current-user-exited .plan-icon {
+  filter: grayscale(0.3);
+}
+
+.exited-badge {
+  display: inline-block;
+  background: #f39c12;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* 已退出计划的记录显示 */
+.current-user-exited .records-scroll-area {
+  background: #fffaf0;
+}
+
+.current-user-exited .record-item {
+  background: #ffffff;
+  border-left: 3px solid #f39c12;
 }
 
 /* 已删除记录的样式 */
