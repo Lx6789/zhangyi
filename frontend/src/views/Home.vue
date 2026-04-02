@@ -190,6 +190,8 @@
               <div class="record-title">
                 <span class="record-category">{{ record.category }}</span>
                 <span class="record-desc" v-if="record.type === '支出' && record.subtype">({{ record.subtype }})</span>
+                <span v-if="record.businessType === 'business'" class="business-badge">生意</span>
+                <span v-else class="personal-badge">个人</span>
               </div>
               <div class="record-meta">
                 <span class="record-date">{{ formatDate(record.date) }}</span>
@@ -202,35 +204,45 @@
                 {{ record.type === '收入' ? '+' : '-' }}¥ {{ formatNumber(record.amount) }}
               </span>
             </div>
+            <div class="record-actions">
+              <button class="action-btn edit-btn" @click.stop="editRecord(record)" title="编辑">
+                <i class="fas fa-edit"></i>
+              </button>
+              <button class="action-btn delete-btn" @click.stop="deleteRecord(record)" title="删除">
+                <i class="fas fa-trash-alt"></i>
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 记账模态框 -->
+    <!-- 记账模态框（用于新增和编辑） -->
     <div class="modal" :class="{ active: recordModalVisible }" @click="closeModalOnOverlay">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
           <i class="fas" :class="recordType === '收入' ? 'fa-money-bill-wave' : 'fa-receipt'"></i>
-          <h3>{{ recordType === '收入' ? '收入记账' : '支出记账' }}</h3>
-          <button class="modal-close" @click="recordModalVisible = false">
+          <h3>{{ editingRecord ? '编辑' : '' }}{{ recordType === '收入' ? '收入记账' : '支出记账' }}</h3>
+          <button class="modal-close" @click="closeRecordModal">
             <i class="fas fa-times"></i>
           </button>
         </div>
 
-        <!-- 收入/支出切换 -->
-        <div class="record-type-switch">
+        <!-- 收入/支出切换（编辑时禁用） -->
+        <div class="record-type-switch" :class="{ disabled: editingRecord }">
           <button
               class="tab-btn"
               :class="{ active: recordType === '收入' }"
-              @click="recordType = '收入'"
+              @click="!editingRecord && (recordType = '收入')"
+              :disabled="editingRecord"
           >
             <i class="fas fa-money-bill-wave"></i> 收入
           </button>
           <button
               class="tab-btn"
               :class="{ active: recordType === '支出' }"
-              @click="recordType = '支出'"
+              @click="!editingRecord && (recordType = '支出')"
+              :disabled="editingRecord"
           >
             <i class="fas fa-receipt"></i> 支出
           </button>
@@ -242,7 +254,6 @@
             <div class="form-group">
               <label><i class="fas fa-tag"></i> 收入类型</label>
               <div class="select-with-actions">
-                <!-- 美化选择框 -->
                 <div class="form-select-custom" @click="showIncomeCategoryList">
                   <span v-if="incomeForm.category">{{ incomeForm.category }}</span>
                   <span v-else class="placeholder">选择收入类型</span>
@@ -275,7 +286,6 @@
             <div class="form-group">
               <label><i class="fas fa-store"></i> 收入来源</label>
               <div class="select-with-actions">
-                <!-- 美化选择框 -->
                 <div class="form-select-custom" @click="showIncomeSourceList">
                   <span v-if="incomeForm.source">{{ incomeForm.source }}</span>
                   <span v-else class="placeholder">选择收入来源</span>
@@ -350,7 +360,6 @@
             <div class="form-group">
               <label><i class="fas fa-list"></i> 支出类型</label>
               <div class="select-with-actions">
-                <!-- 美化选择框 -->
                 <div class="form-select-custom" @click="showExpenseCategoryList">
                   <span v-if="expenseForm.category">{{ expenseForm.category }}</span>
                   <span v-else class="placeholder">选择支出类型</span>
@@ -383,7 +392,6 @@
             <div class="form-group" v-if="expenseForm.category">
               <label><i class="fas fa-tag"></i> 具体项目</label>
               <div class="select-with-actions">
-                <!-- 美化选择框 -->
                 <div class="form-select-custom" @click="showExpenseSubtypeList">
                   <span v-if="expenseForm.subtype">{{ expenseForm.subtype }}</span>
                   <span v-else class="placeholder">选择具体项目</span>
@@ -444,11 +452,11 @@
           </div>
 
           <div class="form-actions">
-            <button type="button" class="btn btn-secondary" @click="recordModalVisible = false">
+            <button type="button" class="btn btn-secondary" @click="closeRecordModal">
               取消
             </button>
             <button type="submit" class="btn btn-primary">
-              <i class="fas fa-check"></i> 保存记录
+              <i class="fas fa-check"></i> {{ editingRecord ? '更新记录' : '保存记录' }}
             </button>
           </div>
         </form>
@@ -477,6 +485,7 @@ const loading = ref(false)
 // 模态框状态
 const recordModalVisible = ref(false)
 const recordType = ref('收入')
+const editingRecord = ref(null) // 正在编辑的记录
 
 // 收入表单
 const incomeForm = reactive({
@@ -528,126 +537,7 @@ const selectedMonth = ref(new Date().getMonth() + 1)
 const selectedDate = ref(dateHelper.getTodayString())
 const selectedWeekOffset = ref(0)
 
-const openCustomDatePicker = async () => {
-  const date = await notificationService.datePicker({
-    defaultDate: selectedDate.value,
-  });
-
-  if (date) {
-    selectedDate.value = date;
-    loadHistoryData();
-  }
-};
-
-const openIncomeDatePicker = async () => {
-  const date = await notificationService.datePicker({
-    defaultDate: incomeForm.date,
-    title: '选择收入日期'
-  });
-  if (date) incomeForm.date = date;
-};
-
-const openExpenseDatePicker = async () => {
-  const date = await notificationService.datePicker({
-    defaultDate: expenseForm.date,
-    title: '选择支出日期'
-  });
-  if (date) expenseForm.date = date;
-};
-
-// ==================== 美化选择列表方法 ====================
-// 显示收入类型选择列表
-const showIncomeCategoryList = async () => {
-  const items = [
-    ...incomeCategories.value.map(c => ({label: c.name, value: c.name})),
-    {label: '➕ 添加新类型', value: '__new__'}
-  ]
-
-  const result = await notificationService.selectList({
-    title: '选择收入类型',
-    items
-  })
-
-  if (result === '__new__') {
-    showIncomeCategoryForm.value = true
-    categoryForm.value = {name: '', originalName: '', isEdit: false}
-    incomeForm.category = ''
-  } else if (result) {
-    incomeForm.category = result
-  }
-}
-
-// 显示收入来源选择列表
-const showIncomeSourceList = async () => {
-  const items = [
-    ...incomeSources.value.map(s => ({label: s.name, value: s.name})),
-    {label: '➕ 添加新来源', value: '__new__'}
-  ]
-
-  const result = await notificationService.selectList({
-    title: '选择收入来源',
-    items
-  })
-
-  if (result === '__new__') {
-    showIncomeSourceForm.value = true
-    sourceForm.value = {name: '', originalName: '', isEdit: false}
-    incomeForm.source = ''
-  } else if (result) {
-    incomeForm.source = result
-  }
-}
-
-// 显示支出类型选择列表
-const showExpenseCategoryList = async () => {
-  const items = [
-    ...expenseCategories.value.map(c => ({label: c.name, value: c.name})),
-    {label: '➕ 添加新类型', value: '__new__'}
-  ]
-
-  const result = await notificationService.selectList({
-    title: '选择支出类型',
-    items
-  })
-
-  if (result === '__new__') {
-    showExpenseCategoryForm.value = true
-    categoryForm.value = {name: '', originalName: '', isEdit: false}
-    expenseForm.category = ''
-  } else if (result) {
-    expenseForm.category = result
-    updateExpenseSubtypes()
-  }
-}
-
-// 显示支出子类型选择列表
-const showExpenseSubtypeList = async () => {
-  const subtypes = getExpenseSubtypes(expenseForm.category)
-  const items = [
-    ...subtypes.map(s => ({label: s.name, value: s.name})),
-    {label: '➕ 添加新项目', value: '__new_sub__'}
-  ]
-
-  const result = await notificationService.selectList({
-    title: '选择具体项目',
-    items
-  })
-
-  if (result === '__new_sub__') {
-    showSubtypeForm.value = true
-    subtypeForm.value = {
-      name: '',
-      originalName: '',
-      categoryName: expenseForm.category,
-      isEdit: false
-    }
-    expenseForm.subtype = ''
-  } else if (result) {
-    expenseForm.subtype = result
-  }
-}
-
-// ==================== 实时数据 ====================
+// 实时数据
 const totalIncome = ref('¥ 0.00')
 const totalExpense = ref('¥ 0.00')
 const todayIncome = ref('¥ 0.00')
@@ -730,19 +620,16 @@ const subtypeForm = ref({
  */
 const getAllRecords = async () => {
   try {
-    // 确保数据库已初始化
     await indexedDBService.ensureInitialized()
 
     console.log('开始获取所有业务记录...')
 
-    // 分别从三个表获取数据
     const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
       businessDataService.getDailyRecordsWithDecrypt(),
       incomeService.getIncomeRecords(),
       expenseService.getExpenseRecords()
     ])
 
-    // 合并所有记录
     const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]
 
     console.log('获取记录完成:', {
@@ -756,7 +643,6 @@ const getAllRecords = async () => {
   } catch (error) {
     console.error('获取记录失败:', error)
 
-    // 如果失败，尝试重新初始化数据库
     try {
       console.log('尝试重新初始化数据库...')
       await indexedDBService.init()
@@ -779,6 +665,73 @@ const getAllRecords = async () => {
 }
 
 /**
+ * 删除记录
+ */
+const deleteRecord = async (record) => {
+  const confirmed = await notificationService.confirm(
+      `确定要删除这条${record.type}记录吗？\n金额：¥${record.amount}\n分类：${record.category}`,
+      '删除确认'
+  )
+
+  if (!confirmed) return
+
+  try {
+    // 根据记录类型调用不同的删除方法
+    if (record.source) {
+      // 收入记录
+      await incomeService.deleteIncomeRecord(record.id)
+    } else if (record.subtype) {
+      // 支出记录
+      await expenseService.deleteExpenseRecord(record.id)
+    } else {
+      // 日常记录
+      await businessDataService.deleteDailyRecord(record.id)
+    }
+
+    notificationService.showNotification('删除成功', 'success')
+    await refreshData()
+  } catch (error) {
+    console.error('删除记录失败:', error)
+    notificationService.showNotification('删除失败，请重试', 'error')
+  }
+}
+
+/**
+ * 编辑记录
+ */
+const editRecord = (record) => {
+  editingRecord.value = record
+  recordType.value = record.type
+
+  if (record.type === '收入') {
+    incomeForm.category = record.category || ''
+    incomeForm.source = record.source || ''
+    incomeForm.amount = record.amount
+    incomeForm.date = record.date
+    incomeForm.paymentMethod = record.paymentMethod || '现金'
+    incomeForm.note = record.note || ''
+  } else {
+    expenseForm.category = record.category || ''
+    expenseForm.subtype = record.subtype || ''
+    expenseForm.amount = record.amount
+    expenseForm.date = record.date
+    expenseForm.supplier = record.supplier || ''
+    expenseForm.note = record.note || ''
+  }
+
+  recordModalVisible.value = true
+}
+
+/**
+ * 关闭记账模态框
+ */
+const closeRecordModal = () => {
+  recordModalVisible.value = false
+  editingRecord.value = null
+  resetForms()
+}
+
+/**
  * 获取总收支数据
  */
 const getTotalData = async () => {
@@ -794,12 +747,6 @@ const getTotalData = async () => {
     } else if (record.type === '支出') {
       totalExpenseAmount += amount
     }
-  })
-
-  console.log('总收支统计:', {
-    总收入: totalIncomeAmount,
-    总支出: totalExpenseAmount,
-    记录总数: records.length
   })
 
   totalIncome.value = '¥ ' + totalIncomeAmount.toFixed(2)
@@ -830,12 +777,6 @@ const getTodayData = async () => {
     }
   })
 
-  console.log('今日收支统计:', {
-    日期: today,
-    今日收入: todayIncomeTotal,
-    今日支出: todayExpenseTotal
-  })
-
   todayIncome.value = '¥ ' + todayIncomeTotal.toFixed(2)
   todayExpense.value = '¥ ' + todayExpenseTotal.toFixed(2)
 
@@ -858,6 +799,7 @@ const loadHistoryData = async () => {
   loading.value = true
   try {
     const records = await getAllRecords()
+    allRecords.value = records
 
     // 根据类型筛选
     let typeFiltered = records
@@ -870,7 +812,6 @@ const loadHistoryData = async () => {
     let filtered = []
 
     if (selectedTimeFilter.value === 'week') {
-      // 根据周偏移量计算日期范围
       const baseDate = new Date()
       baseDate.setDate(baseDate.getDate() + (selectedWeekOffset.value * 7))
       const {startDate, endDate} = dateHelper.getWeekRange(baseDate)
@@ -927,49 +868,11 @@ const refreshData = async () => {
   console.log('数据刷新完成')
 }
 
-/**
- * 获取统计标题
- */
-const getStatsTitle = () => {
-  switch (selectedTimeFilter.value) {
-    case 'week':
-      const baseDate = new Date()
-      baseDate.setDate(baseDate.getDate() + (selectedWeekOffset.value * 7))
-      const {startDate, endDate} = dateHelper.getWeekRange(baseDate)
-      const startParts = startDate.split('-')
-      const endParts = endDate.split('-')
-      return `${startParts[1]}/${startParts[2]} - ${endParts[1]}/${endParts[2]}`
-    case 'month':
-      return `${selectedYear.value}年${selectedMonth.value}月`
-    case 'year':
-      return `${selectedYear.value}年`
-    case 'date':
-      return selectedDate.value.split('-').slice(1).join('/')
-    default:
-      return ''
-  }
-}
-
-/**
- * 获取记录列表标题
- */
-const getRecordsTitle = () => {
-  return getStatsTitle() + '收支明细'
-}
-
-/**
- * 格式化日期显示
- */
-const formatDate = (dateStr) => {
-  return dateHelper.formatDateShort(dateStr)
-}
-
 // ==================== 时间筛选操作 ====================
 
 const selectTimeFilter = (filter) => {
   selectedTimeFilter.value = filter
 
-  // 重置到当前时间
   if (filter === 'week') {
     selectedWeekOffset.value = 0
   } else if (filter === 'month') {
@@ -1007,102 +910,169 @@ const changeWeek = (delta) => {
   loadHistoryData()
 }
 
-// ==================== 监听器 ====================
+// ==================== 日期选择器 ====================
 
-// 移除原有select监听，改用点击事件
+const openCustomDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    defaultDate: selectedDate.value,
+  });
 
-// ==================== 生命周期钩子 ====================
-
-onMounted(async () => {
-  console.log('Home组件挂载，检查认证')
-
-  // 只检查token是否存在
-  const token = localStorage.getItem('auth_token')
-  if (!token) {
-    console.log('未检测到token，跳转到登录页')
-    router.push({
-      path: '/login',
-      query: {redirect: router.currentRoute.value.fullPath}
-    })
-    return
+  if (date) {
+    selectedDate.value = date;
+    loadHistoryData();
   }
+};
 
-  console.log('认证通过，显示主页')
+const openIncomeDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    defaultDate: incomeForm.date,
+    title: '选择收入日期'
+  });
+  if (date) incomeForm.date = date;
+};
 
-  // 设置当前用户
-  const currentUser = authHelperService.getCurrentUser()
-  if (!currentUser) {
-    console.error('无法获取当前用户')
-    router.push('/login')
-    return
-  }
-
-  userDataService.setCurrentUser(currentUser)
-
-  // 设置默认日期
-  const today = new Date()
-  const formattedDate = dateHelper.formatDate(today)
-  incomeForm.date = formattedDate
-  expenseForm.date = formattedDate
-
-  // 从用户数据服务加载配置数据
-  loadData()
-
-  // 刷新实时数据
-  await refreshData()
-})
+const openExpenseDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    defaultDate: expenseForm.date,
+    title: '选择支出日期'
+  });
+  if (date) expenseForm.date = date;
+};
 
 // ==================== 辅助函数 ====================
 
 /**
- * 获取指定支出类型的子项目
+ * 获取统计标题
  */
-const getExpenseSubtypes = (categoryName) => {
-  const category = expenseCategories.value.find(c => c.name === categoryName)
-  return category ? category.subtypes : []
+const getStatsTitle = () => {
+  switch (selectedTimeFilter.value) {
+    case 'week':
+      const baseDate = new Date()
+      baseDate.setDate(baseDate.getDate() + (selectedWeekOffset.value * 7))
+      const {startDate, endDate} = dateHelper.getWeekRange(baseDate)
+      const startParts = startDate.split('-')
+      const endParts = endDate.split('-')
+      return `${startParts[1]}/${startParts[2]} - ${endParts[1]}/${endParts[2]}`
+    case 'month':
+      return `${selectedYear.value}年${selectedMonth.value}月`
+    case 'year':
+      return `${selectedYear.value}年`
+    case 'date':
+      return selectedDate.value.split('-').slice(1).join('/')
+    default:
+      return ''
+  }
 }
 
 /**
- * 从用户数据服务加载所有配置数据
+ * 获取记录列表标题
  */
-const loadData = () => {
-  // 加载收入类型
-  const savedIncomeCategories = userDataService.getIncomeCategories()
-  if (savedIncomeCategories.length > 0) {
-    incomeCategories.value = savedIncomeCategories
-  } else {
-    // 如果没有数据，初始化默认值
-    userDataService.initDefaultData()
-    incomeCategories.value = userDataService.getIncomeCategories()
-  }
+const getRecordsTitle = () => {
+  return getStatsTitle() + '收支明细'
+}
 
-  // 加载收入来源
-  const savedIncomeSources = userDataService.getIncomeSources()
-  if (savedIncomeSources.length > 0) {
-    incomeSources.value = savedIncomeSources
-  } else {
-    incomeSources.value = userDataService.getIncomeSources()
-  }
+/**
+ * 格式化日期显示
+ */
+const formatDate = (dateStr) => {
+  return dateHelper.formatDateShort(dateStr)
+}
 
-  // 加载支出类型
-  const savedExpenseCategories = userDataService.getExpenseCategories()
-  if (savedExpenseCategories.length > 0) {
-    expenseCategories.value = savedExpenseCategories
-  } else {
-    expenseCategories.value = userDataService.getExpenseCategories()
+/**
+ * 格式化数字
+ */
+const formatNumber = (num) => {
+  if (num === undefined || num === null) return '0.00'
+  return parseFloat(num).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+}
+
+// ==================== 美化选择列表方法 ====================
+
+const showIncomeCategoryList = async () => {
+  const items = [
+    ...incomeCategories.value.map(c => ({label: c.name, value: c.name})),
+    {label: '➕ 添加新类型', value: '__new__'}
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择收入类型',
+    items
+  })
+
+  if (result === '__new__') {
+    showIncomeCategoryForm.value = true
+    categoryForm.value = {name: '', originalName: '', isEdit: false}
+    incomeForm.category = ''
+  } else if (result) {
+    incomeForm.category = result
   }
 }
 
-const saveIncomeCategories = () => {
-  userDataService.saveIncomeCategories(incomeCategories.value)
+const showIncomeSourceList = async () => {
+  const items = [
+    ...incomeSources.value.map(s => ({label: s.name, value: s.name})),
+    {label: '➕ 添加新来源', value: '__new__'}
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择收入来源',
+    items
+  })
+
+  if (result === '__new__') {
+    showIncomeSourceForm.value = true
+    sourceForm.value = {name: '', originalName: '', isEdit: false}
+    incomeForm.source = ''
+  } else if (result) {
+    incomeForm.source = result
+  }
 }
 
-const saveIncomeSources = () => {
-  userDataService.saveIncomeSources(incomeSources.value)
+const showExpenseCategoryList = async () => {
+  const items = [
+    ...expenseCategories.value.map(c => ({label: c.name, value: c.name})),
+    {label: '➕ 添加新类型', value: '__new__'}
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择支出类型',
+    items
+  })
+
+  if (result === '__new__') {
+    showExpenseCategoryForm.value = true
+    categoryForm.value = {name: '', originalName: '', isEdit: false}
+    expenseForm.category = ''
+  } else if (result) {
+    expenseForm.category = result
+    updateExpenseSubtypes()
+  }
 }
 
-const saveExpenseCategories = () => {
-  userDataService.saveExpenseCategories(expenseCategories.value)
+const showExpenseSubtypeList = async () => {
+  const subtypes = getExpenseSubtypes(expenseForm.category)
+  const items = [
+    ...subtypes.map(s => ({label: s.name, value: s.name})),
+    {label: '➕ 添加新项目', value: '__new_sub__'}
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择具体项目',
+    items
+  })
+
+  if (result === '__new_sub__') {
+    showSubtypeForm.value = true
+    subtypeForm.value = {
+      name: '',
+      originalName: '',
+      categoryName: expenseForm.category,
+      isEdit: false
+    }
+    expenseForm.subtype = ''
+  } else if (result) {
+    expenseForm.subtype = result
+  }
 }
 
 // ==================== 编辑功能 ====================
@@ -1214,8 +1184,8 @@ const editSource = (sourceName) => {
   }
 }
 
-const deleteSource = (sourceName) => {
-  if (confirm(`确定要删除收入来源"${sourceName}"吗？`)) {
+const deleteSource = async (sourceName) => {
+  if (await notificationService.confirm(`确定要删除收入来源"${sourceName}"吗？`)) {
     const index = incomeSources.value.findIndex(s => s.name === sourceName)
     if (index !== -1) {
       incomeSources.value.splice(index, 1)
@@ -1272,8 +1242,8 @@ const editSubtype = (categoryName, subtypeName) => {
   }
 }
 
-const deleteSubtype = (categoryName, subtypeName) => {
-  if (confirm(`确定要删除"${subtypeName}"吗？`)) {
+const deleteSubtype = async (categoryName, subtypeName) => {
+  if (await notificationService.confirm(`确定要删除"${subtypeName}"吗？`)) {
     const category = expenseCategories.value.find(c => c.name === categoryName)
     if (category) {
       const index = category.subtypes.findIndex(s => s.name === subtypeName)
@@ -1338,9 +1308,15 @@ const updateExpenseSubtypes = () => {
   }
 }
 
+const getExpenseSubtypes = (categoryName) => {
+  const category = expenseCategories.value.find(c => c.name === categoryName)
+  return category ? category.subtypes : []
+}
+
 // ==================== 记账功能 ====================
 
 const openRecordModal = () => {
+  editingRecord.value = null
   recordModalVisible.value = true
   resetForms()
 }
@@ -1371,14 +1347,13 @@ const resetForms = () => {
 
 const closeModalOnOverlay = (event) => {
   if (event.target.classList.contains('modal')) {
-    recordModalVisible.value = false
+    closeRecordModal()
   }
 }
 
 const submitRecord = async () => {
   let record
 
-  // 获取当前用户ID
   const currentUser = authHelperService.getCurrentUser()
   const userId = currentUser?.id
 
@@ -1388,61 +1363,158 @@ const submitRecord = async () => {
       return
     }
 
-    const recordId = idGenerator.generateDailyRecordId(userId)
-
-    record = {
-      id: recordId,
-      type: '收入',
-      category: incomeForm.category,
-      source: incomeForm.source,
-      amount: parseFloat(incomeForm.amount),
-      date: incomeForm.date,
-      paymentMethod: incomeForm.paymentMethod,
-      note: incomeForm.note,
-      businessType: 'personal',
-      timestamp: new Date().toISOString(),
-      createTime: new Date().toISOString(),
-      updateTime: new Date().toISOString(),
-      userId: userId
+    if (editingRecord.value) {
+      // 更新现有记录
+      record = {
+        ...editingRecord.value,
+        category: incomeForm.category,
+        source: incomeForm.source,
+        amount: parseFloat(incomeForm.amount),
+        date: incomeForm.date,
+        paymentMethod: incomeForm.paymentMethod,
+        note: incomeForm.note,
+        updateTime: new Date().toISOString()
+      }
+      await businessDataService.updateDailyRecord(record)
+    } else {
+      // 新增记录
+      const recordId = idGenerator.generateDailyRecordId(userId)
+      record = {
+        id: recordId,
+        type: '收入',
+        category: incomeForm.category,
+        source: incomeForm.source,
+        amount: parseFloat(incomeForm.amount),
+        date: incomeForm.date,
+        paymentMethod: incomeForm.paymentMethod,
+        note: incomeForm.note,
+        businessType: 'personal',
+        timestamp: new Date().toISOString(),
+        createTime: new Date().toISOString(),
+        updateTime: new Date().toISOString(),
+        userId: userId
+      }
+      await businessDataService.addDailyRecord(record)
     }
-
-    await businessDataService.addDailyRecord(record)
   } else {
     if (!expenseForm.category || !expenseForm.subtype || !expenseForm.amount || !expenseForm.date) {
       notificationService.showNotification("请填写所有必填项！", "error")
       return
     }
 
-    const recordId = idGenerator.generateDailyRecordId(userId)
-
-    record = {
-      id: recordId,
-      type: '支出',
-      category: expenseForm.category,
-      subtype: expenseForm.subtype,
-      amount: parseFloat(expenseForm.amount),
-      date: expenseForm.date,
-      supplier: expenseForm.supplier || '无',
-      note: expenseForm.note,
-      businessType: 'personal',
-      timestamp: new Date().toISOString(),
-      createTime: new Date().toISOString(),
-      updateTime: new Date().toISOString(),
-      userId: userId
+    if (editingRecord.value) {
+      // 更新现有记录
+      record = {
+        ...editingRecord.value,
+        category: expenseForm.category,
+        subtype: expenseForm.subtype,
+        amount: parseFloat(expenseForm.amount),
+        date: expenseForm.date,
+        supplier: expenseForm.supplier || '无',
+        note: expenseForm.note,
+        updateTime: new Date().toISOString()
+      }
+      await businessDataService.updateDailyRecord(record)
+    } else {
+      // 新增记录
+      const recordId = idGenerator.generateDailyRecordId(userId)
+      record = {
+        id: recordId,
+        type: '支出',
+        category: expenseForm.category,
+        subtype: expenseForm.subtype,
+        amount: parseFloat(expenseForm.amount),
+        date: expenseForm.date,
+        supplier: expenseForm.supplier || '无',
+        note: expenseForm.note,
+        businessType: 'personal',
+        timestamp: new Date().toISOString(),
+        createTime: new Date().toISOString(),
+        updateTime: new Date().toISOString(),
+        userId: userId
+      }
+      await businessDataService.addDailyRecord(record)
     }
-
-    await businessDataService.addDailyRecord(record)
   }
 
-  console.log('保存记录成功:', record)
+  console.log(`${editingRecord.value ? '更新' : '保存'}记录成功:`, record)
   await refreshData()
-  notificationService.showNotification(`${recordType.value}记录成功：¥${record.amount.toFixed(2)}`)
-  recordModalVisible.value = false
+  notificationService.showNotification(`${recordType.value}记录${editingRecord.value ? '更新' : '保存'}成功：¥${record.amount.toFixed(2)}`)
+  closeRecordModal()
 }
 
-const formatNumber = (num) => {
-  return parseFloat(num).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+// ==================== 数据保存 ====================
+
+const saveIncomeCategories = () => {
+  userDataService.saveIncomeCategories(incomeCategories.value)
 }
+
+const saveIncomeSources = () => {
+  userDataService.saveIncomeSources(incomeSources.value)
+}
+
+const saveExpenseCategories = () => {
+  userDataService.saveExpenseCategories(expenseCategories.value)
+}
+
+const loadData = () => {
+  const savedIncomeCategories = userDataService.getIncomeCategories()
+  if (savedIncomeCategories.length > 0) {
+    incomeCategories.value = savedIncomeCategories
+  } else {
+    userDataService.initDefaultData()
+    incomeCategories.value = userDataService.getIncomeCategories()
+  }
+
+  const savedIncomeSources = userDataService.getIncomeSources()
+  if (savedIncomeSources.length > 0) {
+    incomeSources.value = savedIncomeSources
+  } else {
+    incomeSources.value = userDataService.getIncomeSources()
+  }
+
+  const savedExpenseCategories = userDataService.getExpenseCategories()
+  if (savedExpenseCategories.length > 0) {
+    expenseCategories.value = savedExpenseCategories
+  } else {
+    expenseCategories.value = userDataService.getExpenseCategories()
+  }
+}
+
+// ==================== 生命周期钩子 ====================
+
+onMounted(async () => {
+  console.log('Home组件挂载，检查认证')
+
+  const token = localStorage.getItem('auth_token')
+  if (!token) {
+    console.log('未检测到token，跳转到登录页')
+    router.push({
+      path: '/login',
+      query: {redirect: router.currentRoute.value.fullPath}
+    })
+    return
+  }
+
+  console.log('认证通过，显示主页')
+
+  const currentUser = authHelperService.getCurrentUser()
+  if (!currentUser) {
+    console.error('无法获取当前用户')
+    router.push('/login')
+    return
+  }
+
+  userDataService.setCurrentUser(currentUser)
+
+  const today = new Date()
+  const formattedDate = dateHelper.formatDate(today)
+  incomeForm.date = formattedDate
+  expenseForm.date = formattedDate
+
+  loadData()
+  await refreshData()
+})
 </script>
 
 <style scoped>
@@ -2408,6 +2480,86 @@ form {
 
   .action-btn {
     width: 100%;
+  }
+}
+
+.record-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.record-actions .action-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  background: transparent;
+}
+
+.record-actions .edit-btn {
+  color: #80A492;
+}
+
+.record-actions .edit-btn:hover {
+  background-color: rgba(128, 164, 146, 0.1);
+  transform: scale(1.05);
+}
+
+.record-actions .delete-btn {
+  color: #e74c3c;
+}
+
+.record-actions .delete-btn:hover {
+  background-color: rgba(231, 76, 60, 0.1);
+  transform: scale(1.05);
+}
+
+/* 业务类型标签 */
+.business-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background-color: rgba(243, 156, 18, 0.1);
+  color: #f39c12;
+  margin-left: 6px;
+}
+
+.personal-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background-color: rgba(128, 164, 146, 0.1);
+  color: #80A492;
+  margin-left: 6px;
+}
+
+/* 编辑时禁用切换样式 */
+.record-type-switch.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* 响应式调整 */
+@media (max-width: 600px) {
+  .record-item {
+    flex-wrap: wrap;
+    position: relative;
+  }
+
+  .record-actions {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+  }
+
+  .record-info {
+    margin-right: 70px;
   }
 }
 </style>

@@ -205,6 +205,9 @@
 import { ref, computed, reactive, watch, onMounted } from 'vue'
 import businessDataService from '@/services/cache/business-cache.service.js'
 import notificationService from '@/services/utils/notification.service.js'
+import incomeService from "@/services/api/business/income.service.js"
+import expenseService from "@/services/api/business/expense.service.js"
+import indexedDBService from '@/services/db/indexed-db.service.js'
 
 const props = defineProps({
   visible: {
@@ -317,6 +320,83 @@ const totalStats = computed(() => {
   }
 })
 
+// ==================== 数据加载方法（与 Home.vue 保持一致）====================
+
+/**
+ * 从 IndexedDB 获取所有记账记录
+ * 参考 Home.vue 的 getAllRecords 方法
+ */
+const getAllRecordsFromDB = async () => {
+  try {
+    // 确保数据库已初始化
+    await indexedDBService.ensureInitialized()
+
+    console.log('历史记录弹窗：开始获取所有业务记录...')
+
+    // 分别从三个表获取数据
+    const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
+      businessDataService.getDailyRecordsWithDecrypt(),
+      incomeService.getIncomeRecords(),
+      expenseService.getExpenseRecords()
+    ])
+
+    // 合并所有记录
+    const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]
+
+    console.log('历史记录弹窗：获取记录完成:', {
+      daily: dailyRecords.length,
+      income: incomeRecords.length,
+      expense: expenseRecords.length,
+      total: allRecords.length
+    })
+
+    return allRecords
+  } catch (error) {
+    console.error('历史记录弹窗：获取记录失败:', error)
+
+    // 如果失败，尝试重新初始化数据库
+    try {
+      console.log('历史记录弹窗：尝试重新初始化数据库...')
+      await indexedDBService.init()
+      await businessDataService.init(businessDataService.getCurrentUserId())
+
+      const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
+        businessDataService.getDailyRecordsWithDecrypt(),
+        incomeService.getIncomeRecords(),
+        expenseService.getExpenseRecords()
+      ])
+
+      const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]
+      console.log('历史记录弹窗：重新获取成功，记录数:', allRecords.length)
+      return allRecords
+    } catch (retryError) {
+      console.error('历史记录弹窗：重新获取仍然失败:', retryError)
+      return []
+    }
+  }
+}
+
+// 加载所有记录
+const loadAllRecords = async () => {
+  loading.value = true
+  try {
+    // 使用与 Home.vue 相同的数据获取方式
+    const records = await getAllRecordsFromDB()
+    allRecords.value = records
+    console.log(`历史记录弹窗：加载了 ${allRecords.value.length} 条记录`)
+
+    // 调试：打印前几条记录看看数据结构
+    if (records.length > 0) {
+      console.log('历史记录弹窗：示例记录结构:', records[0])
+    }
+  } catch (error) {
+    console.error('历史记录弹窗：加载记录失败:', error)
+    allRecords.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
 // ==================== 自定义选择器方法 ====================
 
 // 打开记录类型选择器
@@ -408,22 +488,6 @@ const getYearText = (value) => {
 
 // ==================== 方法 ====================
 
-// 加载所有记录
-const loadAllRecords = async () => {
-  loading.value = true
-  try {
-    // 获取所有业务记录（包括个人记账和生意记账）
-    const records = await businessDataService.getAllBusinessRecords()
-    allRecords.value = records
-    console.log(`加载了 ${allRecords.value.length} 条记录`)
-  } catch (error) {
-    console.error('加载记录失败:', error)
-    allRecords.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
 // 重置筛选条件
 const resetFilters = () => {
   filterType.value = 'all'
@@ -495,7 +559,7 @@ const formatNumber = (num) => {
 }
 
 // ==================== 监听 ====================
-watch(() => props.visible, (newVal) => {
+watch(() => props.visible, async (newVal) => {
   if (newVal) {
     // 重置状态
     expandedRecordId.value = null
@@ -505,14 +569,19 @@ watch(() => props.visible, (newVal) => {
       delete expandedYears[key]
     })
     // 加载数据
-    loadAllRecords()
+    await loadAllRecords()
+
+    // 调试：输出数据统计
+    console.log('历史记录弹窗：数据加载完成，总记录数:', allRecords.value.length)
+    console.log('历史记录弹窗：收入记录数:', allRecords.value.filter(r => r.type === '收入').length)
+    console.log('历史记录弹窗：支出记录数:', allRecords.value.filter(r => r.type === '支出').length)
   }
 })
 
 // 初始化
-onMounted(() => {
+onMounted(async () => {
   if (props.visible) {
-    loadAllRecords()
+    await loadAllRecords()
   }
 })
 </script>
