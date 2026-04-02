@@ -13,26 +13,25 @@
         <!-- 筛选器 -->
         <div class="filter-bar">
           <div class="filter-group">
-            <select v-model="filterType" class="filter-select">
-              <option value="all">全部记录</option>
-              <option value="income">仅收入</option>
-              <option value="expense">仅支出</option>
-            </select>
+            <!-- 替换为自定义选择器：记录类型 -->
+            <div class="filter-select-custom" @click="openTypeSelector">
+              {{ getTypeText(filterType) }}
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
           <div class="filter-group">
-            <select v-model="filterBusinessType" class="filter-select">
-              <option value="all">全部类型</option>
-              <option value="personal">个人记账</option>
-              <option value="business">生意记账</option>
-            </select>
+            <!-- 替换为自定义选择器：业务类型 -->
+            <div class="filter-select-custom" @click="openBusinessTypeSelector">
+              {{ getBusinessTypeText(filterBusinessType) }}
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
           <div class="filter-group">
-            <select v-model="filterYear" class="filter-select">
-              <option value="all">全部年份</option>
-              <option v-for="year in availableYears" :key="year" :value="year">
-                {{ year }}年
-              </option>
-            </select>
+            <!-- 替换为自定义选择器：年份 -->
+            <div class="filter-select-custom" @click="openYearSelector">
+              {{ getYearText(filterYear) }}
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
           <button class="filter-reset" @click="resetFilters" title="重置筛选">
             <i class="fas fa-undo-alt"></i>
@@ -205,6 +204,7 @@
 <script setup>
 import { ref, computed, reactive, watch, onMounted } from 'vue'
 import businessDataService from '@/services/cache/business-cache.service.js'
+import notificationService from '@/services/utils/notification.service.js'
 
 const props = defineProps({
   visible: {
@@ -316,6 +316,95 @@ const totalStats = computed(() => {
     count: filteredRecords.value.length
   }
 })
+
+// ==================== 自定义选择器方法 ====================
+
+// 打开记录类型选择器
+const openTypeSelector = async () => {
+  const items = [
+    { label: '全部记录', value: 'all', icon: '📋' },
+    { label: '仅收入', value: 'income', icon: '💰' },
+    { label: '仅支出', value: 'expense', icon: '💸' }
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择记录类型',
+    items
+  })
+
+  if (result !== null) {
+    filterType.value = result
+  }
+}
+
+// 打开业务类型选择器
+const openBusinessTypeSelector = async () => {
+  const items = [
+    { label: '全部类型', value: 'all', icon: '📊' },
+    { label: '个人记账', value: 'personal', icon: '👤' },
+    { label: '生意记账', value: 'business', icon: '🏪' }
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择记账类型',
+    items
+  })
+
+  if (result !== null) {
+    filterBusinessType.value = result
+  }
+}
+
+// 打开年份选择器
+const openYearSelector = async () => {
+  const items = [
+    { label: '全部年份', value: 'all', icon: '🗓️' }
+  ]
+
+  // 动态添加可用年份
+  availableYears.value.forEach(year => {
+    items.push({
+      label: `${year}年`,
+      value: year,
+      icon: '📅'
+    })
+  })
+
+  const result = await notificationService.selectList({
+    title: '选择年份',
+    items
+  })
+
+  if (result !== null) {
+    filterYear.value = result
+  }
+}
+
+// 获取类型显示文本
+const getTypeText = (value) => {
+  const map = {
+    all: '全部记录',
+    income: '仅收入',
+    expense: '仅支出'
+  }
+  return map[value] || value
+}
+
+// 获取业务类型显示文本
+const getBusinessTypeText = (value) => {
+  const map = {
+    all: '全部类型',
+    personal: '个人记账',
+    business: '生意记账'
+  }
+  return map[value] || value
+}
+
+// 获取年份显示文本
+const getYearText = (value) => {
+  if (value === 'all') return '全部年份'
+  return `${value}年`
+}
 
 // ==================== 方法 ====================
 
@@ -563,7 +652,8 @@ onMounted(() => {
   min-width: 100px;
 }
 
-.filter-select {
+/* 自定义选择器样式 */
+.filter-select-custom {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--secondary-color);
@@ -572,11 +662,20 @@ onMounted(() => {
   color: var(--text-dark);
   background-color: var(--white);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.2s;
 }
 
-.filter-select:focus {
-  outline: none;
+.filter-select-custom:hover {
   border-color: var(--accent-color);
+  background-color: rgba(213, 235, 225, 0.1);
+}
+
+.filter-select-custom i {
+  font-size: 12px;
+  color: var(--tertiary-color);
 }
 
 .filter-reset {

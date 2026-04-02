@@ -207,24 +207,28 @@
           <div class="filter-bar">
             <div class="filter-group">
               <label><i class="fas fa-user"></i> 成员</label>
-              <select v-model="selectedMember" class="filter-select" @change="handleSearch">
-                <option value="">全部成员</option>
-                <option
-                    v-for="member in getActiveMembers()"
-                    :key="member.userId"
-                    :value="member.userId"
-                >
-                  {{ member.name }} (¥{{ formatNumber(member.amount) }})
-                </option>
-              </select>
+              <div class="custom-select-display" @click="openMemberSelector">
+                <span :class="{ placeholder: !selectedMember }">
+                  {{ getMemberDisplayText() }}
+                </span>
+                <i class="fas fa-chevron-down"></i>
+              </div>
             </div>
             <div class="filter-group">
               <label><i class="fas fa-calendar"></i> 开始日期</label>
-              <input type="date" v-model="localDateRange.startTime" class="filter-input" @change="handleSearch">
+              <!-- 替换为自定义日期选择器触发框 -->
+              <div class="filter-input date-input" @click="openStartDatePicker">
+                <span>{{ localDateRange.startTime || '选择日期' }}</span>
+                <i class="fas fa-calendar-alt"></i>
+              </div>
             </div>
             <div class="filter-group">
               <label><i class="fas fa-calendar"></i> 结束日期</label>
-              <input type="date" v-model="localDateRange.endTime" class="filter-input" @change="handleSearch">
+              <!-- 替换为自定义日期选择器触发框 -->
+              <div class="filter-input date-input" @click="openEndDatePicker">
+                <span>{{ localDateRange.endTime || '选择日期' }}</span>
+                <i class="fas fa-calendar-alt"></i>
+              </div>
             </div>
             <div class="filter-actions">
               <button class="search-btn" @click="handleSearch">
@@ -319,6 +323,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, defineProps, defineEmits } from 'vue'
+import { notificationService } from '@/services'
 
 const props = defineProps({
   selectedPlan: {
@@ -420,6 +425,33 @@ watch(() => props.dateRange, (newVal) => {
   localDateRange.startTime = newVal.startTime
   localDateRange.endTime = newVal.endTime
 }, { deep: true })
+
+// ========== 日期选择器方法 ==========
+/**
+ * 打开开始日期选择器
+ */
+const openStartDatePicker = async () => {
+  const result = await notificationService.datePicker({
+    title: '选择开始日期',
+    defaultDate: localDateRange.startTime ? new Date(localDateRange.startTime) : new Date(),
+  })
+  if (result) {
+    localDateRange.startTime = result
+  }
+}
+
+/**
+ * 打开结束日期选择器
+ */
+const openEndDatePicker = async () => {
+  const result = await notificationService.datePicker({
+    title: '选择结束日期',
+    defaultDate: localDateRange.endTime ? new Date(localDateRange.endTime) : new Date(),
+  })
+  if (result) {
+    localDateRange.endTime = result
+  }
+}
 
 // ========== 工具函数 ==========
 /**
@@ -536,6 +568,46 @@ const isExpired = (deadline) => {
   } catch (error) {
     console.error('检查过期失败:', error)
     return false
+  }
+}
+
+/**
+ * 获取成员显示文本
+ */
+const getMemberDisplayText = () => {
+  if (!selectedMember.value) return '全部成员'
+  const members = getActiveMembers()
+  const member = members.find(m => String(m.userId) === String(selectedMember.value))
+  if (member) {
+    return `${member.name} (¥${formatNumber(member.amount)})`
+  }
+  return '全部成员'
+}
+
+/**
+ * 打开成员选择器
+ */
+const openMemberSelector = async () => {
+  const members = getActiveMembers()
+
+  const items = [
+    { value: '', label: '全部成员', icon: '👥' },
+    ...members.map(member => ({
+      value: String(member.userId),
+      label: `${member.name} (¥${formatNumber(member.amount)})`,
+      icon: member.isCreator ? '👑' : '👤'
+    }))
+  ]
+
+  const selected = await notificationService.selectList({
+    title: '选择成员',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected !== undefined && selected !== null) {
+    selectedMember.value = selected
+    handleSearch()
   }
 }
 
@@ -1181,16 +1253,73 @@ const toggleMemberRecords = (member) => {
   gap: 5px;
 }
 
-.filter-select,
+/* 自定义选择器显示样式 */
+.custom-select-display {
+  padding: 8px 12px;
+  border: 1px solid var(--secondary-color);
+  border-radius: 8px;
+  font-size: 13px;
+  background-color: var(--white);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
+}
+
+.custom-select-display:hover {
+  border-color: var(--accent-color);
+  background-color: rgba(128, 164, 146, 0.05);
+}
+
+.custom-select-display .placeholder {
+  color: var(--text-light);
+  opacity: 0.7;
+}
+
+.custom-select-display i {
+  color: var(--accent-color);
+  font-size: 12px;
+  transition: transform 0.3s;
+}
+
+.custom-select-display:hover i {
+  transform: translateY(2px);
+}
+
+/* 自定义日期输入框样式 */
 .filter-input {
   padding: 8px 12px;
   border: 1px solid var(--secondary-color);
   border-radius: 8px;
   font-size: 13px;
   background-color: var(--white);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
 }
 
-.filter-select:focus,
+.filter-input:hover {
+  border-color: var(--accent-color);
+  background-color: rgba(128, 164, 146, 0.05);
+}
+
+.filter-input i {
+  color: var(--accent-color);
+  font-size: 14px;
+}
+
+.filter-input span {
+  color: var(--text-dark);
+}
+
+.filter-input .placeholder-text {
+  color: var(--text-light);
+  opacity: 0.7;
+}
+
 .filter-input:focus {
   outline: none;
   border-color: var(--accent-color);

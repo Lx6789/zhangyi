@@ -40,18 +40,22 @@
 
             <!-- 自定义日期范围 -->
             <div v-if="dateRange === 'custom'" class="custom-date-range">
+              <!-- 开始日期 -->
               <input
-                  v-model="customStartDate"
-                  type="date"
+                  readonly
+                  :value="customStartDate"
                   class="form-input"
-                  @change="handleCustomDateChange"
+                  placeholder="选择开始日期"
+                  @click="openStartDatePicker"
               >
               <span>至</span>
+              <!-- 结束日期 -->
               <input
-                  v-model="customEndDate"
-                  type="date"
+                  readonly
+                  :value="customEndDate"
                   class="form-input"
-                  @change="handleCustomDateChange"
+                  placeholder="选择结束日期"
+                  @click="openEndDatePicker"
               >
             </div>
           </div>
@@ -343,6 +347,31 @@ const handleDateRangeChange = (range) => {
 const handleCustomDateChange = () => {
   if (customStartDate.value && customEndDate.value) {
     handleDateRangeChange('custom')
+  }
+}
+
+// 打开开始日期选择器
+const openStartDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择开始日期',
+    defaultDate: customStartDate.value || new Date()
+  })
+  if (date) {
+    customStartDate.value = date
+    handleCustomDateChange()
+  }
+}
+
+// 打开结束日期选择器
+const openEndDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择结束日期',
+    defaultDate: customEndDate.value || new Date(),
+    minDate: customStartDate.value || undefined
+  })
+  if (date) {
+    customEndDate.value = date
+    handleCustomDateChange()
   }
 }
 
@@ -826,6 +855,7 @@ onMounted(() => {
   font-size: 14px;
   background-color: white;
   transition: all 0.3s;
+  cursor: pointer;
 }
 
 .custom-date-range .form-input:focus {

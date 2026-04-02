@@ -179,15 +179,12 @@
         </div>
         <div class="form-group">
           <label><i class="fas fa-list"></i> 存钱类型</label>
-          <select v-model="form.type" class="form-input">
-            <option value="日常储蓄">日常储蓄</option>
-            <option value="旅行基金">旅行基金</option>
-            <option value="教育基金">教育基金</option>
-            <option value="购房基金">购房基金</option>
-            <option value="购车基金">购车基金</option>
-            <option value="应急资金">应急资金</option>
-            <option value="其他">其他</option>
-          </select>
+          <div class="custom-select-display" @click="openSavingsTypeSelector">
+            <span :class="{ placeholder: !form.type }">
+              {{ getTypeLabel(form.type) }}
+            </span>
+            <i class="fas fa-chevron-down"></i>
+          </div>
         </div>
       </div>
 
@@ -269,6 +266,46 @@ const emit = defineEmits([
   'submit-success',
   'reset-form'
 ])
+
+// ========== 存钱类型选项 ==========
+const savingsTypeOptions = [
+  { value: '日常储蓄', label: '日常储蓄', icon: '💰' },
+  { value: '旅行基金', label: '旅行基金', icon: '✈️' },
+  { value: '教育基金', label: '教育基金', icon: '📚' },
+  { value: '购房基金', label: '购房基金', icon: '🏠' },
+  { value: '购车基金', label: '购车基金', icon: '🚗' },
+  { value: '应急资金', label: '应急资金', icon: '🆘' },
+  { value: '其他', label: '其他', icon: '⭐' }
+]
+
+/**
+ * 获取类型显示标签
+ */
+const getTypeLabel = (type) => {
+  const option = savingsTypeOptions.find(opt => opt.value === type)
+  return option ? `${option.icon} ${option.label}` : type || '选择存钱类型'
+}
+
+/**
+ * 打开存钱类型选择器
+ */
+const openSavingsTypeSelector = async () => {
+  const items = savingsTypeOptions.map(opt => ({
+    value: opt.value,
+    label: `${opt.icon} ${opt.label}`,
+    icon: opt.icon
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择存钱类型',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.type = selected
+  }
+}
 
 // ========== 工具函数 ==========
 const getDefaultDeadline = () => {
@@ -1086,6 +1123,42 @@ onMounted(() => {
 .input-hint i {
   font-size: 12px;
   color: var(--accent-color);
+}
+
+/* 自定义选择器显示样式 */
+.custom-select-display {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--secondary-color);
+  border-radius: 12px;
+  font-size: 15px;
+  color: var(--text-dark);
+  background-color: rgba(213, 235, 225, 0.1);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
+}
+
+.custom-select-display:hover {
+  border-color: var(--accent-color);
+  background-color: rgba(213, 235, 225, 0.2);
+}
+
+.custom-select-display .placeholder {
+  color: var(--text-light);
+  opacity: 0.7;
+}
+
+.custom-select-display i {
+  color: var(--accent-color);
+  font-size: 14px;
+  transition: transform 0.3s;
+}
+
+.custom-select-display:hover i {
+  transform: translateY(2px);
 }
 
 .members-section {

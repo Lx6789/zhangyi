@@ -571,17 +571,24 @@
 
           <div class="form-group">
             <label><i class="fas fa-calendar-alt"></i> 还款日期</label>
-            <input v-model="repaymentForm.date" type="date" class="form-input" required>
+            <div class="date-input-wrapper" @click="openRepaymentDatePicker">
+              <input
+                  v-model="repaymentForm.date"
+                  type="text"
+                  class="form-input"
+                  placeholder="点击选择日期"
+                  readonly
+              >
+              <i class="fas fa-calendar-alt date-icon"></i>
+            </div>
           </div>
 
           <div class="form-group">
             <label><i class="fas fa-credit-card"></i> 支付方式</label>
-            <select v-model="repaymentForm.paymentMethod" class="form-select">
-              <option value="现金">现金</option>
-              <option value="微信">微信</option>
-              <option value="支付宝">支付宝</option>
-              <option value="银行卡">银行卡</option>
-            </select>
+            <div class="form-select-custom" @click="openPaymentMethodSelect('repay')">
+              <span class="select-value">{{ repaymentForm.paymentMethod }}</span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <div class="form-group">
@@ -655,17 +662,24 @@
 
           <div class="form-group">
             <label><i class="fas fa-calendar-alt"></i> 收款日期</label>
-            <input v-model="collectionForm.date" type="date" class="form-input" required>
+            <div class="date-input-wrapper" @click="openCollectionDatePicker">
+              <input
+                  v-model="collectionForm.date"
+                  type="text"
+                  class="form-input"
+                  placeholder="点击选择日期"
+                  readonly
+              >
+              <i class="fas fa-calendar-alt date-icon"></i>
+            </div>
           </div>
 
           <div class="form-group">
             <label><i class="fas fa-credit-card"></i> 收款方式</label>
-            <select v-model="collectionForm.paymentMethod" class="form-select">
-              <option value="现金">现金</option>
-              <option value="微信">微信</option>
-              <option value="支付宝">支付宝</option>
-              <option value="银行卡">银行卡</option>
-            </select>
+            <div class="form-select-custom" @click="openPaymentMethodSelect('collect')">
+              <span class="select-value">{{ collectionForm.paymentMethod }}</span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <div class="form-group">
@@ -735,6 +749,58 @@ const collectionForm = reactive({
   paymentMethod: '现金',
   note: ''
 })
+
+// ==================== 支付方式选择列表 ====================
+const paymentMethodList = [
+  { label: '现金', value: '现金', icon: '💵' },
+  { label: '微信', value: '微信', icon: '💬' },
+  { label: '支付宝', value: '支付宝', icon: '🏧' },
+  { label: '银行卡', value: '银行卡', icon: '💳' }
+]
+
+// ==================== 自定义日期选择器方法 ====================
+
+/**
+ * 打开还款日期选择器
+ */
+const openRepaymentDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择还款日期',
+    defaultDate: repaymentForm.date || new Date()
+  })
+  if (date) {
+    repaymentForm.date = date
+  }
+}
+
+/**
+ * 打开收款日期选择器
+ */
+const openCollectionDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择收款日期',
+    defaultDate: collectionForm.date || new Date()
+  })
+  if (date) {
+    collectionForm.date = date
+  }
+}
+
+// 打开支付方式选择弹窗
+const openPaymentMethodSelect = async (type) => {
+  const selectedValue = await notificationService.selectList({
+    title: '选择支付方式',
+    items: paymentMethodList
+  })
+
+  if (selectedValue) {
+    if (type === 'repay') {
+      repaymentForm.paymentMethod = selectedValue
+    } else {
+      collectionForm.paymentMethod = selectedValue
+    }
+  }
+}
 
 // ==================== 计算属性 ====================
 
@@ -1050,7 +1116,75 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 样式保持不变，与之前相同 */
+/* 自定义选择框样式 */
+.form-select-custom {
+  width: 100%;
+  padding: 12px 15px;
+  border: 1px solid #B1D5C8;
+  border-radius: 12px;
+  font-size: 14px;
+  color: #333;
+  background-color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  transition: all 0.3s;
+}
+
+.form-select-custom:hover {
+  border-color: #80A492;
+}
+
+.form-select-custom:focus-within {
+  outline: none;
+  border-color: #80A492;
+  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+}
+
+.form-select-custom .select-value {
+  flex: 1;
+}
+
+.form-select-custom i {
+  color: #80A492;
+  font-size: 12px;
+}
+
+/* ==================== 自定义日期选择器输入框样式 ==================== */
+.date-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.date-input-wrapper .form-input {
+  padding-right: 40px;
+  cursor: pointer;
+}
+
+.date-input-wrapper .date-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #80A492;
+  font-size: 16px;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.date-input-wrapper .form-input[readonly] {
+  cursor: pointer;
+}
+
+.date-input-wrapper .form-input[readonly]:hover + .date-icon,
+.date-input-wrapper:hover .date-icon {
+  opacity: 1;
+}
+
+/* 原有样式保持不变 */
 .credit-type-badge {
   display: inline-flex;
   align-items: center;
@@ -1733,28 +1867,6 @@ onMounted(() => {
 }
 
 .form-input:focus {
-  outline: none;
-  border-color: #80A492;
-  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
-}
-
-.form-select {
-  width: 100%;
-  padding: 12px 35px 12px 15px;
-  border: 1px solid #B1D5C8;
-  border-radius: 12px;
-  font-size: 14px;
-  color: #333;
-  background-color: white;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
-}
-
-.form-select:focus {
   outline: none;
   border-color: #80A492;
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);

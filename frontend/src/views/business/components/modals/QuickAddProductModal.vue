@@ -38,17 +38,12 @@
               <span>商品分类 <span class="required">*</span></span>
             </label>
             <div class="category-select-wrapper">
-              <select v-model="form.category" class="form-select" required>
-                <option value="" disabled>请选择商品分类</option>
-                <option
-                    v-for="category in props.categories"
-                    :key="category.id"
-                    :value="category.name"
-                >
-                  {{ category.name }}
-                  <span v-if="category.isDefault" class="default-badge">默认</span>
-                </option>
-              </select>
+              <div class="custom-select-display" @click="openCategorySelector">
+                <span :class="{ placeholder: !form.category }">
+                  {{ getCategoryDisplayText() }}
+                </span>
+                <i class="fas fa-chevron-down"></i>
+              </div>
               <button
                   type="button"
                   class="icon-btn small"
@@ -71,17 +66,12 @@
               <i class="fas fa-balance-scale"></i>
               <span>单位 <span class="required">*</span></span>
             </label>
-            <select v-model="form.unit" class="form-select" required>
-              <option value="" disabled>请选择单位</option>
-              <option value="斤">斤</option>
-              <option value="公斤">公斤</option>
-              <option value="个">个</option>
-              <option value="份">份</option>
-              <option value="箱">箱</option>
-              <option value="袋">袋</option>
-              <option value="瓶">瓶</option>
-              <option value="包">包</option>
-            </select>
+            <div class="custom-select-display" @click="openUnitSelector">
+              <span :class="{ placeholder: !form.unit }">
+                {{ form.unit || '请选择单位' }}
+              </span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <!-- 参考售价 -->
@@ -173,6 +163,18 @@ const emit = defineEmits(['update:visible', 'success', 'open-category'])
 const saving = ref(false)
 const nameInput = ref(null)
 
+// 单位选项
+const unitOptions = [
+  { value: '斤', label: '斤', icon: '⚖️' },
+  { value: '公斤', label: '公斤', icon: '⚖️' },
+  { value: '个', label: '个', icon: '🔢' },
+  { value: '份', label: '份', icon: '🍽️' },
+  { value: '箱', label: '箱', icon: '📦' },
+  { value: '袋', label: '袋', icon: '🎒' },
+  { value: '瓶', label: '瓶', icon: '🍾' },
+  { value: '包', label: '包', icon: '📦' }
+]
+
 // 表单数据
 const form = reactive({
   name: '',
@@ -182,6 +184,66 @@ const form = reactive({
   produceDate: '',
   description: ''
 })
+
+// ==================== 自定义选择器方法 ====================
+
+/**
+ * 获取分类显示文本
+ */
+const getCategoryDisplayText = () => {
+  if (!form.category) return '请选择商品分类'
+  return form.category
+}
+
+/**
+ * 打开分类选择器
+ */
+const openCategorySelector = async () => {
+  const categories = props.categories
+  if (categories.length === 0) {
+    notificationService.showNotification('暂无分类，请先添加分类', 'warning')
+    return
+  }
+
+  const items = categories.map(cat => ({
+    value: cat.name,
+    label: cat.name,
+    icon: cat.isDefault ? '⭐' : '📁'
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择商品分类',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.category = selected
+  }
+}
+
+/**
+ * 打开单位选择器
+ */
+const openUnitSelector = async () => {
+  const items = unitOptions.map(opt => ({
+    value: opt.value,
+    label: `${opt.icon} ${opt.label}`,
+    icon: opt.icon
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择单位',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.unit = selected
+  }
+}
+
+// ==================== 原有方法 ====================
 
 // 打开生产日期选择器
 const openProduceDatePicker = async () => {
@@ -430,6 +492,42 @@ watch(() => props.categories, (val) => {
   margin-left: 2px;
 }
 
+/* 自定义选择器显示样式 */
+.custom-select-display {
+  width: 100%;
+  padding: 12px 35px 12px 16px;
+  border: 1px solid #D5EBE1;
+  border-radius: 12px;
+  font-size: 14px;
+  background-color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
+  box-sizing: border-box;
+}
+
+.custom-select-display:hover {
+  border-color: #80A492;
+  background-color: rgba(128, 164, 146, 0.05);
+}
+
+.custom-select-display .placeholder {
+  color: #999;
+  opacity: 0.7;
+}
+
+.custom-select-display i {
+  color: #80A492;
+  font-size: 14px;
+  transition: transform 0.3s;
+}
+
+.custom-select-display:hover i {
+  transform: translateY(2px);
+}
+
 .default-badge {
   font-size: 10px;
   background: rgba(128, 164, 146, 0.2);
@@ -501,29 +599,8 @@ watch(() => props.categories, (val) => {
   align-items: center;
 }
 
-.category-select-wrapper .form-select {
+.category-select-wrapper .custom-select-display {
   flex: 1;
-}
-
-.form-select {
-  width: 100%;
-  padding: 12px 35px 12px 16px;
-  border: 1px solid #D5EBE1;
-  border-radius: 12px;
-  font-size: 14px;
-  background: white;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
-}
-
-.form-select:focus {
-  outline: none;
-  border-color: #80A492;
-  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
 }
 
 .icon-btn.small {

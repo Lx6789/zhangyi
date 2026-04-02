@@ -81,12 +81,13 @@
                     placeholder="搜索订单号、供应商..."
                 >
               </div>
-              <select v-model="orderStatusFilter" class="filter-select">
-                <option value="all">全部状态</option>
-                <option value="pending">待处理</option>
-                <option value="completed">已完成</option>
-                <option value="cancelled">已取消</option>
-              </select>
+              <!-- 替换为自定义选择器 -->
+              <div class="filter-select" @click="openOrderStatusFilter">
+                <div class="select-display">
+                  {{ orderStatusFilterText }}
+                  <i class="fas fa-chevron-down"></i>
+                </div>
+              </div>
             </div>
 
             <!-- 订单列表 -->
@@ -318,12 +319,13 @@
                     placeholder="搜索商品名称、供应商..."
                 >
               </div>
-              <select v-model="historySupplierFilter" class="filter-select">
-                <option value="all">全部供应商</option>
-                <option v-for="s in suppliers" :key="s.id" :value="s.id">
-                  {{ s.name }}
-                </option>
-              </select>
+              <!-- 替换为自定义选择器 -->
+              <div class="filter-select" @click="openHistorySupplierFilter">
+                <div class="select-display">
+                  {{ historySupplierFilterText }}
+                  <i class="fas fa-chevron-down"></i>
+                </div>
+              </div>
             </div>
 
             <!-- 日期范围筛选 -->
@@ -423,12 +425,13 @@
           <div class="form-row">
             <div class="form-group">
               <label><i class="fas fa-tag"></i> 供应商类别</label>
-              <select v-model="supplierForm.category" class="form-select">
-                <option value="" disabled>选择类别</option>
-                <option v-for="cat in supplierCategories" :key="cat" :value="cat">
-                  {{ cat }}
-                </option>
-              </select>
+              <!-- 替换为自定义选择器 -->
+              <div class="form-select" @click="openSupplierCategorySelect">
+                <div class="select-display">
+                  {{ supplierForm.category || '选择类别' }}
+                  <i class="fas fa-chevron-down"></i>
+                </div>
+              </div>
             </div>
 
             <div class="form-group">
@@ -501,12 +504,13 @@
           <div class="form-row">
             <div class="form-group">
               <label><i class="fas fa-credit-card"></i> 结算方式</label>
-              <select v-model="supplierForm.paymentTerms" class="form-select">
-                <option value="" disabled>选择结算方式</option>
-                <option v-for="term in paymentTerms" :key="term" :value="term">
-                  {{ term }}
-                </option>
-              </select>
+              <!-- 替换为自定义选择器 -->
+              <div class="form-select" @click="openPaymentTermsSelect">
+                <div class="select-display">
+                  {{ supplierForm.paymentTerms || '选择结算方式' }}
+                  <i class="fas fa-chevron-down"></i>
+                </div>
+              </div>
             </div>
 
             <div class="form-group">
@@ -619,12 +623,13 @@
                 <div class="form-group">
                   <label>供应商 <span class="required">*</span></label>
                   <div class="select-with-action">
-                    <select v-model="orderForm.supplierId" class="form-select" required>
-                      <option value="" disabled>请选择供应商</option>
-                      <option v-for="s in suppliers" :key="s.id" :value="s.id">
-                        {{ s.name }}
-                      </option>
-                    </select>
+                    <!-- 替换为自定义选择器 -->
+                    <div class="form-select" @click="openOrderSupplierSelect">
+                      <div class="select-display">
+                        {{ getSupplierName(orderForm.supplierId) || '请选择供应商' }}
+                        <i class="fas fa-chevron-down"></i>
+                      </div>
+                    </div>
                     <button
                         type="button"
                         class="icon-btn small"
@@ -710,17 +715,13 @@
                     <span class="item-index">{{ index + 1 }}</span>
 
                     <div class="item-field">
-                      <select
-                          v-model="item.productId"
-                          class="form-select"
-                          @change="onProductSelected(index)"
-                          required
-                      >
-                        <option value="" disabled>选择商品</option>
-                        <option v-for="p in props.products" :key="p.id" :value="p.id">
-                          {{ p.name }}
-                        </option>
-                      </select>
+                      <!-- 替换为自定义选择器 -->
+                      <div class="form-select" @click="openProductSelect(index)">
+                        <div class="select-display">
+                          {{ item.productName || '选择商品' }}
+                          <i class="fas fa-chevron-down"></i>
+                        </div>
+                      </div>
                     </div>
 
                     <div class="item-field">
@@ -1069,6 +1070,23 @@ const supplierForm = reactive({
 // 当前选择的日期范围字段
 const currentDateRangeField = ref(null)
 
+// 状态文本映射
+const orderStatusFilterText = computed(() => {
+  const map = {
+    all: '全部状态',
+    pending: '待处理',
+    completed: '已完成',
+    cancelled: '已取消'
+  }
+  return map[orderStatusFilter.value] || '全部状态'
+})
+
+const historySupplierFilterText = computed(() => {
+  if (historySupplierFilter.value === 'all') return '全部供应商'
+  const supplier = suppliers.value.find(s => s.id === historySupplierFilter.value)
+  return supplier ? supplier.name : '全部供应商'
+})
+
 // ==================== 计算属性 ====================
 
 // 统计数据（使用 service 方法）
@@ -1109,6 +1127,104 @@ const supplierCategories = computed(() => {
 const paymentTerms = computed(() => {
   return purchaseService.getPaymentTerms()
 })
+
+// ==================== 自定义选择器打开方法 ====================
+
+/** 打开订单状态筛选 */
+const openOrderStatusFilter = async () => {
+  const items = [
+    { label: '全部状态', value: 'all' },
+    { label: '待处理', value: 'pending' },
+    { label: '已完成', value: 'completed' },
+    { label: '已取消', value: 'cancelled' }
+  ]
+  const res = await notificationService.selectList({
+    title: '选择订单状态',
+    items
+  })
+  if (res) {
+    orderStatusFilter.value = res
+    filterOrders()
+  }
+}
+
+/** 打开历史供应商筛选 */
+const openHistorySupplierFilter = async () => {
+  const items = [
+    { label: '全部供应商', value: 'all' },
+    ...suppliers.value.map(s => ({ label: s.name, value: s.id }))
+  ]
+  const res = await notificationService.selectList({
+    title: '选择供应商',
+    items
+  })
+  if (res) {
+    historySupplierFilter.value = res
+    filterHistory()
+  }
+}
+
+/** 打开供应商类别选择 */
+const openSupplierCategorySelect = async () => {
+  const items = supplierCategories.value.map(cat => ({
+    label: cat,
+    value: cat
+  }))
+  const res = await notificationService.selectList({
+    title: '选择供应商类别',
+    items
+  })
+  if (res) {
+    supplierForm.category = res
+  }
+}
+
+/** 打开结算方式选择 */
+const openPaymentTermsSelect = async () => {
+  const items = paymentTerms.value.map(term => ({
+    label: term,
+    value: term
+  }))
+  const res = await notificationService.selectList({
+    title: '选择结算方式',
+    items
+  })
+  if (res) {
+    supplierForm.paymentTerms = res
+  }
+}
+
+/** 打开订单供应商选择 */
+const openOrderSupplierSelect = async () => {
+  const items = suppliers.value.map(s => ({
+    label: s.name,
+    value: s.id
+  }))
+  const res = await notificationService.selectList({
+    title: '选择供应商',
+    items
+  })
+  if (res) {
+    orderForm.supplierId = res
+  }
+}
+
+/** 打开商品选择 */
+const openProductSelect = async (index) => {
+  const items = props.products.map(p => ({
+    label: p.name,
+    value: p.id
+  }))
+  const res = await notificationService.selectList({
+    title: '选择商品',
+    items
+  })
+  if (res) {
+    const item = orderForm.items[index]
+    item.productId = res
+    onProductSelected(index)
+  }
+}
 
 // ==================== 辅助方法 ====================
 
@@ -2201,7 +2317,9 @@ onMounted(() => {
   color: #999;
 }
 
-.filter-select {
+/* 自定义选择器样式 */
+.filter-select,
+.form-select {
   width: 150px;
   padding: 12px 15px;
   border: 1px solid #B1D5C8;
@@ -2209,14 +2327,32 @@ onMounted(() => {
   font-size: 14px;
   background: white;
   cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
+  transition: all 0.3s;
 }
 
-.filter-select:focus {
+.form-select {
+  width: 100%;
+}
+
+.filter-select:hover,
+.form-select:hover {
+  border-color: #80A492;
+}
+
+.select-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #333;
+}
+
+.select-display i {
+  color: #80A492;
+  font-size: 12px;
+}
+
+.filter-select:focus,
+.form-select:focus {
   outline: none;
   border-color: #80A492;
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
@@ -2857,28 +2993,6 @@ onMounted(() => {
   color: #666;
   border-color: #D5EBE1;
   cursor: pointer;
-}
-
-.form-select {
-  width: 100%;
-  padding: 12px 35px 12px 15px;
-  border: 1px solid #B1D5C8;
-  border-radius: 12px;
-  font-size: 14px;
-  color: #333;
-  background-color: white;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
-}
-
-.form-select:focus {
-  outline: none;
-  border-color: #80A492;
-  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
 }
 
 .form-textarea {

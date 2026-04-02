@@ -42,12 +42,12 @@
           <!-- 商品选择 -->
           <div class="form-group" v-if="form.category">
             <label><i class="fas fa-box"></i> 选择商品</label>
-            <select v-model="form.productId" class="form-select" @change="onProductSelected">
-              <option value="">请选择商品</option>
-              <option v-for="product in filteredProducts" :key="product.id" :value="product.id">
-                {{ product.name }} ({{ product.unit }})
-              </option>
-            </select>
+            <div class="custom-select-display" @click="openProductSelector">
+              <span :class="{ placeholder: !form.productId }">
+                {{ getProductDisplayText() }}
+              </span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
             <button type="button" class="photo-btn" @click="openQuickAddProduct">
               <i class="fas fa-plus-circle"></i> 添加新商品
             </button>
@@ -56,16 +56,12 @@
           <!-- 销售渠道 -->
           <div class="form-group">
             <label><i class="fas fa-store"></i> 销售渠道</label>
-            <select v-model="form.channel" class="form-select" required @change="onChannelChange">
-              <option value="">选择销售渠道</option>
-              <option value="门店零售">门店零售</option>
-              <option value="批发">批发</option>
-              <option value="线上订单">线上订单</option>
-              <option value="外卖平台">外卖平台</option>
-              <option value="集市摆摊">集市摆摊</option>
-              <option value="单位团购">单位团购</option>
-              <option value="其他">其他</option>
-            </select>
+            <div class="custom-select-display" @click="openChannelSelector">
+              <span :class="{ placeholder: !form.channel }">
+                {{ getChannelDisplayText() }}
+              </span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <!-- 批发库存信息 -->
@@ -125,16 +121,12 @@
                 <i class="fas fa-users-cog"></i>
               </button>
             </div>
-            <select v-model="form.customerId" class="form-select" @change="onCustomerChange">
-              <option value="">散客/无记录</option>
-              <option v-for="customer in customers" :key="customer.id" :value="customer.id">
-                {{ customer.name }}
-                <span v-if="customer.type">({{ customer.type }})</span>
-                <span v-if="customer.creditInfo?.balance > 0" style="color:#e74c3c;">
-                  赊账: ¥{{ formatNumber(customer.creditInfo.balance) }}
-                </span>
-              </option>
-            </select>
+            <div class="custom-select-display" @click="openCustomerSelector">
+              <span :class="{ placeholder: !form.customerId }">
+                {{ getCustomerDisplayText() }}
+              </span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <!-- 数量 & 单价 -->
@@ -165,14 +157,10 @@
           <!-- 单位 -->
           <div class="form-group">
             <label><i class="fas fa-balance-scale"></i> 单位</label>
-            <select v-model="form.unit" class="form-select">
-              <option value="斤">斤</option>
-              <option value="公斤">公斤</option>
-              <option value="个">个</option>
-              <option value="份">份</option>
-              <option value="箱">箱</option>
-              <option value="袋">袋</option>
-            </select>
+            <div class="custom-select-display" @click="openUnitSelector">
+              <span>{{ form.unit || '斤' }}</span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <!-- 收款方式 -->
@@ -208,7 +196,6 @@
               </div>
               <div class="form-group">
                 <label><i class="fas fa-calendar-check"></i> 预计还款日期</label>
-                <!-- 这里替换成自定义日期选择器 -->
                 <div class="input-wrapper" @click="openRepayDatePicker">
                   <input
                       v-model="form.expectedRepayDate"
@@ -289,6 +276,27 @@ const emit = defineEmits(['update:visible', 'success', 'open-customer', 'open-ca
 // ==================== 常量 ====================
 const paymentMethods = incomeService.getPaymentMethods()
 
+// 销售渠道选项
+const channelOptions = [
+  { value: '门店零售', label: '门店零售', icon: '🏪' },
+  { value: '批发', label: '批发', icon: '📦' },
+  { value: '线上订单', label: '线上订单', icon: '📱' },
+  { value: '外卖平台', label: '外卖平台', icon: '🛵' },
+  { value: '集市摆摊', label: '集市摆摊', icon: '🏮' },
+  { value: '单位团购', label: '单位团购', icon: '🏢' },
+  { value: '其他', label: '其他', icon: '📝' }
+]
+
+// 单位选项
+const unitOptions = [
+  { value: '斤', label: '斤', icon: '⚖️' },
+  { value: '公斤', label: '公斤', icon: '⚖️' },
+  { value: '个', label: '个', icon: '🔢' },
+  { value: '份', label: '份', icon: '🍽️' },
+  { value: '箱', label: '箱', icon: '📦' },
+  { value: '袋', label: '袋', icon: '🎒' }
+]
+
 // ==================== 状态 ====================
 const quickAddModalVisible = ref(false)
 const autoUpdateInventory = ref(true)
@@ -366,7 +374,147 @@ const filteredPaymentMethods = computed(() => {
   return methods
 })
 
-// ==================== 方法 ====================
+// ==================== 自定义选择器方法 ====================
+
+/**
+ * 获取商品显示文本
+ */
+const getProductDisplayText = () => {
+  if (!form.productId) return '请选择商品'
+  const product = props.products.find(p => p.id === form.productId)
+  return product ? `${product.name} (${product.unit})` : '请选择商品'
+}
+
+/**
+ * 打开商品选择器
+ */
+const openProductSelector = async () => {
+  if (!form.category) {
+    notificationService.showNotification('请先选择商品分类', 'warning')
+    return
+  }
+
+  const products = filteredProducts.value
+  if (products.length === 0) {
+    notificationService.showNotification('该分类下暂无商品，请先添加', 'warning')
+    return
+  }
+
+  const items = products.map(product => ({
+    value: product.id,
+    label: `${product.name} (${product.unit})`,
+    icon: '📦'
+  }))
+
+  const selected = await notificationService.selectList({
+    title: `选择商品 - ${form.category}`,
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.productId = selected
+    onProductSelected()
+  }
+}
+
+/**
+ * 获取销售渠道显示文本
+ */
+const getChannelDisplayText = () => {
+  if (!form.channel) return '选择销售渠道'
+  const option = channelOptions.find(opt => opt.value === form.channel)
+  return option ? `${option.icon} ${option.label}` : form.channel
+}
+
+/**
+ * 打开销售渠道选择器
+ */
+const openChannelSelector = async () => {
+  const items = channelOptions.map(opt => ({
+    value: opt.value,
+    label: `${opt.icon} ${opt.label}`,
+    icon: opt.icon
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择销售渠道',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.channel = selected
+    onChannelChange()
+  }
+}
+
+/**
+ * 获取客户显示文本
+ */
+const getCustomerDisplayText = () => {
+  if (!form.customerId) return '散客/无记录'
+  const customer = props.customers.find(c => c.id === form.customerId)
+  if (!customer) return '散客/无记录'
+  let text = customer.name
+  if (customer.type) text += ` (${customer.type})`
+  if (customer.creditInfo?.balance > 0) text += ` 赊账: ¥${formatNumber(customer.creditInfo.balance)}`
+  return text
+}
+
+/**
+ * 打开客户选择器
+ */
+const openCustomerSelector = async () => {
+  const customers = props.customers
+  const items = [
+    { value: '', label: '散客/无记录', icon: '👤' },
+    ...customers.map(customer => {
+      let label = customer.name
+      if (customer.type) label += ` (${customer.type})`
+      if (customer.creditInfo?.balance > 0) label += ` 赊账: ¥${formatNumber(customer.creditInfo.balance)}`
+      return {
+        value: customer.id,
+        label: label,
+        icon: customer.type === '批发客户' ? '🏪' : '👤'
+      }
+    })
+  ]
+
+  const selected = await notificationService.selectList({
+    title: '选择客户',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected !== undefined && selected !== null) {
+    form.customerId = selected
+    onCustomerChange()
+  }
+}
+
+/**
+ * 打开单位选择器
+ */
+const openUnitSelector = async () => {
+  const items = unitOptions.map(opt => ({
+    value: opt.value,
+    label: `${opt.icon} ${opt.label}`,
+    icon: opt.icon
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择单位',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.unit = selected
+  }
+}
+
+// ==================== 原有方法 ====================
 const openDatePicker = async () => {
   const date = await notificationService.datePicker({
     title: '选择日期',
@@ -377,7 +525,6 @@ const openDatePicker = async () => {
   }
 }
 
-// 新增：打开赊账还款日期选择器（你的自定义美化版）
 const openRepayDatePicker = async () => {
   const date = await notificationService.datePicker({
     title: '选择预计还款日期',
@@ -413,6 +560,10 @@ const onProductSelected = () => {
   }
 }
 
+const onCustomerChange = () => {
+  // 客户变化时的处理
+}
+
 const validateQuantity = () => {}
 const selectPaymentMethod = (method) => {
   if (method.disabled) {
@@ -444,7 +595,8 @@ const submitForm = async () => {
   if (form.channel === '批发' && currentInventory.value && form.quantity) {
     const q = parseFloat(form.quantity)
     if (q > currentInventory.value.quantity) {
-      if (!window.confirm('销售数量超过库存，确定继续？')) return
+      const confirmed = await notificationService.confirm('销售数量超过库存，确定继续？')
+      if (!confirmed) return
     }
   }
 
@@ -538,175 +690,512 @@ watch(() => form.category, () => {
   visibility: hidden;
   transition: all 0.3s;
 }
-.modal.active { opacity:1; visibility:visible; }
+.modal.active {
+  opacity: 1;
+  visibility: visible;
+}
 
 .modal-content {
   background: white;
-  width:90%;
-  max-width:500px;
-  border-radius:20px;
-  box-shadow:0 10px 30px rgba(0,0,0,0.2);
-  max-height:85vh;
-  overflow:hidden;
-  display:flex;
-  flex-direction:column;
+  width: 90%;
+  max-width: 500px;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal-header {
-  display:flex;
-  align-items:center;
-  padding:20px 25px;
-  border-bottom:1px solid #D5EBE1;
-  background:white;
-  position:sticky;
-  top:0;
-  z-index:10;
-  border-radius:20px 20px 0 0;
+  display: flex;
+  align-items: center;
+  padding: 20px 25px;
+  border-bottom: 1px solid #D5EBE1;
+  background: white;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-radius: 20px 20px 0 0;
 }
-.modal-header i { font-size:24px; margin-right:10px; color:#80A492; }
-.modal-header h3 { font-size:20px; color:#80A492; flex:1; margin:0; }
+.modal-header i {
+  font-size: 24px;
+  margin-right: 10px;
+  color: #80A492;
+}
+
+.modal-header h3 {
+  font-size: 20px;
+  color: #80A492;
+  flex: 1;
+  margin: 0;
+}
+
 .modal-close {
-  background:none; border:none; font-size:24px; color:#99BCAC;
-  width:40px; height:40px; border-radius:50%; cursor:pointer;
-  display:flex; align-items:center; justify-content:center;
-  transition:0.3s;
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #99BCAC;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: 0.3s;
 }
-.modal-close:hover { background:#D5EBE1; color:#80A492; }
 
-.modal-body { padding:25px; overflow-y:auto; max-height:calc(85vh - 80px); }
+.modal-close:hover {
+  background: #D5EBE1;
+  color: #80A492;
+}
 
-.form-group { margin-bottom:20px; }
-.form-group label { display:block; font-size:14px; color:#80A492; margin-bottom:8px; }
-.form-group label i { margin-right:8px; width:20px; color:#99BCAC; }
+.modal-body {
+  padding: 25px;
+  overflow-y: auto;
+  max-height: calc(85vh - 80px);
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 14px;
+  color: #80A492;
+  margin-bottom: 8px;
+}
+
+.form-group label i {
+  margin-right: 8px;
+  width: 20px;
+  color: #99BCAC;
+}
 
 .form-input {
-  width:100%; padding:12px 15px; border:1px solid #B1D5C8; border-radius:12px;
-  font-size:14px; transition:0.3s; box-sizing:border-box;
+  width: 100%;
+  padding: 12px 15px;
+  border: 1px solid #B1D5C8;
+  border-radius: 12px;
+  font-size: 14px;
+  transition: 0.3s;
+  box-sizing: border-box;
 }
-.form-input:focus { outline:none; border-color:#80A492; box-shadow:0 0 0 2px rgba(128,164,146,0.2); }
 
-.form-select {
-  width:100%; padding:12px 35px 12px 15px; border:1px solid #B1D5C8; border-radius:12px;
-  font-size:14px; appearance:none; cursor:pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat:no-repeat; background-position:right 12px center; background-size:16px;
+.form-input:focus {
+  outline: none;
+  border-color: #80A492;
+  box-shadow: 0 0 0 2px rgba(128,164,146,0.2);
 }
-.form-select:focus { border-color:#80A492; box-shadow:0 0 0 2px rgba(128,164,146,0.2); }
 
-.form-textarea { min-height:80px; resize:vertical; }
-.form-row { display:flex; gap:15px; }
-.form-row .form-group { flex:1; }
+/* 自定义选择器显示样式 */
+.custom-select-display {
+  width: 100%;
+  padding: 12px 35px 12px 15px;
+  border: 1px solid #B1D5C8;
+  border-radius: 12px;
+  font-size: 14px;
+  background-color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
+  box-sizing: border-box;
+}
+.custom-select-display:hover {
+  border-color: #80A492;
+  background-color: rgba(128,164,146,0.05);
+}
+.custom-select-display .placeholder {
+  color: #999;
+  opacity: 0.7;
+}
+.custom-select-display i {
+  color: #80A492;
+  font-size: 14px;
+  transition: transform 0.3s;
+}
+.custom-select-display:hover i {
+  transform: translateY(2px);
+}
+
+.form-textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+.form-row {
+  display: flex;
+  gap: 15px;
+}
+.form-row .form-group {
+  flex: 1;
+}
 
 .form-actions {
-  display:flex; gap:15px; margin-top:25px; padding-top:10px; border-top:1px solid #D5EBE1;
+  display: flex;
+  gap: 15px;
+  margin-top: 25px;
+  padding-top: 10px;
+  border-top: 1px solid #D5EBE1;
 }
 
 .btn {
-  flex:1; padding:14px; border:none; border-radius:12px; font-size:15px; font-weight:600;
-  cursor:pointer; transition:0.3s; display:flex; align-items:center; justify-content:center; gap:10px;
+  flex: 1;
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
-.btn-primary { background:#D5EBE1; color:#80A492; }
-.btn-primary:hover:not(:disabled) { background:#B1D5C8; }
-.btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
-.btn-secondary { background:white; color:#80A492; border:1px solid #B1D5C8; }
-.btn-secondary:hover { background:#f8fafc; border-color:#80A492; }
+.btn-primary {
+  background: #D5EBE1;
+  color: #80A492;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #B1D5C8;
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-secondary {
+  background: white;
+  color: #80A492;
+  border: 1px solid #B1D5C8;
+}
+.btn-secondary:hover {
+  background: #f8fafc;
+  border-color: #80A492;
+}
 
-.label-with-action { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.label-with-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
 .icon-btn.small {
-  width:32px; height:32px; background:#D5EBE1; color:#80A492; border:none; border-radius:8px;
-  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  width: 32px;
+  height: 32px;
+  background: #D5EBE1;
+  color: #80A492;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
-.icon-btn.small:hover { background:#B1D5C8; }
+.icon-btn.small:hover {
+  background: #B1D5C8;
+}
 
-.category-tags { display:flex; flex-wrap:wrap; gap:10px; margin-top:5px; }
+.category-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 5px;
+}
 .category-tag {
-  padding:8px 16px; background:#D5EBE1; border-radius:30px; font-size:13px; color:#80A492;
-  cursor:pointer; transition:0.3s; border:1px solid transparent;
+  padding: 8px 16px;
+  background: #D5EBE1;
+  border-radius: 30px;
+  font-size: 13px;
+  color: #80A492;
+  cursor: pointer;
+  transition: 0.3s;
+  border: 1px solid transparent;
 }
-.category-tag:hover { background:#B1D5C8; }
-.category-tag.active { background:#80A492; color:white; }
+.category-tag:hover {
+  background: #B1D5C8;
+}
+.category-tag.active {
+  background: #80A492;
+  color: white;
+}
 
-.empty-tags { padding:20px; text-align:center; background:#f8fafc; border-radius:12px; color:#666; border:1px dashed #D5EBE1; }
-.text-link { background:none; border:none; color:#80A492; text-decoration:underline; cursor:pointer; }
+.empty-tags {
+  padding: 20px;
+  text-align: center;
+  background: #f8fafc;
+  border-radius: 12px;
+  color: #666;
+  border: 1px dashed #D5EBE1;
+}
+.text-link {
+  background: none;
+  border: none;
+  color: #80A492;
+  text-decoration: underline;
+  cursor: pointer;
+}
 
 .photo-btn {
-  width:100%; padding:14px; border:2px dashed #D5EBE1; border-radius:12px;
-  background:none; color:#666; font-size:14px; cursor:pointer; transition:0.3s;
-  display:flex; align-items:center; justify-content:center; gap:10px; margin-top:10px;
+  width: 100%;
+  padding: 14px;
+  border: 2px dashed #D5EBE1;
+  border-radius: 12px;
+  background: none;
+  color: #666;
+  font-size: 14px;
+  cursor: pointer;
+  transition: 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
 }
-.photo-btn:hover { border-color:#80A492; color:#80A492; background:rgba(128,164,146,0.05); }
+.photo-btn:hover {
+  border-color: #80A492;
+  color: #80A492;
+  background: rgba(128,164,146,0.05);
+}
 
 .inventory-info-panel {
-  margin:15px 0; padding:16px; background:#f8fafc; border-radius:16px; border:1px solid #D5EBE1;
+  margin: 15px 0;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 16px;
+  border: 1px solid #D5EBE1;
 }
 .inventory-header {
-  display:flex; align-items:center; gap:8px; margin-bottom:12px; padding-bottom:8px;
-  border-bottom:1px dashed #D5EBE1; color:#80A492; font-weight:600; font-size:14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #D5EBE1;
+  color: #80A492;
+  font-weight: 600;
+  font-size: 14px;
 }
-.inventory-stats { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
-.inventory-stat-item { padding:8px; background:white; border-radius:8px; border:1px solid #D5EBE1; }
-.inventory-stat-item.low-stock { border-color:#f39c12; background:rgba(243,156,18,0.05); }
-.stat-label { display:block; font-size:11px; color:#999; }
-.stat-value { font-size:14px; font-weight:600; color:#333; }
-.stat-value.price { color:#2ecc71; }
+.inventory-stats {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 10px;
+}
+.inventory-stat-item {
+  padding: 8px;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #D5EBE1;
+}
+.inventory-stat-item.low-stock {
+  border-color: #f39c12;
+  background: rgba(243,156,18,0.05);
+}
+.stat-label {
+  display: block;
+  font-size: 11px;
+  color: #999;
+}
+.stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+.stat-value.price {
+  color: #2ecc71;
+}
 .low-stock-badge {
-  display:inline-block; margin-left:6px; padding:2px 6px; background:#f39c12;
-  color:white; font-size:10px; border-radius:12px;
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  background: #f39c12;
+  color: white;
+  font-size: 10px;
+  border-radius: 12px;
 }
 
 .expiry-info {
-  display:flex; align-items:center; gap:8px; padding:10px; background:white; border-radius:8px;
-  margin:10px 0; font-size:13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  background: white;
+  border-radius: 8px;
+  margin: 10px 0;
+  font-size: 13px;
 }
-.expiry-info.expiring { background:rgba(243,156,18,0.1); color:#f39c12; }
-.expiry-info.expired { background:rgba(231,76,60,0.1); color:#e74c3c; }
-.expiry-badge { padding:2px 8px; border-radius:12px; font-size:10px; color:white; margin-left:6px; }
-.warning-badge { background:#f39c12; }
-.expired-badge { background:#e74c3c; }
+.expiry-info.expiring {
+  background: rgba(243,156,18,0.1);
+  color: #f39c12;
+}
+.expiry-info.expired {
+  background: rgba(231,76,60,0.1);
+  color: #e74c3c;
+}
+.expiry-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  color: white;
+  margin-left: 6px;
+}
+.warning-badge {
+  background: #f39c12;
+}
+.expired-badge {
+  background: #e74c3c;
+}
 
 .stock-warning {
-  margin:10px 0; padding:10px; background:rgba(231,76,60,0.1); border:1px solid rgba(231,76,60,0.2);
-  border-radius:8px; color:#e74c3c; font-size:13px; display:flex; align-items:center; gap:8px;
+  margin: 10px 0;
+  padding: 10px;
+  background: rgba(231,76,60,0.1);
+  border: 1px solid rgba(231,76,60,0.2);
+  border-radius: 8px;
+  color: #e74c3c;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.quantity-hint { margin-top:4px; font-size:12px; color:#999; text-align:right; }
-.inventory-actions { margin-top:12px; padding-top:12px; border-top:1px dashed #D5EBE1; }
-.checkbox-label { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#666; }
-.checkbox-label input { width:16px; height:16px; accent-color:#80A492; }
+.quantity-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #999;
+  text-align: right;
+}
+.inventory-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #D5EBE1;
+}
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #666;
+}
+.checkbox-label input {
+  width: 16px;
+  height: 16px;
+  accent-color: #80A492;
+}
 
-.payment-tags { display:flex; flex-wrap:wrap; gap:10px; margin-top:5px; }
+.payment-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 5px;
+}
 .payment-tag {
-  flex:1; min-width:70px; padding:10px 12px; background:white; border:1px solid #D5EBE1;
-  border-radius:25px; font-size:13px; color:#666; cursor:pointer; transition:0.3s; text-align:center;
+  flex: 1;
+  min-width: 70px;
+  padding: 10px 12px;
+  background: white;
+  border: 1px solid #D5EBE1;
+  border-radius: 25px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer;
+  transition: 0.3s;
+  text-align: center;
 }
-.payment-tag:hover:not(.disabled) { background:#D5EBE1; color:#80A492; border-color:#80A492; }
-.payment-tag.active { background:#80A492; color:white; border-color:#80A492; }
-.payment-tag.disabled { opacity:0.5; cursor:not-allowed; background:#f5f5f5; border-color:#ddd; color:#999; }
-.disabled-tag { font-size:10px; color:#e74c3c; margin-left:2px; }
+.payment-tag:hover:not(.disabled) {
+  background: #D5EBE1;
+  color: #80A492;
+  border-color: #80A492;
+}
+.payment-tag.active {
+  background: #80A492;
+  color: white;
+  border-color: #80A492;
+}
+.payment-tag.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #f5f5f5;
+  border-color: #ddd;
+  color: #999;
+}
+.disabled-tag {
+  font-size: 10px;
+  color: #e74c3c;
+  margin-left: 2px;
+}
 
 .warning-message {
-  margin-top:8px; padding:10px 12px; background:rgba(231,76,60,0.1); border:1px solid rgba(231,76,60,0.2);
-  border-radius:8px; color:#c0392b; font-size:13px; display:flex; align-items:center; gap:8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: rgba(231,76,60,0.1);
+  border: 1px solid rgba(231,76,60,0.2);
+  border-radius: 8px;
+  color: #c0392b;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .edit-form {
-  margin-top:10px; padding:20px; background:#f8fafc; border-radius:16px; border:1px solid #D5EBE1;
+  margin-top: 10px;
+  padding: 20px;
+  background: #f8fafc;
+  border-radius: 16px;
+  border: 1px solid #D5EBE1;
 }
 .credit-info-panel {
-  margin-bottom:15px; padding:15px; background:white; border-radius:12px; border:1px solid #D5EBE1;
+  margin-bottom: 15px;
+  padding: 15px;
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #D5EBE1;
 }
-.credit-info-row { display:flex; margin-bottom:8px; font-size:13px; }
-.credit-info-label { width:80px; color:#666; }
-.credit-info-value { flex:1; color:#333; font-weight:500; }
-.credit-info-value.warning { color:#e74c3c; font-weight:600; }
+.credit-info-row {
+  display: flex;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.credit-info-label {
+  width: 80px;
+  color: #666;
+}
+.credit-info-value {
+  flex: 1;
+  color: #333;
+  font-weight: 500;
+}
+.credit-info-value.warning {
+  color: #e74c3c;
+  font-weight: 600;
+}
 
-.modal-body::-webkit-scrollbar { width:6px; }
-.modal-body::-webkit-scrollbar-track { background:#f1f1f1; }
-.modal-body::-webkit-scrollbar-thumb { background:#B1D5C8; border-radius:3px; }
+.modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-body::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+.modal-body::-webkit-scrollbar-thumb {
+  background: #B1D5C8;
+  border-radius: 3px;
+}
 
 @media (max-width: 480px) {
-  .form-row { flex-direction:column; gap:10px; }
-  .form-actions { flex-direction:column; }
-  .inventory-stats { grid-template-columns:1fr; }
+  .form-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .form-actions {
+    flex-direction: column;
+  }
+  .inventory-stats {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -242,14 +242,12 @@
             <div class="form-group">
               <label><i class="fas fa-tag"></i> 收入类型</label>
               <div class="select-with-actions">
-                <select v-model="incomeForm.category" class="form-select" required>
-                  <option value="">选择收入类型</option>
-                  <option v-for="category in incomeCategories" :key="category.id" :value="category.name">
-                    {{ category.name }}
-                  </option>
-                  <option value="__new__">➕ 添加新类型</option>
-                </select>
-                <div class="select-actions" v-if="incomeForm.category && incomeForm.category !== '__new__'">
+                <!-- 美化选择框 -->
+                <div class="form-select-custom" @click="showIncomeCategoryList">
+                  <span v-if="incomeForm.category">{{ incomeForm.category }}</span>
+                  <span v-else class="placeholder">选择收入类型</span>
+                </div>
+                <div class="select-actions" v-if="incomeForm.category">
                   <button type="button" class="action-btn" @click="editCategory('income', incomeForm.category)" title="编辑">
                     <i class="fas fa-edit"></i>
                   </button>
@@ -277,14 +275,12 @@
             <div class="form-group">
               <label><i class="fas fa-store"></i> 收入来源</label>
               <div class="select-with-actions">
-                <select v-model="incomeForm.source" class="form-select" required>
-                  <option value="">选择收入来源</option>
-                  <option v-for="source in incomeSources" :key="source.id" :value="source.name">
-                    {{ source.name }}
-                  </option>
-                  <option value="__new__">➕ 添加新来源</option>
-                </select>
-                <div class="select-actions" v-if="incomeForm.source && incomeForm.source !== '__new__'">
+                <!-- 美化选择框 -->
+                <div class="form-select-custom" @click="showIncomeSourceList">
+                  <span v-if="incomeForm.source">{{ incomeForm.source }}</span>
+                  <span v-else class="placeholder">选择收入来源</span>
+                </div>
+                <div class="select-actions" v-if="incomeForm.source">
                   <button type="button" class="action-btn" @click="editSource(incomeForm.source)" title="编辑">
                     <i class="fas fa-edit"></i>
                   </button>
@@ -354,14 +350,12 @@
             <div class="form-group">
               <label><i class="fas fa-list"></i> 支出类型</label>
               <div class="select-with-actions">
-                <select v-model="expenseForm.category" class="form-select" @change="updateExpenseSubtypes" required>
-                  <option value="">选择支出类型</option>
-                  <option v-for="category in expenseCategories" :key="category.id" :value="category.name">
-                    {{ category.name }}
-                  </option>
-                  <option value="__new__">➕ 添加新类型</option>
-                </select>
-                <div class="select-actions" v-if="expenseForm.category && expenseForm.category !== '__new__'">
+                <!-- 美化选择框 -->
+                <div class="form-select-custom" @click="showExpenseCategoryList">
+                  <span v-if="expenseForm.category">{{ expenseForm.category }}</span>
+                  <span v-else class="placeholder">选择支出类型</span>
+                </div>
+                <div class="select-actions" v-if="expenseForm.category">
                   <button type="button" class="action-btn" @click="editCategory('expense', expenseForm.category)" title="编辑">
                     <i class="fas fa-edit"></i>
                   </button>
@@ -386,17 +380,15 @@
               </div>
             </div>
 
-            <div class="form-group" v-if="expenseForm.category && expenseForm.category !== '__new__'">
+            <div class="form-group" v-if="expenseForm.category">
               <label><i class="fas fa-tag"></i> 具体项目</label>
               <div class="select-with-actions">
-                <select v-model="expenseForm.subtype" class="form-select" required>
-                  <option value="">选择具体项目</option>
-                  <option v-for="subtype in getExpenseSubtypes(expenseForm.category)" :key="subtype.id" :value="subtype.name">
-                    {{ subtype.name }}
-                  </option>
-                  <option value="__new_sub__">➕ 添加新项目</option>
-                </select>
-                <div class="select-actions" v-if="expenseForm.subtype && expenseForm.subtype !== '__new_sub__'">
+                <!-- 美化选择框 -->
+                <div class="form-select-custom" @click="showExpenseSubtypeList">
+                  <span v-if="expenseForm.subtype">{{ expenseForm.subtype }}</span>
+                  <span v-else class="placeholder">选择具体项目</span>
+                </div>
+                <div class="select-actions" v-if="expenseForm.subtype">
                   <button type="button" class="action-btn" @click="editSubtype(expenseForm.category, expenseForm.subtype)" title="编辑">
                     <i class="fas fa-edit"></i>
                   </button>
@@ -562,6 +554,98 @@ const openExpenseDatePicker = async () => {
   });
   if (date) expenseForm.date = date;
 };
+
+// ==================== 美化选择列表方法 ====================
+// 显示收入类型选择列表
+const showIncomeCategoryList = async () => {
+  const items = [
+    ...incomeCategories.value.map(c => ({label: c.name, value: c.name})),
+    {label: '➕ 添加新类型', value: '__new__'}
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择收入类型',
+    items
+  })
+
+  if (result === '__new__') {
+    showIncomeCategoryForm.value = true
+    categoryForm.value = {name: '', originalName: '', isEdit: false}
+    incomeForm.category = ''
+  } else if (result) {
+    incomeForm.category = result
+  }
+}
+
+// 显示收入来源选择列表
+const showIncomeSourceList = async () => {
+  const items = [
+    ...incomeSources.value.map(s => ({label: s.name, value: s.name})),
+    {label: '➕ 添加新来源', value: '__new__'}
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择收入来源',
+    items
+  })
+
+  if (result === '__new__') {
+    showIncomeSourceForm.value = true
+    sourceForm.value = {name: '', originalName: '', isEdit: false}
+    incomeForm.source = ''
+  } else if (result) {
+    incomeForm.source = result
+  }
+}
+
+// 显示支出类型选择列表
+const showExpenseCategoryList = async () => {
+  const items = [
+    ...expenseCategories.value.map(c => ({label: c.name, value: c.name})),
+    {label: '➕ 添加新类型', value: '__new__'}
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择支出类型',
+    items
+  })
+
+  if (result === '__new__') {
+    showExpenseCategoryForm.value = true
+    categoryForm.value = {name: '', originalName: '', isEdit: false}
+    expenseForm.category = ''
+  } else if (result) {
+    expenseForm.category = result
+    updateExpenseSubtypes()
+  }
+}
+
+// 显示支出子类型选择列表
+const showExpenseSubtypeList = async () => {
+  const subtypes = getExpenseSubtypes(expenseForm.category)
+  const items = [
+    ...subtypes.map(s => ({label: s.name, value: s.name})),
+    {label: '➕ 添加新项目', value: '__new_sub__'}
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择具体项目',
+    items
+  })
+
+  if (result === '__new_sub__') {
+    showSubtypeForm.value = true
+    subtypeForm.value = {
+      name: '',
+      originalName: '',
+      categoryName: expenseForm.category,
+      isEdit: false
+    }
+    expenseForm.subtype = ''
+  } else if (result) {
+    expenseForm.subtype = result
+  }
+}
 
 // ==================== 实时数据 ====================
 const totalIncome = ref('¥ 0.00')
@@ -925,56 +1009,7 @@ const changeWeek = (delta) => {
 
 // ==================== 监听器 ====================
 
-watch(() => incomeForm.category, (newVal) => {
-  if (newVal === '__new__') {
-    showIncomeCategoryForm.value = true
-    categoryForm.value = {
-      name: '',
-      originalName: '',
-      isEdit: false
-    }
-    incomeForm.category = ''
-  }
-})
-
-watch(() => incomeForm.source, (newVal) => {
-  if (newVal === '__new__') {
-    showIncomeSourceForm.value = true
-    sourceForm.value = {
-      name: '',
-      originalName: '',
-      isEdit: false
-    }
-    incomeForm.source = ''
-  }
-})
-
-watch(() => expenseForm.category, (newVal) => {
-  if (newVal === '__new__') {
-    showExpenseCategoryForm.value = true
-    categoryForm.value = {
-      name: '',
-      originalName: '',
-      isEdit: false
-    }
-    expenseForm.category = ''
-  } else {
-    expenseForm.subtype = ''
-  }
-})
-
-watch(() => expenseForm.subtype, (newVal) => {
-  if (newVal === '__new_sub__') {
-    showSubtypeForm.value = true
-    subtypeForm.value = {
-      name: '',
-      originalName: '',
-      categoryName: expenseForm.category,
-      isEdit: false
-    }
-    expenseForm.subtype = ''
-  }
-})
+// 移除原有select监听，改用点击事件
 
 // ==================== 生命周期钩子 ====================
 
@@ -1293,7 +1328,7 @@ const cancelSubtypeForm = () => {
 }
 
 const updateExpenseSubtypes = () => {
-  if (expenseForm.category && expenseForm.category !== '__new__') {
+  if (expenseForm.category) {
     const category = expenseCategories.value.find(c => c.name === expenseForm.category)
     if (category) {
       expenseSubtypesList.value = category.subtypes.map(s => s.name)
@@ -2109,26 +2144,47 @@ form {
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
 }
 
-.form-select {
+/* 自定义美化选择框 */
+.form-select-custom {
   width: 100%;
-  padding: 12px 35px 12px 15px;
+  padding: 12px 15px;
   border: 1px solid #B1D5C8;
   border-radius: 12px;
   font-size: 14px;
   color: #333;
   background-color: white;
   cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
+  transition: all 0.3s;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
 }
 
-.form-select:focus {
+.form-select-custom::after {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  opacity: 0.7;
+}
+
+.form-select-custom:hover {
+  border-color: #80A492;
+}
+
+.form-select-custom:focus-within {
   outline: none;
   border-color: #80A492;
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+}
+
+.form-select-custom .placeholder {
+  color: #999;
 }
 
 .form-textarea {

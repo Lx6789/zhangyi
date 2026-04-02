@@ -205,12 +205,12 @@
                   placeholder="搜索商品名称..."
               >
             </div>
-            <select v-model="categoryFilter" class="filter-select">
-              <option value="all">全部分类</option>
-              <option v-for="cat in categoryNames" :key="cat" :value="cat">
-                {{ cat }}
-              </option>
-            </select>
+
+            <!-- 替换为自定义选择器 -->
+            <div class="filter-select-custom" @click="openCategorySelector">
+              <i class="fas fa-chevron-down"></i>
+              <span>{{ categoryFilterText }}</span>
+            </div>
           </div>
 
           <!-- 商品列表 -->
@@ -584,6 +584,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import costService from "@/services/api/business/cost.service.js";
 import baseService from "@/services/api/business/base.service.js";
+import notificationService from "@/services/utils/notification.service.js";
 
 const props = defineProps({
   visible: {
@@ -642,6 +643,12 @@ const timeRanges = [
 // 分类名称列表
 const categoryNames = computed(() => {
   return props.categories.map(c => c.name).sort()
+})
+
+// 分类选择器显示文本
+const categoryFilterText = computed(() => {
+  if (categoryFilter.value === 'all') return '全部分类'
+  return categoryFilter.value
 })
 
 // 日期范围文本
@@ -726,6 +733,27 @@ const productTransactions = computed(() => {
 })
 
 // ==================== 方法 ====================
+
+// 打开分类选择器
+const openCategorySelector = async () => {
+  const items = [
+    { label: '全部分类', value: 'all', icon: '📦' },
+    ...categoryNames.value.map(name => ({
+      label: name,
+      value: name,
+      icon: '📁'
+    }))
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择商品分类',
+    items
+  })
+
+  if (result !== null) {
+    categoryFilter.value = result
+  }
+}
 
 // 加载数据
 const loadData = async () => {
@@ -1347,14 +1375,29 @@ onMounted(() => {
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
 }
 
-.filter-select {
+/* 自定义选择器样式 */
+.filter-select-custom {
   width: 150px;
-  padding: 12px;
+  padding: 12px 16px;
   border: 1px solid #B1D5C8;
   border-radius: 25px;
   font-size: 14px;
   background: white;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
+}
+
+.filter-select-custom:hover {
+  border-color: #80A492;
+  background: rgba(213, 235, 225, 0.1);
+}
+
+.filter-select-custom i {
+  font-size: 12px;
+  color: #99BCAC;
 }
 
 /* ==================== 商品卡片网格 ==================== */
@@ -1882,7 +1925,7 @@ onMounted(() => {
     flex-direction: column;
   }
 
-  .filter-select {
+  .filter-select-custom {
     width: 100%;
   }
 

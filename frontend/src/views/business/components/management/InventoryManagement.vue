@@ -60,18 +60,21 @@
           <!-- 筛选选项 -->
           <div v-if="showFilters" class="filter-panel">
             <div class="filter-row">
-              <select v-model="filters.category" class="form-select filter-select">
-                <option value="">全部分类</option>
-                <option v-for="cat in categoryNames" :key="cat" :value="cat">{{ cat }}</option>
-              </select>
-              <select v-model="filters.supplier" class="form-select filter-select">
-                <option value="">全部供应商</option>
-                <option v-for="sup in uniqueSuppliers" :key="sup" :value="sup">{{ sup }}</option>
-              </select>
-              <select v-model="filters.location" class="form-select filter-select">
-                <option value="">全部存放位置</option>
-                <option v-for="loc in uniqueLocations" :key="loc" :value="loc">{{ loc }}</option>
-              </select>
+              <!-- 分类选择 -->
+              <div class="filter-select" @click="openCategoryFilter" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                <span>{{ filters.category || '全部分类' }}</span>
+                <i class="fas fa-chevron-down" style="font-size: 12px; opacity: 0.6;"></i>
+              </div>
+              <!-- 供应商选择 -->
+              <div class="filter-select" @click="openSupplierFilter" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                <span>{{ filters.supplier || '全部供应商' }}</span>
+                <i class="fas fa-chevron-down" style="font-size: 12px; opacity: 0.6;"></i>
+              </div>
+              <!-- 位置选择 -->
+              <div class="filter-select" @click="openLocationFilter" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                <span>{{ filters.location || '全部存放位置' }}</span>
+                <i class="fas fa-chevron-down" style="font-size: 12px; opacity: 0.6;"></i>
+              </div>
             </div>
             <div class="filter-actions">
               <button class="btn btn-small btn-secondary" @click="resetFilters">重置</button>
@@ -221,17 +224,15 @@
           <div class="form-group">
             <label><i class="fas fa-tags"></i> 商品分类 <span class="required">*</span></label>
             <div class="category-select-wrapper">
-              <select
-                  v-model="form.selectedCategory"
+              <div
                   class="form-select"
                   required
-                  @change="onCategorySelected"
+                  @click="openCategorySelect"
+                  style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;"
               >
-                <option value="">请选择分类</option>
-                <option v-for="category in sortedCategories" :key="category.id" :value="category.name">
-                  {{ category.name }}
-                </option>
-              </select>
+                <span>{{ form.selectedCategory || '请选择分类' }}</span>
+                <i class="fas fa-chevron-down" style="font-size: 12px; opacity: 0.6;"></i>
+              </div>
               <button
                   type="button"
                   class="icon-btn small"
@@ -251,22 +252,16 @@
           <div class="form-group" v-if="form.selectedCategory">
             <label><i class="fas fa-box"></i> 选择商品 <span class="required">*</span></label>
             <div class="product-select-wrapper">
-              <select
-                  v-model="form.productId"
+              <div
                   class="form-select"
                   required
-                  @change="onProductSelected"
+                  @click="openProductSelect"
                   :disabled="filteredProductsByCategory.length === 0"
+                  style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;"
               >
-                <option value="">请选择商品</option>
-                <option
-                    v-for="product in filteredProductsByCategory"
-                    :key="product.id"
-                    :value="product.id"
-                >
-                  {{ product.name }} ({{ product.unit }})
-                </option>
-              </select>
+                <span>{{ form.productId ? selectedProductLabel : '请选择商品' }}</span>
+                <i class="fas fa-chevron-down" style="font-size: 12px; opacity: 0.6;"></i>
+              </div>
               <button
                   v-if="filteredProductsByCategory.length === 0"
                   type="button"
@@ -409,11 +404,16 @@
             </div>
             <div class="form-group">
               <label><i class="fas fa-calendar-alt"></i> 保质期</label>
-              <input
-                  v-model="form.expiryDate"
-                  type="date"
-                  class="form-input"
-              >
+              <div class="date-input-wrapper" @click="openExpiryDatePicker">
+                <input
+                    v-model="form.expiryDate"
+                    type="text"
+                    class="form-input"
+                    placeholder="点击选择保质期"
+                    readonly
+                >
+                <i class="fas fa-calendar-alt date-icon"></i>
+              </div>
             </div>
           </div>
 
@@ -479,18 +479,28 @@
 
           <div class="form-group">
             <label><i class="fas fa-calendar-alt"></i> 日期</label>
-            <input v-model="adjustForm.date" type="date" class="form-input" required>
+            <div class="date-input-wrapper" @click="openAdjustDatePicker">
+              <input
+                  v-model="adjustForm.date"
+                  type="text"
+                  class="form-input"
+                  placeholder="点击选择日期"
+                  readonly
+              >
+              <i class="fas fa-calendar-alt date-icon"></i>
+            </div>
           </div>
 
           <div class="form-group">
             <label><i class="fas fa-tag"></i> 类型</label>
-            <select v-model="adjustForm.type" class="form-select">
-              <option value="采购入库">采购入库</option>
-              <option value="销售出库">销售出库</option>
-              <option value="盘点调整">盘点调整</option>
-              <option value="报损出库">报损出库</option>
-              <option value="退货入库">退货入库</option>
-            </select>
+            <div
+                class="form-select"
+                @click="openAdjustTypeSelect"
+                style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;"
+            >
+              <span>{{ adjustForm.type }}</span>
+              <i class="fas fa-chevron-down" style="font-size: 12px; opacity: 0.6;"></i>
+            </div>
           </div>
 
           <div class="form-group">
@@ -680,6 +690,7 @@ const form = reactive({
   expiryDate: '',
   note: ''
 })
+const selectedProductLabel = ref('')
 
 // 调整相关
 const adjustModalVisible = ref(false)
@@ -765,6 +776,35 @@ const isAdjustSubmitDisabled = computed(() => {
   return false
 })
 
+// ==================== 自定义日期选择器方法 ====================
+
+/**
+ * 打开保质期日期选择器（新增/编辑表单）
+ */
+const openExpiryDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择保质期',
+    defaultDate: form.expiryDate || new Date(),
+    minDate: new Date().toISOString().split('T')[0] // 不能选今天之前的日期
+  })
+  if (date) {
+    form.expiryDate = date
+  }
+}
+
+/**
+ * 打开调整日期选择器
+ */
+const openAdjustDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择调整日期',
+    defaultDate: adjustForm.date || new Date()
+  })
+  if (date) {
+    adjustForm.date = date
+  }
+}
+
 // ==================== 辅助函数（使用业务服务） ====================
 
 const isLowStock = (item) => {
@@ -794,6 +834,115 @@ const formatDate = (dateStr) => {
 
 const formatDateTime = (dateStr) => {
   return baseService.formatDateTime(dateStr)
+}
+
+// ==================== 自定义选择器方法 ====================
+
+// 筛选面板 - 分类选择
+const openCategoryFilter = async () => {
+  const items = [
+    { label: '全部分类', value: '' },
+    ...categoryNames.value.map(cat => ({ label: cat, value: cat }))
+  ]
+  const result = await notificationService.selectList({
+    title: '选择分类',
+    items
+  })
+  if (result !== null) {
+    filters.category = result
+    applyFilters()
+  }
+}
+
+// 筛选面板 - 供应商选择
+const openSupplierFilter = async () => {
+  const items = [
+    { label: '全部供应商', value: '' },
+    ...uniqueSuppliers.value.map(sup => ({ label: sup, value: sup }))
+  ]
+  const result = await notificationService.selectList({
+    title: '选择供应商',
+    items
+  })
+  if (result !== null) {
+    filters.supplier = result
+    applyFilters()
+  }
+}
+
+// 筛选面板 - 位置选择
+const openLocationFilter = async () => {
+  const items = [
+    { label: '全部存放位置', value: '' },
+    ...uniqueLocations.value.map(loc => ({ label: loc, value: loc }))
+  ]
+  const result = await notificationService.selectList({
+    title: '选择存放位置',
+    items
+  })
+  if (result !== null) {
+    filters.location = result
+    applyFilters()
+  }
+}
+
+// 新增/编辑 - 分类选择
+const openCategorySelect = async () => {
+  if (sortedCategories.value.length === 0) {
+    notificationService.showNotification('暂无分类，请先添加分类', 'warning')
+    return
+  }
+  const items = sortedCategories.value.map(cat => ({
+    label: cat.name,
+    value: cat.name
+  }))
+  const result = await notificationService.selectList({
+    title: '选择商品分类',
+    items
+  })
+  if (result !== null) {
+    form.selectedCategory = result
+    onCategorySelected()
+  }
+}
+
+// 新增/编辑 - 商品选择
+const openProductSelect = async () => {
+  if (filteredProductsByCategory.value.length === 0) {
+    notificationService.showNotification('该分类下暂无商品', 'warning')
+    return
+  }
+  const items = filteredProductsByCategory.value.map(p => ({
+    label: `${p.name} (${p.unit})`,
+    value: p.id
+  }))
+  const result = await notificationService.selectList({
+    title: '选择商品',
+    items
+  })
+  if (result !== null) {
+    form.productId = result
+    selectedProductLabel.value = items.find(item => item.value === result)?.label || ''
+    onProductSelected()
+  }
+}
+
+// 库存调整 - 类型选择
+const openAdjustTypeSelect = async () => {
+  const items = [
+    { label: '采购入库', value: '采购入库' },
+    { label: '销售出库', value: '销售出库' },
+    { label: '盘点调整', value: '盘点调整' },
+    { label: '报损出库', value: '报损出库' },
+    { label: '退货入库', value: '退货入库' }
+  ]
+  const result = await notificationService.selectList({
+    title: '选择调整类型',
+    items
+  })
+  if (result !== null) {
+    adjustForm.type = result
+  }
 }
 
 // ==================== 方法 ====================
@@ -862,6 +1011,7 @@ const handleQuickAddProductSuccess = async () => {
   await new Promise(resolve => setTimeout(resolve, 500))
   if (form.selectedCategory && filteredProductsByCategory.value.length > 0) {
     form.productId = filteredProductsByCategory.value[filteredProductsByCategory.value.length - 1].id
+    selectedProductLabel.value = `${filteredProductsByCategory.value[filteredProductsByCategory.value.length - 1].name} (${filteredProductsByCategory.value[filteredProductsByCategory.value.length - 1].unit})`
     onProductSelected()
   }
 }
@@ -869,6 +1019,7 @@ const handleQuickAddProductSuccess = async () => {
 // 选择分类
 const onCategorySelected = () => {
   form.productId = ''
+  selectedProductLabel.value = ''
   form.productName = ''
   form.category = form.selectedCategory
   form.unit = '斤'
@@ -911,6 +1062,7 @@ const openAddInventoryModal = () => {
 const resetForm = () => {
   form.selectedCategory = ''
   form.productId = ''
+  selectedProductLabel.value = ''
   form.productName = ''
   form.category = ''
   form.quantity = 0
@@ -930,6 +1082,7 @@ const editInventory = (item) => {
   const product = props.products.find(p => p.id === item.productId)
   form.selectedCategory = product?.category || item.category
   form.productId = item.productId
+  selectedProductLabel.value = product ? `${product.name} (${product.unit})` : ''
   form.productName = item.productName
   form.category = item.category
   form.quantity = item.quantity
@@ -939,7 +1092,7 @@ const editInventory = (item) => {
   form.supplier = item.supplier
   form.location = item.location
   form.minStock = item.minStock
-  form.expiryDate = item.expiryDate
+  form.expiryDate = item.expiryDate || ''
   form.note = item.note
   addEditModalVisible.value = true
 }
@@ -1851,31 +2004,37 @@ onMounted(() => {
 
 .form-input[readonly] {
   background-color: #f8fafc;
-  cursor: not-allowed;
-  color: #666;
+  cursor: pointer;
+  color: #333;
   border-color: #D5EBE1;
+}
+
+.form-input[readonly]:hover {
+  border-color: #80A492;
+  background-color: rgba(128, 164, 146, 0.05);
 }
 
 .form-select {
   width: 100%;
-  padding: 12px 35px 12px 15px;
+  padding: 12px 15px;
   border: 1px solid #B1D5C8;
   border-radius: 12px;
   font-size: 14px;
   color: #333;
   background-color: white;
   cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
+  transition: all 0.3s;
 }
 
 .form-select:focus {
   outline: none;
   border-color: #80A492;
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+}
+
+.form-select:hover {
+  border-color: #80A492;
+  background-color: #f8fafc;
 }
 
 .form-textarea {
@@ -1900,6 +2059,38 @@ onMounted(() => {
   margin-top: 25px;
   padding-top: 10px;
   border-top: 1px solid #D5EBE1;
+}
+
+/* ==================== 自定义日期选择器输入框样式 ==================== */
+.date-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.date-input-wrapper .form-input {
+  padding-right: 40px;
+  cursor: pointer;
+}
+
+.date-input-wrapper .date-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #80A492;
+  font-size: 16px;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.date-input-wrapper .form-input[readonly] {
+  cursor: pointer;
+}
+
+.date-input-wrapper .form-input[readonly]:hover + .date-icon,
+.date-input-wrapper:hover .date-icon {
+  opacity: 1;
 }
 
 /* ==================== 输入组样式 ==================== */

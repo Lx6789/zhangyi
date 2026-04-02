@@ -14,31 +14,23 @@
           <!-- 支出类型选择 -->
           <div class="form-group">
             <label><i class="fas fa-list"></i> 支出类型</label>
-            <select v-model="form.type" class="form-select" @change="handleTypeChange" required>
-              <option value="">选择支出类型</option>
-              <option value="进货采购">📦 进货采购 (更新库存)</option>
-              <option value="租金水电">🏢 租金水电</option>
-              <option value="员工工资">👥 员工工资</option>
-              <option value="设备工具">🔧 设备工具</option>
-              <option value="包装物料">📦 包装物料</option>
-              <option value="运输费用">🚚 运输费用</option>
-              <option value="平台费用">📱 平台费用</option>
-              <option value="税费杂费">📄 税费杂费</option>
-              <option value="库存损耗">⚠️ 库存损耗 (减少库存)</option>
-              <option value="退货退款">🔄 退货退款 (减少库存)</option>
-              <option value="其他支出">📌 其他支出</option>
-            </select>
+            <div class="custom-select-display" @click="openExpenseTypeSelector">
+              <span :class="{ placeholder: !form.type }">
+                {{ getExpenseTypeDisplayText() }}
+              </span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <!-- 具体项目 - 仅在不是"进货采购"时显示 -->
           <div class="form-group" v-if="form.type && form.type !== '进货采购'">
             <label><i class="fas fa-tag"></i> 具体项目</label>
-            <select v-model="form.subtype" class="form-select" :required="form.type && form.type !== '进货采购'">
-              <option value="">选择具体项目</option>
-              <option v-for="subtype in subtypesList" :key="subtype" :value="subtype">
-                {{ subtype }}
-              </option>
-            </select>
+            <div class="custom-select-display" @click="openSubtypeSelector">
+              <span :class="{ placeholder: !form.subtype }">
+                {{ form.subtype || '选择具体项目' }}
+              </span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <!-- 金额和日期 -->
@@ -109,16 +101,12 @@
                 <i class="fas fa-spinner fa-spin"></i> 加载商品中...
               </div>
               <div v-else class="product-select-wrapper">
-                <select v-model="form.inventoryProductId" class="form-select" @change="onProductSelected" required>
-                  <option value="">请选择商品</option>
-                  <option
-                      v-for="product in filteredProductsByType"
-                      :key="product.id"
-                      :value="product.id"
-                  >
-                    {{ product.name }} ({{ product.unit }})
-                  </option>
-                </select>
+                <div class="custom-select-display" @click="openProductSelector">
+                  <span :class="{ placeholder: !form.inventoryProductId }">
+                    {{ getProductDisplayText() }}
+                  </span>
+                  <i class="fas fa-chevron-down"></i>
+                </div>
                 <button
                     type="button"
                     class="quick-add-btn"
@@ -236,14 +224,12 @@
             <!-- 损耗原因 (对库存损耗显示) -->
             <div v-if="form.type === '库存损耗'" class="form-group">
               <label><i class="fas fa-exclamation-triangle"></i> 损耗原因</label>
-              <select v-model="form.lossReason" class="form-select">
-                <option value="">请选择损耗原因</option>
-                <option value="自然损耗">自然损耗</option>
-                <option value="过期损耗">过期损耗</option>
-                <option value="损坏损耗">损坏损耗</option>
-                <option value="盘点差异">盘点差异</option>
-                <option value="其他">其他</option>
-              </select>
+              <div class="custom-select-display" @click="openLossReasonSelector">
+                <span :class="{ placeholder: !form.lossReason }">
+                  {{ form.lossReason || '请选择损耗原因' }}
+                </span>
+                <i class="fas fa-chevron-down"></i>
+              </div>
             </div>
 
             <!-- 退货原因 (对退货退款显示) -->
@@ -378,6 +364,30 @@ const emit = defineEmits(['update:visible', 'success', 'refresh-products', 'open
 const expenseSubtypesMap = expenseService.getExpenseSubtypesMap()
 const paymentMethods = expenseService.getPaymentMethods()
 
+// 支出类型选项
+const expenseTypeOptions = [
+  { value: '进货采购', label: '📦 进货采购 (更新库存)', icon: '📦' },
+  { value: '租金水电', label: '🏢 租金水电', icon: '🏢' },
+  { value: '员工工资', label: '👥 员工工资', icon: '👥' },
+  { value: '设备工具', label: '🔧 设备工具', icon: '🔧' },
+  { value: '包装物料', label: '📦 包装物料', icon: '📦' },
+  { value: '运输费用', label: '🚚 运输费用', icon: '🚚' },
+  { value: '平台费用', label: '📱 平台费用', icon: '📱' },
+  { value: '税费杂费', label: '📄 税费杂费', icon: '📄' },
+  { value: '库存损耗', label: '⚠️ 库存损耗 (减少库存)', icon: '⚠️' },
+  { value: '退货退款', label: '🔄 退货退款 (减少库存)', icon: '🔄' },
+  { value: '其他支出', label: '📌 其他支出', icon: '📌' }
+]
+
+// 损耗原因选项
+const lossReasonOptions = [
+  { value: '自然损耗', label: '自然损耗', icon: '🌿' },
+  { value: '过期损耗', label: '过期损耗', icon: '📅' },
+  { value: '损坏损耗', label: '损坏损耗', icon: '💔' },
+  { value: '盘点差异', label: '盘点差异', icon: '🔍' },
+  { value: '其他', label: '其他', icon: '📝' }
+]
+
 // 表单数据
 const form = reactive({
   type: '',
@@ -461,7 +471,125 @@ const inventoryWarningMessage = computed(() => {
   return checkResult.message || ''
 })
 
-// ==================== 方法 ====================
+// ==================== 自定义选择器方法 ====================
+
+/**
+ * 获取支出类型显示文本
+ */
+const getExpenseTypeDisplayText = () => {
+  if (!form.type) return '选择支出类型'
+  const option = expenseTypeOptions.find(opt => opt.value === form.type)
+  return option ? option.label : form.type
+}
+
+/**
+ * 打开支出类型选择器
+ */
+const openExpenseTypeSelector = async () => {
+  const items = expenseTypeOptions.map(opt => ({
+    value: opt.value,
+    label: opt.label,
+    icon: opt.icon
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择支出类型',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.type = selected
+    handleTypeChange()
+  }
+}
+
+/**
+ * 打开具体项目选择器
+ */
+const openSubtypeSelector = async () => {
+  const subtypes = expenseService.getExpenseSubtypes(form.type)
+  if (!subtypes || subtypes.length === 0) {
+    notificationService.showNotification('暂无具体项目可选', 'warning')
+    return
+  }
+
+  const items = subtypes.map(sub => ({
+    value: sub,
+    label: sub,
+    icon: '🏷️'
+  }))
+
+  const selected = await notificationService.selectList({
+    title: `选择${form.type}的具体项目`,
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.subtype = selected
+  }
+}
+
+/**
+ * 获取商品显示文本
+ */
+const getProductDisplayText = () => {
+  if (!form.inventoryProductId) return '请选择商品'
+  const product = props.products.find(p => p.id === form.inventoryProductId)
+  return product ? `${product.name} (${product.unit})` : '请选择商品'
+}
+
+/**
+ * 打开商品选择器
+ */
+const openProductSelector = async () => {
+  const products = filteredProductsByType.value
+  if (products.length === 0) {
+    notificationService.showNotification('该分类下暂无商品，请先添加', 'warning')
+    return
+  }
+
+  const items = products.map(product => ({
+    value: product.id,
+    label: `${product.name} (${product.unit})`,
+    icon: '📦'
+  }))
+
+  const selected = await notificationService.selectList({
+    title: `选择商品 - ${form.productType}`,
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.inventoryProductId = selected
+    onProductSelected()
+  }
+}
+
+/**
+ * 打开损耗原因选择器
+ */
+const openLossReasonSelector = async () => {
+  const items = lossReasonOptions.map(opt => ({
+    value: opt.value,
+    label: `${opt.icon} ${opt.label}`,
+    icon: opt.icon
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择损耗原因',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    form.lossReason = selected
+  }
+}
+
+// ==================== 原有方法 ====================
 const openDatePicker = async () => {
   const date = await notificationService.datePicker({
     title: '选择日期',
@@ -870,26 +998,40 @@ watch(() => props.products, (newProducts) => {
   border-color: #D5EBE1;
 }
 
-.form-select {
+/* 自定义选择器显示样式 */
+.custom-select-display {
   width: 100%;
   padding: 12px 35px 12px 15px;
   border: 1px solid #B1D5C8;
   border-radius: 12px;
   font-size: 14px;
-  color: #333;
   background-color: white;
   cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
+  box-sizing: border-box;
 }
 
-.form-select:focus {
-  outline: none;
+.custom-select-display:hover {
   border-color: #80A492;
-  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+  background-color: rgba(128, 164, 146, 0.05);
+}
+
+.custom-select-display .placeholder {
+  color: #999;
+  opacity: 0.7;
+}
+
+.custom-select-display i {
+  color: #80A492;
+  font-size: 14px;
+  transition: transform 0.3s;
+}
+
+.custom-select-display:hover i {
+  transform: translateY(2px);
 }
 
 .form-textarea {

@@ -157,12 +157,11 @@
           <div class="form-row">
             <div class="form-group">
               <label><i class="fas fa-tag"></i> 客户类型</label>
-              <select v-model="customerForm.type" class="form-select">
-                <option value="零售客户">零售客户</option>
-                <option value="批发客户">批发客户</option>
-                <option value="长期客户">长期客户</option>
-                <option value="单位客户">单位客户</option>
-              </select>
+              <!-- 替换为自定义选择器显示框 -->
+              <div class="custom-select-display" @click="openCustomerTypeSelect">
+                <span>{{ customerForm.type || '请选择客户类型' }}</span>
+                <i class="fas fa-chevron-down"></i>
+              </div>
             </div>
 
             <div class="form-group">
@@ -293,12 +292,11 @@
 
           <!-- 时间筛选 -->
           <div class="date-filter">
-            <select v-model="transactionDateRange" class="form-select">
-              <option value="all">全部记录</option>
-              <option value="month">最近一个月</option>
-              <option value="quarter">最近三个月</option>
-              <option value="year">最近一年</option>
-            </select>
+            <!-- 替换为自定义选择器 -->
+            <div class="custom-select-display" @click="openTransactionDateRangeSelect">
+              <span>{{ getTransactionDateRangeText(transactionDateRange) }}</span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <!-- 交易记录列表 -->
@@ -397,12 +395,11 @@
 
           <div class="form-group">
             <label><i class="fas fa-credit-card"></i> 支付方式</label>
-            <select v-model="repaymentForm.paymentMethod" class="form-select">
-              <option value="现金">现金</option>
-              <option value="微信">微信</option>
-              <option value="支付宝">支付宝</option>
-              <option value="银行卡">银行卡</option>
-            </select>
+            <!-- 替换为自定义选择器 -->
+            <div class="custom-select-display" @click="openPaymentMethodSelect">
+              <span>{{ repaymentForm.paymentMethod || '请选择支付方式' }}</span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <div class="form-group">
@@ -474,7 +471,6 @@ const customerTypes = ref([])
 
 // 使用 computed 进行本地筛选（性能优化，避免频繁调用 API）
 const filteredCustomers = computed(() => {
-  // 调用 service 的本地筛选方法
   return customerService.filterCustomersLocal(customers.value, {
     type: selectedType.value,
     keyword: searchKeyword.value
@@ -516,6 +512,83 @@ const repaymentForm = reactive({
 const deleteConfirmVisible = ref(false)
 const deleteConfirmMessage = ref('')
 const deleteConfirmCustomer = ref(null)
+
+// ==================== 自定义选择器方法 ====================
+/**
+ * 打开客户类型选择弹窗
+ */
+const openCustomerTypeSelect = async () => {
+  const items = [
+    { label: '零售客户', value: '零售客户' },
+    { label: '批发客户', value: '批发客户' },
+    { label: '长期客户', value: '长期客户' },
+    { label: '单位客户', value: '单位客户' }
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择客户类型',
+    items: items
+  })
+
+  if (result) {
+    customerForm.type = result
+  }
+}
+
+/**
+ * 打开交易时间范围选择弹窗
+ */
+const openTransactionDateRangeSelect = async () => {
+  const items = [
+    { label: '全部记录', value: 'all' },
+    { label: '最近一个月', value: 'month' },
+    { label: '最近三个月', value: 'quarter' },
+    { label: '最近一年', value: 'year' }
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择时间范围',
+    items: items
+  })
+
+  if (result) {
+    transactionDateRange.value = result
+  }
+}
+
+/**
+ * 打开支付方式选择弹窗
+ */
+const openPaymentMethodSelect = async () => {
+  const items = [
+    { label: '现金', value: '现金' },
+    { label: '微信', value: '微信' },
+    { label: '支付宝', value: '支付宝' },
+    { label: '银行卡', value: '银行卡' }
+  ]
+
+  const result = await notificationService.selectList({
+    title: '选择支付方式',
+    items: items
+  })
+
+  if (result) {
+    repaymentForm.paymentMethod = result
+  }
+}
+
+/**
+ * 获取时间范围显示文本
+ */
+const getTransactionDateRangeText = (range) => {
+  const map = {
+    all: '全部记录',
+    month: '最近一个月',
+    quarter: '最近三个月',
+    year: '最近一年'
+  }
+  return map[range] || range
+}
 
 // ==================== 方法 ====================
 
@@ -680,7 +753,6 @@ const openRepaymentDatePicker = async () => {
     defaultDate = new Date(repaymentForm.date)
   }
 
-  // 确保日期有效
   if (isNaN(defaultDate.getTime())) {
     defaultDate = new Date()
   }
@@ -688,7 +760,7 @@ const openRepaymentDatePicker = async () => {
   const selectedDate = await notificationService.datePicker({
     title: '选择还款日期',
     defaultDate: defaultDate,
-    maxDate: new Date().toISOString().split('T')[0], // 不能超过今天
+    maxDate: new Date().toISOString().split('T')[0],
     confirmText: '确定',
     cancelText: '取消'
   })
@@ -783,32 +855,23 @@ const closeConfirmOnOverlay = (event) => {
   }
 }
 
-// ==================== 格式化工具函数（委托给 service） ====================
-
-/**
- * 格式化数字金额
- */
+// ==================== 格式化工具函数 ====================
 const formatNumber = (num) => {
   return baseService.formatNumber(num)
 }
 
-/**
- * 格式化日期
- */
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
   return dateHelper.formatDate(dateStr)
 }
 
 // ==================== 监听器 ====================
-
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     loadCustomers()
   }
 })
 
-// 监听筛选条件变化（computed 会自动响应，无需手动调用）
 watch(transactionDateRange, () => {
   if (transactionModalVisible.value && selectedCustomer.value) {
     loadCustomerTransactions(selectedCustomer.value.id)
@@ -817,9 +880,7 @@ watch(transactionDateRange, () => {
 
 // ==================== 初始化 ====================
 onMounted(async () => {
-  // 从 service 获取客户类型列表
   customerTypes.value = customerService.getCustomerTypes()
-
   if (props.visible) {
     loadCustomers()
   }
@@ -1258,26 +1319,32 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-.form-select {
+/* 自定义选择器显示样式（与你原有样式统一） */
+.custom-select-display {
   width: 100%;
   padding: 12px 35px 12px 15px;
   border: 1px solid #B1D5C8;
   border-radius: 12px;
   font-size: 14px;
-  color: #333;
   background-color: white;
   cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
+  box-sizing: border-box;
 }
-
-.form-select:focus {
-  outline: none;
+.custom-select-display:hover {
   border-color: #80A492;
-  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+  background-color: rgba(128, 164, 146, 0.05);
+}
+.custom-select-display i {
+  color: #80A492;
+  font-size: 14px;
+  transition: transform 0.3s;
+}
+.custom-select-display:hover i {
+  transform: translateY(2px);
 }
 
 .form-textarea {

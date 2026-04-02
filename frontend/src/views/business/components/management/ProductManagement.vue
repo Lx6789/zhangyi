@@ -142,12 +142,12 @@
           <div class="form-group">
             <label><i class="fas fa-tags"></i> 商品分类 <span class="required">*</span></label>
             <div class="category-select">
-              <select v-model="productForm.category" class="form-select" required>
-                <option value="">选择分类</option>
-                <option v-for="category in categoryNames" :key="category" :value="category">
-                  {{ category }}
-                </option>
-              </select>
+              <div class="custom-select-display" @click="openCategorySelector">
+                <span :class="{ placeholder: !productForm.category }">
+                  {{ productForm.category || '选择分类' }}
+                </span>
+                <i class="fas fa-chevron-down"></i>
+              </div>
               <button type="button" class="icon-btn small" @click="openCategoryManagement" title="管理分类">
                 <i class="fas fa-cog"></i>
               </button>
@@ -160,12 +160,12 @@
 
           <div class="form-group">
             <label><i class="fas fa-balance-scale"></i> 单位 <span class="required">*</span></label>
-            <select v-model="productForm.unit" class="form-select" required>
-              <option value="">选择单位</option>
-              <option v-for="unit in productUnits" :key="unit" :value="unit">
-                {{ unit }}
-              </option>
-            </select>
+            <div class="custom-select-display" @click="openUnitSelector">
+              <span :class="{ placeholder: !productForm.unit }">
+                {{ productForm.unit || '选择单位' }}
+              </span>
+              <i class="fas fa-chevron-down"></i>
+            </div>
           </div>
 
           <div class="form-group">
@@ -264,6 +264,21 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'update', 'open-category'])
 
+// ==================== 常量 ====================
+const productUnits = productService.getProductUnits()
+
+// 单位选项（带图标）
+const unitOptions = [
+  { value: '斤', label: '斤', icon: '⚖️' },
+  { value: '公斤', label: '公斤', icon: '⚖️' },
+  { value: '个', label: '个', icon: '🔢' },
+  { value: '份', label: '份', icon: '🍽️' },
+  { value: '箱', label: '箱', icon: '📦' },
+  { value: '袋', label: '袋', icon: '🎒' },
+  { value: '瓶', label: '瓶', icon: '🍾' },
+  { value: '包', label: '包', icon: '📦' }
+]
+
 // ==================== 状态 ====================
 const products = ref([])
 const filteredProducts = ref([])
@@ -279,7 +294,7 @@ const productForm = reactive({
   category: '',
   unit: '',
   defaultPrice: null,
-  produceDate: '', // 新增
+  produceDate: '',
   description: ''
 })
 
@@ -288,7 +303,57 @@ const deleteConfirmVisible = ref(false)
 const deleteConfirmMessage = ref('')
 const deleteConfirmProduct = ref(null)
 
-// ==================== 打开生产日期选择器（你自己的） ====================
+// ==================== 自定义选择器方法 ====================
+
+/**
+ * 打开分类选择器
+ */
+const openCategorySelector = async () => {
+  const categories = categoryNames.value
+  if (categories.length === 0) {
+    notificationService.showNotification('暂无分类，请先添加分类', 'warning')
+    return
+  }
+
+  const items = categories.map(cat => ({
+    value: cat,
+    label: cat,
+    icon: '📁'
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择商品分类',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    productForm.category = selected
+  }
+}
+
+/**
+ * 打开单位选择器
+ */
+const openUnitSelector = async () => {
+  const items = unitOptions.map(opt => ({
+    value: opt.value,
+    label: `${opt.icon} ${opt.label}`,
+    icon: opt.icon
+  }))
+
+  const selected = await notificationService.selectList({
+    title: '选择单位',
+    items: items,
+    cancelText: '取消'
+  })
+
+  if (selected) {
+    productForm.unit = selected
+  }
+}
+
+// ==================== 打开生产日期选择器 ====================
 const openProduceDatePicker = async () => {
   const date = await notificationService.datePicker({
     title: '选择生产日期',
@@ -305,9 +370,6 @@ const categoryNames = computed(() => {
 })
 const filterCategories = computed(() => {
   return props.categories.map(c => c.name).sort()
-})
-const productUnits = computed(() => {
-  return productService.getProductUnits()
 })
 
 // ==================== 方法 ====================
@@ -346,7 +408,7 @@ const openAddProductModal = () => {
   productForm.category = defaultForm.category
   productForm.unit = defaultForm.unit
   productForm.defaultPrice = defaultForm.defaultPrice
-  productForm.produceDate = '' // 重置
+  productForm.produceDate = ''
   productForm.description = defaultForm.description
   addEditModalVisible.value = true
 }
@@ -357,7 +419,7 @@ const editProduct = (product) => {
   productForm.category = product.category
   productForm.unit = product.unit
   productForm.defaultPrice = product.defaultPrice
-  productForm.produceDate = product.produceDate || '' // 赋值
+  productForm.produceDate = product.produceDate || ''
   productForm.description = product.description || ''
   addEditModalVisible.value = true
 }
@@ -375,7 +437,7 @@ const saveProduct = async () => {
       category: productForm.category,
       unit: productForm.unit,
       defaultPrice: productForm.defaultPrice ? parseFloat(productForm.defaultPrice) : null,
-      produceDate: productForm.produceDate || null, // 保存
+      produceDate: productForm.produceDate || null,
       description: productForm.description || '',
       updateTime: new Date().toISOString()
     }
@@ -916,26 +978,40 @@ onMounted(() => {
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
 }
 
-.form-select {
+/* 自定义选择器显示样式 */
+.custom-select-display {
   width: 100%;
   padding: 12px 35px 12px 15px;
   border: 1px solid #B1D5C8;
   border-radius: 12px;
   font-size: 14px;
-  color: #333;
   background-color: white;
   cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2380A492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.3s;
+  box-sizing: border-box;
 }
 
-.form-select:focus {
-  outline: none;
+.custom-select-display:hover {
   border-color: #80A492;
-  box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+  background-color: rgba(128, 164, 146, 0.05);
+}
+
+.custom-select-display .placeholder {
+  color: #999;
+  opacity: 0.7;
+}
+
+.custom-select-display i {
+  color: #80A492;
+  font-size: 14px;
+  transition: transform 0.3s;
+}
+
+.custom-select-display:hover i {
+  transform: translateY(2px);
 }
 
 .form-textarea {
@@ -991,7 +1067,7 @@ onMounted(() => {
   align-items: center;
 }
 
-.category-select .form-select {
+.category-select .custom-select-display {
   flex: 1;
 }
 
