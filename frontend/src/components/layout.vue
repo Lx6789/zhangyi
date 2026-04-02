@@ -7,11 +7,10 @@
           <img src="@/assets/zhangyi_logo.png" class="logo-img" alt="账易">
           <span>账易</span>
         </div>
-        <div class="sidebar-toggle" @click="toggleSidebar">
-          <div class="hamburger">
-            <span></span>
-            <span></span>
-            <span></span>
+        <div class="user-info">
+          <div class="user-name">
+            <i class="fas fa-user-circle"></i>
+            <span>{{ userName }}</span>
           </div>
         </div>
       </div>
@@ -172,6 +171,9 @@ import FriendsModal from '@/components/sidebar/FriendsModal.vue'
 const router = useRouter()
 const sidebarVisible = ref(false)
 
+// 用户信息
+const userName = ref('用户')
+
 // 弹框显示状态
 const historyModalVisible = ref(false)
 const dataTransferModalVisible = ref(false)
@@ -180,8 +182,34 @@ const friendsModalVisible = ref(false)
 const savingRecordsModalVisible = ref(false)
 const cloudBackupModalVisible = ref(false)
 
+// 获取用户信息
+const getUserInfo = () => {
+  const user = authHelperService.getCurrentUser()
+  if (user) {
+    // 优先使用昵称，如果没有则使用用户名或手机号
+    if (user.nickname) {
+      userName.value = user.nickname
+    } else if (user.username) {
+      userName.value = user.username
+    } else if (user.phone) {
+      // 手机号脱敏显示
+      const phone = user.phone
+      if (phone.length === 11) {
+        userName.value = phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')
+      } else {
+        userName.value = phone
+      }
+    } else {
+      userName.value = '用户'
+    }
+  }
+}
+
 // layout.vue
 onMounted(async () => {
+  // 获取用户信息
+  getUserInfo()
+
   // 检查认证状态
   if (!authHelperService.isAuthenticated()) {
     authHelperService.checkAuthAndRedirect(router)
@@ -311,6 +339,28 @@ const handleLogout = async () => {
   transition: all 0.3s ease;
 }
 
+/* 用户信息样式 - 不可点击 */
+.user-info {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 20px;
+}
+
+.user-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent-color);
+}
+
+.user-name i {
+  font-size: 20px;
+}
+
+/* 其他样式保持不变 */
 .sidebar-toggle {
   width: 40px;
   height: 40px;
@@ -563,6 +613,19 @@ const handleLogout = async () => {
   .logo-img {
     height: 32px;
   }
+
+  .user-name span {
+    display: none;
+  }
+
+  .user-name {
+    padding: 8px;
+  }
+
+  .user-name i {
+    font-size: 24px;
+    margin: 0;
+  }
 }
 
 @media (max-width: 480px) {
@@ -586,6 +649,14 @@ const handleLogout = async () => {
 
   .logo-img {
     height: 28px;
+  }
+
+  .user-name span {
+    display: none;
+  }
+
+  .user-name i {
+    font-size: 22px;
   }
 }
 
