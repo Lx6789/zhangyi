@@ -831,27 +831,28 @@ const handleAddMoney = async () => {
   width: 100%;
 }
 
+/* 空状态样式 - 与多人存钱保持一致 */
 .empty-state {
   text-align: center;
-  padding: 60px 20px;
+  padding: 40px 20px;
   color: var(--text-light);
 }
 
 .empty-state i {
-  font-size: 80px;
+  font-size: 60px;
   color: var(--secondary-color);
-  margin-bottom: 20px;
+  margin-bottom: 15px;
 }
 
 .empty-state h3 {
-  font-size: 20px;
+  font-size: 18px;
   margin-bottom: 10px;
   color: var(--accent-color);
 }
 
 .empty-state p {
   font-size: 14px;
-  margin-bottom: 25px;
+  margin-bottom: 20px;
   color: var(--text-light);
 }
 

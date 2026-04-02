@@ -604,7 +604,7 @@ const handleLogout = async () => {
   color: #f56c6c;
 }
 
-/* 响应式调整 - 根据屏幕大小缩放 logo */
+/* 响应式调整 - 小屏幕设备隐藏图标，只显示文字 */
 @media (max-width: 768px) {
   .logo {
     font-size: 1.2rem;
@@ -614,17 +614,17 @@ const handleLogout = async () => {
     height: 32px;
   }
 
-  .user-name span {
+  /* 隐藏用户图标，只显示用户名文字 */
+  .user-name i {
     display: none;
   }
 
   .user-name {
-    padding: 8px;
+    gap: 0;
   }
 
-  .user-name i {
-    font-size: 24px;
-    margin: 0;
+  .user-name span {
+    font-size: 13px;
   }
 }
 
@@ -651,12 +651,13 @@ const handleLogout = async () => {
     height: 28px;
   }
 
-  .user-name span {
+  /* 隐藏用户图标，只显示用户名文字 */
+  .user-name i {
     display: none;
   }
 
-  .user-name i {
-    font-size: 22px;
+  .user-name span {
+    font-size: 12px;
   }
 }
 
@@ -671,6 +672,15 @@ const handleLogout = async () => {
 
   .logo span {
     font-size: 0.9rem;
+  }
+
+  /* 隐藏用户图标，只显示用户名文字 */
+  .user-name i {
+    display: none;
+  }
+
+  .user-name span {
+    font-size: 11px;
   }
 }
 
