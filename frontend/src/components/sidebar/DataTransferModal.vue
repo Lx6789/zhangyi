@@ -126,13 +126,32 @@
                 <div class="date-input-group">
                   <label>开始日期</label>
                   <!-- 自定义日期选择器 -->
-                  <DatePicker v-model="dateRange.start" class="date-input" placeholder="选择开始日期" />
+                  <div class="custom-date-wrapper">
+                    <input
+                        type="text"
+                        :value="dateRange.start"
+                        readonly
+                        placeholder="选择开始日期"
+                        class="date-input custom-date-input"
+                        @click="openDatePicker('start')"
+                    />
+                    <i class="fas fa-calendar-alt calendar-icon" @click="openDatePicker('start')"></i>
+                  </div>
                 </div>
                 <span class="date-separator">至</span>
                 <div class="date-input-group">
                   <label>结束日期</label>
-                  <!-- 自定义日期选择器 -->
-                  <DatePicker v-model="dateRange.end" class="date-input" placeholder="选择结束日期" />
+                  <div class="custom-date-wrapper">
+                    <input
+                        type="text"
+                        :value="dateRange.end"
+                        readonly
+                        placeholder="选择结束日期"
+                        class="date-input custom-date-input"
+                        @click="openDatePicker('end')"
+                    />
+                    <i class="fas fa-calendar-alt calendar-icon" @click="openDatePicker('end')"></i>
+                  </div>
                 </div>
                 <button class="clear-date-btn" @click="clearDateRange" title="清除日期筛选">
                   <i class="fas fa-times"></i>
@@ -253,14 +272,32 @@
               <div class="date-range-selector" v-if="overwriteMode === 'overwrite_range'">
                 <div class="range-input-group">
                   <label>开始日期</label>
-                  <!-- 自定义日期选择器 -->
-                  <DatePicker v-model="overwriteDateRange.startDate" class="date-input" placeholder="选择开始日期" />
+                  <div class="custom-date-wrapper">
+                    <input
+                        type="text"
+                        :value="overwriteDateRange.startDate"
+                        readonly
+                        placeholder="选择开始日期"
+                        class="date-input custom-date-input"
+                        @click="openDatePickerForOverwrite('start')"
+                    />
+                    <i class="fas fa-calendar-alt calendar-icon" @click="openDatePickerForOverwrite('start')"></i>
+                  </div>
                 </div>
                 <span class="range-separator">至</span>
                 <div class="range-input-group">
                   <label>结束日期</label>
-                  <!-- 自定义日期选择器 -->
-                  <DatePicker v-model="overwriteDateRange.endDate" class="date-input" placeholder="选择结束日期" />
+                  <div class="custom-date-wrapper">
+                    <input
+                        type="text"
+                        :value="overwriteDateRange.endDate"
+                        readonly
+                        placeholder="选择结束日期"
+                        class="date-input custom-date-input"
+                        @click="openDatePickerForOverwrite('end')"
+                    />
+                    <i class="fas fa-calendar-alt calendar-icon" @click="openDatePickerForOverwrite('end')"></i>
+                  </div>
                 </div>
                 <div class="range-hint">
                   <i class="fas fa-info-circle"></i>
@@ -455,6 +492,10 @@ const dateRange = reactive({
 // 微信账单说明弹窗状态
 const showWechatGuide = ref(false)
 
+// 当前正在选择的日期类型
+let currentDatePickerType = ref(null) // 'start' 或 'end'
+let currentOverwritePickerType = ref(null) // 'start' 或 'end'
+
 // 获取当前用户
 const fetchCurrentUser = async () => {
   const userFromStorage = authHelperService.getCurrentUser()
@@ -470,6 +511,60 @@ const fetchCurrentUser = async () => {
         id: parseInt(savedUserId),
         username: '用户'
       }
+    }
+  }
+}
+
+// ==================== 自定义日期选择器 ====================
+const openDatePicker = async (type) => {
+  currentDatePickerType = type
+  const currentValue = type === 'start' ? dateRange.start : dateRange.end
+
+  // 解析当前日期，如果没有则使用今天
+  let defaultDate = new Date()
+  if (currentValue) {
+    const parts = currentValue.split('-')
+    if (parts.length === 3) {
+      defaultDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+    }
+  }
+
+  const result = await notificationService.datePicker({
+    title: type === 'start' ? '选择开始日期' : '选择结束日期',
+    defaultDate: defaultDate
+  })
+
+  if (result) {
+    if (type === 'start') {
+      dateRange.start = result
+    } else {
+      dateRange.end = result
+    }
+  }
+}
+
+const openDatePickerForOverwrite = async (type) => {
+  currentOverwritePickerType = type
+  const currentValue = type === 'start' ? overwriteDateRange.startDate : overwriteDateRange.endDate
+
+  let defaultDate = new Date()
+  if (currentValue) {
+    const parts = currentValue.split('-')
+    if (parts.length === 3) {
+      defaultDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+    }
+  }
+
+  const result = await notificationService.datePicker({
+    title: type === 'start' ? '选择开始日期' : '选择结束日期',
+    defaultDate: defaultDate
+  })
+
+  if (result) {
+    if (type === 'start') {
+      overwriteDateRange.startDate = result
+    } else {
+      overwriteDateRange.endDate = result
     }
   }
 }
@@ -1286,7 +1381,7 @@ watch(importType, () => {
   margin-left: auto;
 }
 
-/* 日期范围 */
+/* 日期范围 - 自定义日期选择器样式 */
 .date-range {
   display: flex;
   align-items: flex-end;
@@ -1296,7 +1391,7 @@ watch(importType, () => {
 
 .date-input-group {
   flex: 1;
-  min-width: 120px;
+  min-width: 130px;
 }
 
 .date-input-group label {
@@ -1306,21 +1401,47 @@ watch(importType, () => {
   margin-bottom: 4px;
 }
 
-/* 自定义日期选择器样式适配 */
-.date-input {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #B1D5C8;
-  border-radius: 8px;
-  font-size: 13px;
-  background-color: white;
-  transition: all 0.3s;
+/* 自定义日期选择器包装器 */
+.custom-date-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
 }
 
-.date-input:focus {
+.custom-date-input {
+  width: 100%;
+  padding: 10px 32px 10px 12px;
+  border: 1px solid #B1D5C8;
+  border-radius: 8px;
+  font-size: 14px;
+  background-color: white;
+  transition: all 0.3s;
+  cursor: pointer;
+  min-height: 40px;
+}
+
+.custom-date-input:hover {
+  border-color: #80A492;
+}
+
+.custom-date-input:focus {
   outline: none;
   border-color: #80A492;
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+}
+
+.calendar-icon {
+  position: absolute;
+  right: 12px;
+  color: #99BCAC;
+  font-size: 16px;
+  cursor: pointer;
+  transition: color 0.3s;
+  pointer-events: auto;
+}
+
+.calendar-icon:hover {
+  color: #80A492;
 }
 
 .clear-date-btn {
@@ -1331,7 +1452,8 @@ watch(importType, () => {
   padding: 8px;
   border-radius: 50%;
   transition: all 0.3s;
-  margin-bottom: 8px;
+  margin-bottom: 0;
+  align-self: center;
 }
 
 .clear-date-btn:hover {

@@ -392,7 +392,7 @@ class NotificationService {
     }
 
     /**
-     * 自定义日期选择器（美化版）
+     * 自定义日期选择器（美化版）- 修复选中日期高亮问题，保持原配色
      */
     datePicker(options = {}) {
         return new Promise((resolve) => {
@@ -443,6 +443,12 @@ class NotificationService {
                 overflow: 'hidden'
             });
 
+            // 辅助函数：格式化日期为 YYYY-MM-DD
+            const formatDateStr = (date) => {
+                if (!date || isNaN(date.getTime())) return '';
+                return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            };
+
             const renderCalendar = () => {
                 const firstDay = new Date(currentYear, currentMonth, 1);
                 const lastDay = new Date(currentYear, currentMonth + 1, 0);
@@ -450,13 +456,19 @@ class NotificationService {
                 const daysInMonth = lastDay.getDate();
                 const prevMonthLastDay = new Date(currentYear, currentMonth, 0).getDate();
 
+                // 生成选中日期的字符串，用于比较
+                const selectedDateStr = formatDateStr(selectedDate);
+
                 const days = [];
+                // 上月日期
                 for (let i = startWeekday - 1; i >= 0; i--) {
                     days.push({ day: prevMonthLastDay - i, isCurrentMonth: false, date: new Date(currentYear, currentMonth - 1, prevMonthLastDay - i) });
                 }
+                // 当月日期
                 for (let i = 1; i <= daysInMonth; i++) {
                     days.push({ day: i, isCurrentMonth: true, date: new Date(currentYear, currentMonth, i) });
                 }
+                // 下月日期
                 const remaining = 42 - days.length;
                 for (let i = 1; i <= remaining; i++) {
                     days.push({ day: i, isCurrentMonth: false, date: new Date(currentYear, currentMonth + 1, i) });
@@ -467,9 +479,9 @@ class NotificationService {
                 let calendarHtml = `
                     <div style="padding: 20px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <button class="prev-month" style="width: 32px; height: 32px; border-radius: 50%; background: ${this.colors.grayBg}; color: ${this.colors.textDark}; cursor: pointer; font-size: 18px; border: none;">‹</button>
+                            <button class="prev-month" style="width: 32px; height: 32px; border-radius: 50%; background: ${this.colors.grayBg}; color: ${this.colors.textDark}; cursor: pointer; font-size: 18px; border: none; display: flex; align-items: center; justify-content: center;">‹</button>
                             <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: ${this.colors.textDark};">${currentYear}年 ${currentMonth + 1}月</h3>
-                            <button class="next-month" style="width: 32px; height: 32px; border-radius: 50%; background: ${this.colors.grayBg}; color: ${this.colors.textDark}; cursor: pointer; font-size: 18px; border: none;">›</button>
+                            <button class="next-month" style="width: 32px; height: 32px; border-radius: 50%; background: ${this.colors.grayBg}; color: ${this.colors.textDark}; cursor: pointer; font-size: 18px; border: none; display: flex; align-items: center; justify-content: center;">›</button>
                         </div>
                         <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 8px;">
                             ${weekdays.map(day => `<div style="text-align: center; font-size: 12px; color: ${this.colors.textLight}; padding: 8px 0;">${day}</div>`).join('')}
@@ -478,17 +490,19 @@ class NotificationService {
                 `;
 
                 days.forEach((day) => {
-                    const dateStr = `${day.date.getFullYear()}-${String(day.date.getMonth() + 1).padStart(2, '0')}-${String(day.date.getDate()).padStart(2, '0')}`;
-                    const isSelected = selectedDate &&
-                        selectedDate.getFullYear() === day.date.getFullYear() &&
-                        selectedDate.getMonth() === day.date.getMonth() &&
-                        selectedDate.getDate() === day.date.getDate();
-                    const isDisabled = (minDate && dateStr < minDate) || (maxDate && dateStr > maxDate);
+                    const currentDateStr = formatDateStr(day.date);
+                    const isSelected = selectedDateStr === currentDateStr;
 
+                    // 检查是否禁用
+                    let isDisabled = false;
+                    if (minDate && currentDateStr < minDate) isDisabled = true;
+                    if (maxDate && currentDateStr > maxDate) isDisabled = true;
+
+                    // 使用原来的配色方案：选中时背景用 primary，文字用 textDark
                     const bgColor = isSelected ? this.colors.primary : 'transparent';
                     const textColor = isSelected ? this.colors.textDark : (day.isCurrentMonth ? this.colors.textDark : this.colors.textLight);
 
-                    calendarHtml += `<div class="calendar-day" data-date="${dateStr}" data-year="${day.date.getFullYear()}" data-month="${day.date.getMonth()}" data-day="${day.day}" data-disabled="${isDisabled}" style="text-align: center; padding: 10px 0; font-size: 14px; border-radius: 40px; cursor: ${isDisabled ? 'not-allowed' : 'pointer'}; background: ${bgColor}; color: ${textColor}; opacity: ${isDisabled ? 0.4 : 1}; transition: all 0.2s;">${day.day}</div>`;
+                    calendarHtml += `<div class="calendar-day" data-date="${currentDateStr}" data-year="${day.date.getFullYear()}" data-month="${day.date.getMonth()}" data-day="${day.day}" data-disabled="${isDisabled}" style="text-align: center; padding: 10px 0; font-size: 14px; border-radius: 40px; cursor: ${isDisabled ? 'not-allowed' : 'pointer'}; background: ${bgColor}; color: ${textColor}; opacity: ${isDisabled ? 0.4 : 1}; transition: all 0.2s;">${day.day}</div>`;
                 });
 
                 calendarHtml += `
@@ -508,26 +522,32 @@ class NotificationService {
                 const cancelBtn = modal.querySelector('.date-cancel');
                 const confirmBtn = modal.querySelector('.date-confirm');
 
-                prevBtn.onclick = () => {
-                    if (currentMonth === 0) {
-                        currentMonth = 11;
-                        currentYear--;
-                    } else {
-                        currentMonth--;
-                    }
-                    renderCalendar();
-                };
+                // 上月/下月按钮事件
+                if (prevBtn) {
+                    prevBtn.onclick = () => {
+                        if (currentMonth === 0) {
+                            currentMonth = 11;
+                            currentYear--;
+                        } else {
+                            currentMonth--;
+                        }
+                        renderCalendar();
+                    };
+                }
 
-                nextBtn.onclick = () => {
-                    if (currentMonth === 11) {
-                        currentMonth = 0;
-                        currentYear++;
-                    } else {
-                        currentMonth++;
-                    }
-                    renderCalendar();
-                };
+                if (nextBtn) {
+                    nextBtn.onclick = () => {
+                        if (currentMonth === 11) {
+                            currentMonth = 0;
+                            currentYear++;
+                        } else {
+                            currentMonth++;
+                        }
+                        renderCalendar();
+                    };
+                }
 
+                // 日期点击事件
                 daysEl.forEach(dayEl => {
                     const isDisabled = dayEl.dataset.disabled === 'true';
                     if (!isDisabled) {
@@ -536,7 +556,7 @@ class NotificationService {
                             const month = parseInt(dayEl.dataset.month);
                             const day = parseInt(dayEl.dataset.day);
                             selectedDate = new Date(year, month, day);
-                            renderCalendar();
+                            renderCalendar(); // 重新渲染以高亮新选中的日期
                         };
                         dayEl.onmouseenter = () => {
                             if (!isDisabled && dayEl.style.backgroundColor !== this.colors.primary) {
@@ -544,36 +564,49 @@ class NotificationService {
                             }
                         };
                         dayEl.onmouseleave = () => {
-                            if (!isDisabled && dayEl.style.backgroundColor !== this.colors.primary) {
-                                dayEl.style.backgroundColor = 'transparent';
+                            if (!isDisabled) {
+                                const isSelectedDay = formatDateStr(selectedDate) === dayEl.dataset.date;
+                                if (isSelectedDay) {
+                                    dayEl.style.backgroundColor = this.colors.primary;
+                                } else {
+                                    dayEl.style.backgroundColor = 'transparent';
+                                }
                             }
                         };
                     }
                 });
 
-                cancelBtn.onclick = () => close(null);
-                confirmBtn.onclick = () => {
-                    const formattedDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-                    close(formattedDate);
-                };
+                // 取消按钮
+                if (cancelBtn) {
+                    cancelBtn.onclick = () => close(null);
+                    cancelBtn.onmouseenter = () => {
+                        cancelBtn.style.backgroundColor = this.colors.grayBg;
+                        cancelBtn.style.boxShadow = `0 0 0 1px ${this.colors.tertiary} inset`;
+                    };
+                    cancelBtn.onmouseleave = () => {
+                        cancelBtn.style.backgroundColor = this.colors.white;
+                        cancelBtn.style.boxShadow = `0 0 0 1px ${this.colors.secondary} inset`;
+                    };
+                }
 
-                cancelBtn.onmouseenter = () => {
-                    cancelBtn.style.backgroundColor = this.colors.grayBg;
-                    cancelBtn.style.boxShadow = `0 0 0 1px ${this.colors.tertiary} inset`;
-                };
-                cancelBtn.onmouseleave = () => {
-                    cancelBtn.style.backgroundColor = this.colors.white;
-                    cancelBtn.style.boxShadow = `0 0 0 1px ${this.colors.secondary} inset`;
-                };
-                confirmBtn.onmouseenter = () => confirmBtn.style.opacity = '0.9';
-                confirmBtn.onmouseleave = () => confirmBtn.style.opacity = '1';
+                // 确认按钮
+                if (confirmBtn) {
+                    confirmBtn.onclick = () => {
+                        const formattedDate = formatDateStr(selectedDate);
+                        close(formattedDate);
+                    };
+                    confirmBtn.onmouseenter = () => confirmBtn.style.opacity = '0.9';
+                    confirmBtn.onmouseleave = () => confirmBtn.style.opacity = '1';
+                }
             };
 
             const close = (result) => {
                 overlay.style.opacity = '0';
-                modal.style.transform = 'scale(0.9)';
-                setTimeout(() => overlay.remove(), 300);
-                resolve(result);
+                if (modal) modal.style.transform = 'scale(0.9)';
+                setTimeout(() => {
+                    if (overlay.parentNode) overlay.remove();
+                    resolve(result);
+                }, 300);
             };
 
             overlay.appendChild(modal);
