@@ -169,11 +169,12 @@
         <div class="form-group">
           <label><i class="fas fa-calendar-alt"></i> 截止日期</label>
           <input
-              v-model="form.deadline"
-              type="date"
+              :value="form.deadline"
               class="form-input"
-              :min="today"
               required
+              placeholder="选择截止日期"
+              readonly
+              @click="openCustomDeadlinePicker"
           >
         </div>
         <div class="form-group">
@@ -449,6 +450,19 @@ watch(() => props.currentSavingsType, (newType) => {
     form.members = []
   }
 }, { immediate: true })
+
+// 自定义截止日期选择器
+const openCustomDeadlinePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择截止日期',
+    defaultDate: form.deadline,
+    minDate: today.value  // 不能选今天之前的日期
+  });
+
+  if (date) {
+    form.deadline = date;
+  }
+};
 
 // ========== 方法 ==========
 // 验证金额

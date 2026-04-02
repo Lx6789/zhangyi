@@ -125,12 +125,14 @@
               <div class="date-range">
                 <div class="date-input-group">
                   <label>开始日期</label>
-                  <input type="date" v-model="dateRange.start" class="date-input">
+                  <!-- 自定义日期选择器 -->
+                  <DatePicker v-model="dateRange.start" class="date-input" placeholder="选择开始日期" />
                 </div>
                 <span class="date-separator">至</span>
                 <div class="date-input-group">
                   <label>结束日期</label>
-                  <input type="date" v-model="dateRange.end" class="date-input">
+                  <!-- 自定义日期选择器 -->
+                  <DatePicker v-model="dateRange.end" class="date-input" placeholder="选择结束日期" />
                 </div>
                 <button class="clear-date-btn" @click="clearDateRange" title="清除日期筛选">
                   <i class="fas fa-times"></i>
@@ -251,12 +253,14 @@
               <div class="date-range-selector" v-if="overwriteMode === 'overwrite_range'">
                 <div class="range-input-group">
                   <label>开始日期</label>
-                  <input type="date" v-model="overwriteDateRange.startDate" class="date-input">
+                  <!-- 自定义日期选择器 -->
+                  <DatePicker v-model="overwriteDateRange.startDate" class="date-input" placeholder="选择开始日期" />
                 </div>
                 <span class="range-separator">至</span>
                 <div class="range-input-group">
                   <label>结束日期</label>
-                  <input type="date" v-model="overwriteDateRange.endDate" class="date-input">
+                  <!-- 自定义日期选择器 -->
+                  <DatePicker v-model="overwriteDateRange.endDate" class="date-input" placeholder="选择结束日期" />
                 </div>
                 <div class="range-hint">
                   <i class="fas fa-info-circle"></i>
@@ -379,7 +383,7 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'close', 'data-imported'])
 
 // 使用导出和导入逻辑
-const exportModule = Export()  // 修改：使用 exportModule 而不是解构 exportToExcel
+const exportModule = Export()
 const {
   parseImportFile,
   importIncomeExpenseData,
@@ -412,8 +416,8 @@ const selectedFile = ref(null)
 const isDragging = ref(false)
 
 // 导入类型和覆盖模式
-const importType = ref('wechat') // 'wechat' 或 'json'
-const overwriteMode = ref('append') // 'append', 'overwrite_range', 'overwrite_all'
+const importType = ref('wechat')
+const overwriteMode = ref('append')
 const overwriteDateRange = reactive({
   startDate: '',
   endDate: ''
@@ -528,7 +532,6 @@ const handleExport = async () => {
   exportProgress.value = '正在准备导出数据...'
 
   try {
-    // 使用 exportAllData 方法批量导出
     const result = await exportModule.exportAllData(
         currentUser.value.id,
         exportOptions,
@@ -546,7 +549,6 @@ const handleExport = async () => {
     notificationService.showNotification(`导出成功！共导出 ${result.count} 个文件`, 'success')
     exportProgress.value = ''
 
-    // 可选：延迟关闭弹窗，让用户看到成功消息
     setTimeout(() => {
       close()
     }, 1500)
@@ -567,13 +569,11 @@ const selectFile = () => {
 const handleFileSelect = (event) => {
   const file = event.target.files[0]
   if (file) {
-    // 根据导入类型验证文件格式
     if (importType.value === 'wechat') {
       if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
         notificationService.showNotification('请选择 Excel 格式的微信账单文件（.xlsx）', 'warning')
         return
       }
-      // 预览微信账单数据
       previewWechatBill(file)
     } else {
       if (!file.name.endsWith('.json')) {
@@ -613,7 +613,6 @@ const handleDrop = (event) => {
   isDragging.value = false
   const file = event.dataTransfer.files[0]
   if (file) {
-    // 根据导入类型验证文件格式
     if (importType.value === 'wechat') {
       if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
         notificationService.showNotification('请上传 Excel 格式的微信账单文件（.xlsx）', 'warning')
@@ -638,7 +637,6 @@ const handleImport = async () => {
     return
   }
 
-  // 验证覆盖模式下的日期范围
   if (overwriteMode.value === 'overwrite_range') {
     if (!overwriteDateRange.startDate || !overwriteDateRange.endDate) {
       notificationService.showNotification('请选择要覆盖的日期范围', 'warning')
@@ -650,7 +648,6 @@ const handleImport = async () => {
     }
   }
 
-  // 构建确认消息
   let confirmMessage = ''
   if (importType.value === 'wechat') {
     switch (overwriteMode.value) {
@@ -682,9 +679,7 @@ const handleImport = async () => {
       total: 0
     }
 
-    // 根据导入类型处理
     if (importType.value === 'wechat') {
-      // 导入微信账单
       importProgress.value = '正在导入微信账单...'
 
       const importOptions = {
@@ -705,13 +700,9 @@ const handleImport = async () => {
       )
       results = result
     } else {
-      // 导入JSON数据
       const data = await parseImportFile(selectedFile.value)
-
-      // JSON导入使用追加模式
       const importOptions = {overwriteMode: 'append'}
 
-      // 导入收支数据
       if (data.incomeExpense && data.incomeExpense.length > 0) {
         importProgress.value = '正在导入收支数据...'
         const result = await importIncomeExpenseData(data, importOptions)
@@ -719,7 +710,6 @@ const handleImport = async () => {
         results.failCount += result.failCount
       }
 
-      // 导入个人存钱数据
       if (data.personalSaving && data.personalSaving.length > 0) {
         importProgress.value = '正在导入个人存钱数据...'
         const result = await importPersonalSavingData(currentUser.value.id, data, importOptions)
@@ -727,7 +717,6 @@ const handleImport = async () => {
         results.failCount += result.failCount
       }
 
-      // 导入多人存钱数据
       if (data.groupSaving && data.groupSaving.length > 0) {
         importProgress.value = '正在导入多人存钱数据...'
         const result = await importGroupSavingData(currentUser.value.id, data, importOptions)
@@ -735,7 +724,6 @@ const handleImport = async () => {
         results.failCount += result.failCount
       }
 
-      // 导入商品数据
       if (data.products && data.products.length > 0) {
         importProgress.value = '正在导入商品数据...'
         const result = await importProductsData(data, importOptions)
@@ -743,7 +731,6 @@ const handleImport = async () => {
         results.failCount += result.failCount
       }
 
-      // 导入库存数据
       if (data.inventory && data.inventory.length > 0) {
         importProgress.value = '正在导入库存数据...'
         const result = await importInventoryData(data, importOptions)
@@ -751,7 +738,6 @@ const handleImport = async () => {
         results.failCount += result.failCount
       }
 
-      // 导入商品分类
       if (data.categories && data.categories.length > 0) {
         importProgress.value = '正在导入商品分类...'
         const result = await importCategoriesData(data, importOptions)
@@ -759,7 +745,6 @@ const handleImport = async () => {
         results.failCount += result.failCount
       }
 
-      // 导入供应商
       if (data.suppliers && data.suppliers.length > 0) {
         importProgress.value = '正在导入供应商...'
         const result = await importSuppliersData(data, importOptions)
@@ -767,7 +752,6 @@ const handleImport = async () => {
         results.failCount += result.failCount
       }
 
-      // 导入客户
       if (data.customers && data.customers.length > 0) {
         importProgress.value = '正在导入客户...'
         const result = await importCustomersData(data, importOptions)
@@ -796,8 +780,6 @@ const handleImport = async () => {
 
     notificationService.showNotification(successMsg, 'success')
 
-    // ==================== 关键修改：导入成功后触发刷新事件 ====================
-    // 如果有成功导入的数据，通知父组件刷新
     if (results.successCount > 0) {
       console.log('数据导入成功，触发刷新事件')
       emit('data-imported', {
@@ -806,12 +788,10 @@ const handleImport = async () => {
         overwriteMode: overwriteMode.value
       })
 
-      // 可选：延迟关闭弹窗，让用户看到成功消息
       setTimeout(() => {
         close()
       }, 1500)
     } else {
-      // 没有成功导入的数据，直接关闭弹窗
       setTimeout(() => {
         close()
       }, 1000)
@@ -874,12 +854,10 @@ watch(importType, () => {
   importPreviewRecordCount.value = 0
 })
 
-// 动态导入 XLSX（用于模板中的 XLSX 引用，如果模板中没有使用可以移除）
-import * as XLSX from 'xlsx'
 </script>
 
 <style scoped>
-/* 基础模态框样式 - 与 CategoryManagement 保持一致 */
+/* 基础模态框样式 */
 .modal {
   position: fixed;
   top: 0;
@@ -909,7 +887,6 @@ import * as XLSX from 'xlsx'
   padding: 25px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   max-height: 85vh;
-  /* 隐藏外层滚动条 */
   overflow-y: hidden;
   display: flex;
   flex-direction: column;
@@ -961,13 +938,11 @@ import * as XLSX from 'xlsx'
 
 .modal-body {
   margin-bottom: 20px;
-  /* 内容区域滚动 */
   flex: 1;
   overflow-y: auto;
   padding-right: 8px;
 }
 
-/* modal-body 自定义滚动条样式 */
 .modal-body::-webkit-scrollbar {
   width: 8px;
 }
@@ -986,7 +961,6 @@ import * as XLSX from 'xlsx'
   background: #80A492;
 }
 
-/* Firefox 滚动条样式 */
 .modal-body {
   scrollbar-width: thin;
   scrollbar-color: #B1D5C8 #f1f1f1;
@@ -1332,6 +1306,7 @@ import * as XLSX from 'xlsx'
   margin-bottom: 4px;
 }
 
+/* 自定义日期选择器样式适配 */
 .date-input {
   width: 100%;
   padding: 8px 10px;

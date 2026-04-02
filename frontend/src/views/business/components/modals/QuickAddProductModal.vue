@@ -21,17 +21,17 @@
             </label>
             <div class="input-wrapper">
               <input
+                  ref="nameInput"
                   v-model="form.name"
                   type="text"
                   class="form-input"
                   placeholder="例如：苹果、大米..."
                   required
-                  autofocus
               >
             </div>
           </div>
 
-          <!-- 商品分类 - 直接使用 props.categories -->
+          <!-- 商品分类 -->
           <div class="form-group">
             <label>
               <i class="fas fa-folder"></i>
@@ -84,7 +84,7 @@
             </select>
           </div>
 
-          <!-- 参考售价（可选） -->
+          <!-- 参考售价 -->
           <div class="form-group">
             <label>
               <i class="fas fa-yen-sign"></i>
@@ -103,7 +103,24 @@
             </div>
           </div>
 
-          <!-- 描述/备注（可选） -->
+          <!-- 生产日期（你自己的日期选择器） -->
+          <div class="form-group">
+            <label>
+              <i class="fas fa-calendar-alt"></i>
+              <span>生产日期（可选）</span>
+            </label>
+            <div class="input-wrapper" @click="openProduceDatePicker">
+              <input
+                  v-model="form.produceDate"
+                  type="text"
+                  class="form-input"
+                  placeholder="点击选择生产日期"
+                  readonly
+              >
+            </div>
+          </div>
+
+          <!-- 备注 -->
           <div class="form-group">
             <label>
               <i class="fas fa-align-left"></i>
@@ -117,7 +134,7 @@
             ></textarea>
           </div>
 
-          <!-- 表单操作按钮 -->
+          <!-- 操作按钮 -->
           <div class="form-actions">
             <button type="button" class="btn btn-secondary" @click="close">
               <i class="fas fa-times"></i> 取消
@@ -152,8 +169,9 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'success', 'open-category'])
 
-// ==================== 状态 ====================
+// 状态
 const saving = ref(false)
+const nameInput = ref(null)
 
 // 表单数据
 const form = reactive({
@@ -161,68 +179,75 @@ const form = reactive({
   category: '',
   unit: '',
   defaultPrice: '',
+  produceDate: '',
   description: ''
 })
 
-// ==================== 方法 ====================
+// 打开生产日期选择器
+const openProduceDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择生产日期',
+    defaultDate: form.produceDate || new Date()
+  })
+  if (date) {
+    form.produceDate = date
+  }
+}
 
 // 重置表单
 const resetForm = () => {
-  form.name = ''
-  form.category = ''
-  form.unit = ''
-  form.defaultPrice = ''
-  form.description = ''
+  Object.assign(form, {
+    name: '',
+    category: '',
+    unit: '',
+    defaultPrice: '',
+    produceDate: '',
+    description: ''
+  })
 }
 
 // 保存商品
 const saveProduct = async () => {
-  // 验证表单
-  if (!form.name.trim()) {
+  const trimName = form.name.trim()
+  if (!trimName) {
     notificationService.showNotification('请输入商品名称', 'error')
     return
   }
-
   if (!form.category) {
     notificationService.showNotification('请选择商品分类', 'error')
     return
   }
-
   if (!form.unit) {
     notificationService.showNotification('请选择单位', 'error')
     return
   }
 
-  // 检查商品名称是否重复
-  const existingProducts = await productService.getAllProducts()
-  const isDuplicate = existingProducts.some(
-      p => p.name.toLowerCase() === form.name.trim().toLowerCase()
-  )
-
-  if (isDuplicate) {
-    notificationService.showNotification(`商品 "${form.name.trim()}" 已存在，请勿重复添加`, 'error')
-    return
-  }
-
-  saving.value = true
   try {
-    // 创建商品数据
+    const existingProducts = await productService.getAllProducts()
+    const isDuplicate = existingProducts.some(
+        p => p.name.toLowerCase() === trimName.toLowerCase()
+    )
+    if (isDuplicate) {
+      notificationService.showNotification(`商品 "${trimName}" 已存在，请勿重复添加`, 'error')
+      return
+    }
+
+    saving.value = true
     const productData = {
-      name: form.name.trim(),
+      name: trimName,
       category: form.category,
       unit: form.unit,
       defaultPrice: form.defaultPrice ? parseFloat(form.defaultPrice) : null,
+      produceDate: form.produceDate || null,
       description: form.description.trim() || null,
       createTime: new Date().toISOString()
     }
 
-    // 添加商品
     await productService.addProduct(productData)
+    notificationService.showNotification(`商品 "${trimName}" 添加成功`, 'success')
 
     emit('success')
     close()
-
-    notificationService.showNotification(`商品 "${form.name}" 添加成功`, 'success')
   } catch (error) {
     console.error('添加商品失败:', error)
     notificationService.showNotification('添加商品失败，请重试', 'error')
@@ -242,33 +267,24 @@ const close = () => {
   emit('update:visible', false)
 }
 
+// 点击遮罩关闭
 const closeOnOverlay = (event) => {
-  if (event.target.classList.contains('modal')) {
-    close()
-  }
+  if (event.target.classList.contains('modal')) close()
 }
 
-// ==================== 监听器 ====================
-
-// 监听 visible 变化
+// 打开弹窗自动聚焦
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     resetForm()
-    // 自动聚焦输入框
-    setTimeout(() => {
-      const input = document.querySelector('.quick-form .form-input')
-      if (input) input.focus()
-    }, 100)
+    setTimeout(() => nameInput.value?.focus(), 100)
   }
 })
 
-// 监听分类变化，当有新分类时自动选中
-watch(() => props.categories, (newCategories, oldCategories) => {
-  console.log('QuickAddProductModal - categories 更新:', newCategories?.length)
-  if (newCategories && newCategories.length > 0 && !form.category) {
-    // 自动选中第一个分类
-    form.category = newCategories[0].name
-    console.log('自动选中分类:', form.category)
+// 自动选中默认分类
+watch(() => props.categories, (val) => {
+  if (val?.length && !form.category) {
+    const defaultCat = val.find(c => c.isDefault) || val[0]
+    form.category = defaultCat.name
   }
 }, { immediate: true, deep: true })
 </script>
@@ -457,6 +473,7 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   transition: all 0.3s;
   background: white;
   box-sizing: border-box;
+  cursor: pointer;
 }
 
 .form-input.with-prefix-input {
@@ -475,6 +492,7 @@ watch(() => props.categories, (newCategories, oldCategories) => {
   min-height: 60px;
   resize: vertical;
   font-family: inherit;
+  cursor: text !important;
 }
 
 .category-select-wrapper {

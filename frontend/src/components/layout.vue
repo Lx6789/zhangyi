@@ -247,7 +247,7 @@ const showCloudBackupModal = () => {
 
 const handleLogout = async () => {
   try {
-    const confirmLogout = confirm('确定要退出登录吗？')
+    const confirmLogout = await notificationService.confirm('确定要退出登录吗？')
     if (!confirmLogout) return
 
     // 清除好友缓存

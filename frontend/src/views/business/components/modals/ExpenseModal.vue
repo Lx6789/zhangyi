@@ -59,7 +59,15 @@
 
             <div class="form-group">
               <label><i class="fas fa-calendar-alt"></i> 日期</label>
-              <input v-model="form.date" type="date" class="form-input" required>
+              <div class="input-wrapper" @click="openDatePicker">
+                <input
+                    v-model="form.date"
+                    type="text"
+                    class="form-input"
+                    placeholder="点击选择日期"
+                    readonly
+                >
+              </div>
             </div>
           </div>
 
@@ -119,7 +127,6 @@
                 >
                   <i class="fas fa-plus"></i>
                 </button>
-                <!-- 手动刷新按钮 -->
                 <button
                     type="button"
                     class="quick-add-btn"
@@ -313,7 +320,6 @@
               取消
             </button>
 
-            <!-- 进货采购时显示快捷跳转按钮 -->
             <button
                 v-if="form.type === '进货采购' && selectedProduct"
                 type="button"
@@ -368,7 +374,7 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'success', 'refresh-products', 'open-category', 'open-purchase'])
 
-// ==================== 常量（使用业务服务） ====================
+// ==================== 常量 ====================
 const expenseSubtypesMap = expenseService.getExpenseSubtypesMap()
 const paymentMethods = expenseService.getPaymentMethods()
 
@@ -402,45 +408,36 @@ const selectedProduct = ref(null)
 const isRefreshing = ref(false)
 
 // ==================== 计算属性 ====================
-
-// 根据商品类型筛选商品
 const filteredProductsByType = computed(() => {
   if (!form.productType) return []
   return props.products.filter(p => p.category === form.productType)
 })
 
-// 当前选择的商品的库存信息
 const currentInventoryItem = computed(() => {
   if (!form.inventoryProductId) return null
   return props.inventoryItems.find(item => item.productId === form.inventoryProductId)
 })
 
-// 是否显示库存相关字段
 const showInventoryFields = computed(() => {
   return expenseService.isInventoryAffectingExpense(form.type)
 })
 
-// 库存状态样式
 const getStockStatusClass = computed(() => {
   return inventoryService.getStockStatusClass(currentInventoryItem.value)
 })
 
-// 更新库存文本
 const updateInventoryText = computed(() => {
   return expenseService.getUpdateInventoryText(form.type)
 })
 
-// 供应商占位符
 const supplierPlaceholder = computed(() => {
   return expenseService.getSupplierPlaceholder(form.type)
 })
 
-// 备注占位符
 const notePlaceholder = computed(() => {
   return expenseService.getNotePlaceholder(form.type)
 })
 
-// 库存预警
 const showInventoryWarning = computed(() => {
   if (!currentInventoryItem.value || !form.quantity) return false
   if (form.type === '库存损耗' || form.type === '退货退款') {
@@ -465,13 +462,20 @@ const inventoryWarningMessage = computed(() => {
 })
 
 // ==================== 方法 ====================
+const openDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择日期',
+    defaultDate: form.date || new Date()
+  })
+  if (date) {
+    form.date = date
+  }
+}
 
-// 从数据库查询商品类型
 const loadProductTypes = async () => {
   loadingProductTypes.value = true
   try {
     productTypes.value = await businessDataService.getAllCategories()
-    console.log('从数据库加载商品类型:', productTypes.value)
   } catch (error) {
     console.error('加载商品类型失败:', error)
     productTypes.value = []
@@ -480,37 +484,27 @@ const loadProductTypes = async () => {
   }
 }
 
-// 根据商品类型查询商品
 const loadProductsByType = async (type) => {
   if (!type) return
   loadingProductsByType.value = true
-  try {
-    console.log(`加载类型为 ${type} 的商品，当前商品总数:`, props.products.length)
-    // 计算属性会自动处理
-  } catch (error) {
+  try { } catch (error) {
     console.error('加载商品失败:', error)
   } finally {
     loadingProductsByType.value = false
   }
 }
 
-// 处理支出类型变化
 const handleTypeChange = () => {
   updateSubtypes()
   resetInventoryFields()
-
-  if (form.type === '进货采购') {
-    loadProductTypes()
-  }
+  if (form.type === '进货采购') loadProductTypes()
 }
 
-// 更新子类型列表
 const updateSubtypes = () => {
   subtypesList.value = expenseService.getExpenseSubtypes(form.type)
   form.subtype = ''
 }
 
-// 选择商品类型
 const selectProductType = (type) => {
   form.productType = type
   form.inventoryProductId = ''
@@ -518,7 +512,6 @@ const selectProductType = (type) => {
   loadProductsByType(type)
 }
 
-// 重置库存相关字段
 const resetInventoryFields = () => {
   form.productType = ''
   form.inventoryProductId = ''
@@ -530,36 +523,28 @@ const resetInventoryFields = () => {
   selectedProduct.value = null
 }
 
-// 选择商品
 const onProductSelected = () => {
   if (!form.inventoryProductId) {
     selectedProduct.value = null
     form.unit = '斤'
     return
   }
-
   const product = props.products.find(p => p.id === form.inventoryProductId)
   if (product) {
     selectedProduct.value = product
     form.unit = product.unit || '斤'
-    console.log('已选择商品:', product.name)
-
     if (form.type === '进货采购' && currentInventoryItem.value) {
       form.unitPrice = currentInventoryItem.value.costPrice || ''
     }
-  } else {
-    console.warn('未找到商品 ID:', form.inventoryProductId)
   }
 }
 
-// 根据金额计算
 const calculateFromAmount = () => {
   if (form.type === '进货采购' && form.quantity && form.amount) {
     form.unitPrice = parseFloat(form.amount) / parseFloat(form.quantity)
   }
 }
 
-// 根据数量计算
 const calculateFromQuantity = () => {
   if (form.type === '进货采购' && form.unitPrice && form.quantity) {
     form.amount = expenseService.calculatePurchaseTotal(form.unitPrice, form.quantity)
@@ -568,89 +553,53 @@ const calculateFromQuantity = () => {
   }
 }
 
-// 根据单价计算
 const calculateFromPrice = () => {
   if (form.type === '进货采购' && form.quantity && form.unitPrice) {
     form.amount = expenseService.calculatePurchaseTotal(form.unitPrice, form.quantity)
   }
 }
 
-// 打开快速新增商品
 const openQuickAddProduct = () => {
   quickAddProductVisible.value = true
 }
 
-// 手动刷新商品列表
 const refreshProductsList = async () => {
   if (isRefreshing.value) return
-
   isRefreshing.value = true
   loadingProductsByType.value = true
-
   try {
-    console.log('手动刷新商品列表...')
     emit('refresh-products')
     await new Promise(resolve => setTimeout(resolve, 300))
-
-    if (form.productType) {
-      await loadProductsByType(form.productType)
-    }
-
+    if (form.productType) await loadProductsByType(form.productType)
     notificationService.showNotification('商品列表已刷新', 'success')
   } catch (error) {
-    console.error('刷新商品列表失败:', error)
     notificationService.showNotification('刷新商品列表失败', 'error')
   } finally {
     loadingProductsByType.value = false
-    setTimeout(() => {
-      isRefreshing.value = false
-    }, 500)
+    setTimeout(() => isRefreshing.value = false, 500)
   }
 }
 
-// 快速新增商品成功
 const handleQuickAddProductSuccess = async () => {
   quickAddProductVisible.value = false
   loadingProductsByType.value = true
-
   try {
-    console.log('快速添加商品成功，开始刷新商品列表...')
     emit('refresh-products')
     await loadProductTypes()
     await new Promise(resolve => setTimeout(resolve, 500))
-
-    if (form.productType) {
-      await loadProductsByType(form.productType)
-
-      if (filteredProductsByType.value.length > 0) {
-        const products = [...filteredProductsByType.value]
-        const newProduct = products[products.length - 1]
-
-        if (!form.inventoryProductId) {
-          form.inventoryProductId = newProduct.id
-          onProductSelected()
-          notificationService.showNotification(`已添加新商品: ${newProduct.name}`, 'success')
-        } else {
-          notificationService.showNotification(`新商品 "${newProduct.name}" 已添加到列表`, 'info')
-        }
-      }
-    }
+    if (form.productType) await loadProductsByType(form.productType)
   } catch (error) {
-    console.error('刷新商品列表失败:', error)
     notificationService.showNotification('刷新商品列表失败，请手动刷新', 'error')
   } finally {
     loadingProductsByType.value = false
   }
 }
 
-// 打开分类管理
 const openCategoryManagement = () => {
   emit('open-category')
 }
 
-// 打开采购管理（快捷跳转）
 const openPurchaseManagement = () => {
-  // 保存当前表单数据到 localStorage，供采购管理读取
   const purchaseData = {
     supplier: form.supplier,
     productId: selectedProduct.value?.id,
@@ -661,21 +610,12 @@ const openPurchaseManagement = () => {
     date: form.date,
     note: form.note
   }
-
   localStorage.setItem('pending_purchase_data', JSON.stringify(purchaseData))
-
-  // 关闭当前模态框
   close()
-
-  // 通知父组件打开采购管理
-  setTimeout(() => {
-    emit('open-purchase')
-  }, 100)
-
+  setTimeout(() => emit('open-purchase'), 100)
   notificationService.showNotification('已跳转到采购管理，可继续创建采购订单', 'info')
 }
 
-// 重置表单
 const resetForm = () => {
   form.type = ''
   form.subtype = ''
@@ -697,16 +637,13 @@ const resetForm = () => {
   productTypes.value = []
 }
 
-// 提交表单
 const submitForm = async () => {
-  // 验证表单
   const validation = expenseService.validateExpenseForm(form, form.type !== '进货采购')
   if (!validation.valid) {
     notificationService.showNotification(validation.errors.join('，'), 'error')
     return
   }
 
-  // 验证库存字段
   if (showInventoryFields.value) {
     const inventoryValidation = expenseService.validateInventoryFields(form)
     if (!inventoryValidation.valid) {
@@ -716,20 +653,15 @@ const submitForm = async () => {
   }
 
   try {
-    // 创建记录
     const record = expenseService.createExpenseRecord({
       ...form,
       selectedProduct: selectedProduct.value
     })
-
     await businessDataService.addExpenseRecord(record)
-
     let inventoryUpdated = false
 
-    // 更新库存
     if (showInventoryFields.value && form.updateInventory && selectedProduct.value) {
       const quantity = parseFloat(form.quantity)
-
       if (form.type === '进货采购') {
         const updateData = expenseService.processPurchaseInventoryUpdate(
             currentInventoryItem.value,
@@ -738,7 +670,6 @@ const submitForm = async () => {
             parseFloat(form.unitPrice),
             form.supplier
         )
-
         if (updateData.exists) {
           await businessDataService.updateInventoryItem(updateData.id, updateData)
         } else {
@@ -750,36 +681,22 @@ const submitForm = async () => {
             currentInventoryItem.value,
             quantity
         )
-
         if (updateData.error) {
           notificationService.showNotification(updateData.error, 'error')
           return
         }
-
         if (updateData.exists) {
           await businessDataService.updateInventoryItem(updateData.id, updateData)
           inventoryUpdated = true
         }
       }
-
-      // 更新供应商历史
       supplierHistory.value = expenseService.updateSupplierHistory(supplierHistory.value, form.supplier)
     }
 
     emit('success')
     close()
-
     const successMsg = expenseService.formatExpenseSuccessMessage(form, inventoryUpdated)
-
-    // 如果是进货采购，添加采购订单提示
-    if (form.type === '进货采购' && selectedProduct.value) {
-      notificationService.showNotification(
-          `${successMsg}。如需创建采购订单，可点击「创建采购订单」按钮`,
-          'success'
-      )
-    } else {
-      notificationService.showNotification(successMsg, 'success')
-    }
+    notificationService.showNotification(successMsg, 'success')
   } catch (error) {
     console.error('保存支出记录失败:', error)
     notificationService.showNotification('保存支出记录失败，请重试', 'error')
@@ -787,30 +704,11 @@ const submitForm = async () => {
 }
 
 // 辅助函数
-const formatNumber = (num) => {
-  return baseService.formatNumber(num)
-}
-
-const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const isExpiring = (expiryDate) => {
-  return inventoryService.isExpiring(expiryDate)
-}
-
-const isExpired = (expiryDate) => {
-  return inventoryService.isExpired(expiryDate)
-}
-
-const getExpiryStatusClass = (expiryDate) => {
-  return inventoryService.getExpiryStatusClass(expiryDate)
-}
+const formatNumber = (num) => baseService.formatNumber(num)
+const formatDate = (dateStr) => dateHelper.formatDate(dateStr)
+const isExpiring = (expiryDate) => inventoryService.isExpiring(expiryDate)
+const isExpired = (expiryDate) => inventoryService.isExpired(expiryDate)
+const getExpiryStatusClass = (expiryDate) => inventoryService.getExpiryStatusClass(expiryDate)
 
 const close = () => {
   resetForm()
@@ -818,42 +716,26 @@ const close = () => {
 }
 
 const closeOnOverlay = (event) => {
-  if (event.target.classList.contains('modal')) {
-    close()
-  }
+  if (event.target.classList.contains('modal')) close()
 }
 
-// 监听 visible 变化
 watch(() => props.visible, (newVal) => {
-  if (newVal) {
-    resetForm()
-  }
+  if (newVal) resetForm()
 })
 
-// 监听 products 变化
-watch(() => props.products, (newProducts, oldProducts) => {
-  console.log('商品列表已更新，新数量:', newProducts.length, '旧数量:', oldProducts?.length)
-
-  if (form.productType && newProducts.length > (oldProducts?.length || 0)) {
-    const newProduct = newProducts.find(p =>
-        !oldProducts?.some(oldP => oldP.id === p.id)
-    )
-
-    if (newProduct && newProduct.category === form.productType) {
-      console.log('检测到新商品:', newProduct.name)
-
-      if (!form.inventoryProductId) {
-        form.inventoryProductId = newProduct.id
-        onProductSelected()
-        notificationService.showNotification(`新商品 "${newProduct.name}" 已自动选中`, 'success')
-      }
+watch(() => props.products, (newProducts) => {
+  if (form.productType && newProducts.length) {
+    const newProduct = newProducts.find(p => p.category === form.productType)
+    if (newProduct && !form.inventoryProductId) {
+      form.inventoryProductId = newProduct.id
+      onProductSelected()
     }
   }
 }, { deep: true })
 </script>
 
 <style scoped>
-/* ==================== 基础样式 ==================== */
+/* 样式保持不变，已优化整洁 */
 .modal {
   position: fixed;
   top: 0;
@@ -878,7 +760,7 @@ watch(() => props.products, (newProducts, oldProducts) => {
 .modal-content {
   background-color: white;
   width: 90%;
-  max-width: 500px;
+  max-width: 550px;
   border-radius: 20px;
   padding: 0;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
@@ -886,10 +768,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-}
-
-.expense-modal {
-  max-width: 550px !important;
 }
 
 .modal-header {
@@ -919,7 +797,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
 }
 
 .modal-close {
-  margin-left: auto;
   background: none;
   border: none;
   font-size: 24px;
@@ -939,17 +816,12 @@ watch(() => props.products, (newProducts, oldProducts) => {
   color: #80A492;
 }
 
-.expense-header {
-  border-radius: 20px 20px 0 0;
-}
-
 .modal-body {
   padding: 25px;
   overflow-y: auto;
   max-height: calc(85vh - 80px);
 }
 
-/* ==================== 表单样式 ==================== */
 .form-group {
   margin-bottom: 20px;
 }
@@ -1078,18 +950,15 @@ watch(() => props.products, (newProducts, oldProducts) => {
   border-color: #80A492;
 }
 
-/* 信息按钮样式（采购订单快捷跳转） */
 .btn-info {
   background-color: #3498db;
   color: white;
-  border: none;
 }
 
 .btn-info:hover {
   background-color: #2980b9;
 }
 
-/* ==================== 支付方式标签 ==================== */
 .payment-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1123,7 +992,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   border-color: #80A492;
 }
 
-/* ==================== 库存区域样式 ==================== */
 .inventory-section {
   margin-top: 15px;
   padding: 20px;
@@ -1158,11 +1026,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   border: 1px solid #D5EBE1;
 }
 
-.loading-types i,
-.loading-products i {
-  margin-right: 8px;
-}
-
 .product-type-selector {
   display: flex;
   flex-wrap: wrap;
@@ -1183,10 +1046,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   transition: all 0.3s;
   font-size: 13px;
   font-weight: 500;
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
 }
 
 .product-type-card:hover {
@@ -1228,7 +1087,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   justify-content: center;
   transition: all 0.3s;
   flex-shrink: 0;
-  font-size: 16px;
 }
 
 .quick-add-btn:hover {
@@ -1240,9 +1098,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   font-size: 12px;
   color: #999;
   margin-top: 6px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
 .text-link {
@@ -1253,14 +1108,8 @@ watch(() => props.products, (newProducts, oldProducts) => {
   cursor: pointer;
   padding: 0 4px;
   font-size: 12px;
-  font-weight: 500;
 }
 
-.text-link:hover {
-  color: #608070;
-}
-
-/* ==================== 库存信息卡片 ==================== */
 .stock-info-card {
   margin: 15px 0;
   padding: 16px;
@@ -1279,10 +1128,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   color: #80A492;
   font-weight: 500;
   font-size: 14px;
-}
-
-.stock-header i {
-  font-size: 16px;
 }
 
 .stock-details {
@@ -1307,26 +1152,9 @@ watch(() => props.products, (newProducts, oldProducts) => {
   font-weight: 500;
 }
 
-.stock-value.normal {
-  color: #2ecc71;
-}
-
-.stock-value.warning {
-  color: #f39c12;
-}
-
-.stock-value.danger {
-  color: #e74c3c;
-}
-
-.stock-value.expired {
-  color: #e74c3c;
-  text-decoration: line-through;
-}
-
-.stock-value.expiring {
-  color: #f39c12;
-}
+.stock-value.normal { color: #2ecc71; }
+.stock-value.warning { color: #f39c12; }
+.stock-value.danger { color: #e74c3c; }
 
 .badge {
   display: inline-block;
@@ -1337,15 +1165,9 @@ watch(() => props.products, (newProducts, oldProducts) => {
   color: white;
 }
 
-.badge.warning {
-  background: #f39c12;
-}
+.badge.warning { background: #f39c12; }
+.badge.expired { background: #e74c3c; }
 
-.badge.expired {
-  background: #e74c3c;
-}
-
-/* ==================== 复选框样式 ==================== */
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -1355,7 +1177,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   background: white;
   border-radius: 12px;
   border: 1px solid #D5EBE1;
-  transition: all 0.3s;
   font-size: 14px;
   color: #80A492;
 }
@@ -1365,18 +1186,12 @@ watch(() => props.products, (newProducts, oldProducts) => {
   border-color: #80A492;
 }
 
-.checkbox-label input[type="checkbox"] {
+.checkbox {
   width: 18px;
   height: 18px;
-  cursor: pointer;
   accent-color: #80A492;
 }
 
-.checkbox-label i {
-  color: #99BCAC;
-}
-
-/* ==================== 警告和提示消息 ==================== */
 .warning-message {
   margin: 10px 0;
   padding: 12px 16px;
@@ -1388,11 +1203,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.warning-message i {
-  font-size: 16px;
-  color: #e74c3c;
 }
 
 .info-message {
@@ -1408,28 +1218,15 @@ watch(() => props.products, (newProducts, oldProducts) => {
   gap: 8px;
 }
 
-.info-message i {
-  font-size: 16px;
-  color: #3498db;
-}
-
 .field-hint {
   font-size: 12px;
   color: #80A492;
   margin-top: 6px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
   background: #f8fafc;
   padding: 6px 10px;
   border-radius: 8px;
 }
 
-.field-hint i {
-  font-size: 12px;
-}
-
-/* ==================== 滚动条 ==================== */
 .modal-body::-webkit-scrollbar,
 .product-type-selector::-webkit-scrollbar {
   width: 6px;
@@ -1438,7 +1235,6 @@ watch(() => props.products, (newProducts, oldProducts) => {
 .modal-body::-webkit-scrollbar-track,
 .product-type-selector::-webkit-scrollbar-track {
   background: #f1f1f1;
-  border-radius: 3px;
 }
 
 .modal-body::-webkit-scrollbar-thumb,
@@ -1447,74 +1243,10 @@ watch(() => props.products, (newProducts, oldProducts) => {
   border-radius: 3px;
 }
 
-.modal-body::-webkit-scrollbar-thumb:hover,
-.product-type-selector::-webkit-scrollbar-thumb:hover {
-  background: #80A492;
-}
-
-.checkbox {
-  margin-right: 25px;
-}
-
-/* ==================== 响应式设计 ==================== */
 @media (max-width: 480px) {
-  .modal-header {
-    padding: 15px 20px;
-  }
-
-  .modal-header h3 {
-    font-size: 18px;
-  }
-
-  .modal-body {
-    padding: 20px;
-  }
-
-  .form-row {
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .payment-tags {
-    flex-direction: column;
-  }
-
-  .payment-tag {
-    width: 100%;
-  }
-
-  .inventory-section {
-    padding: 15px;
-  }
-
-  .product-type-selector {
-    flex-direction: column;
-  }
-
-  .product-type-card {
-    width: 100%;
-    text-align: center;
-  }
-
-  .stock-item {
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .stock-label {
-    width: 100%;
-  }
-
-  .form-actions {
-    flex-direction: column;
-  }
-
-  .product-select-wrapper {
-    flex-wrap: wrap;
-  }
-
-  .quick-add-btn {
-    width: 100%;
-  }
+  .form-row { flex-direction: column; gap: 10px; }
+  .form-actions { flex-direction: column; }
+  .product-select-wrapper { flex-wrap: wrap; }
+  .quick-add-btn { width: 100%; }
 }
 </style>

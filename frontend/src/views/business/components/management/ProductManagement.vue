@@ -99,6 +99,10 @@
                     <span class="detail-label">参考售价：</span>
                     <span class="detail-value price">¥ {{ formatNumber(product.defaultPrice || 0) }}</span>
                   </div>
+                  <div class="detail-item" v-if="product.produceDate">
+                    <span class="detail-label">生产日期：</span>
+                    <span class="detail-value">{{ product.produceDate }}</span>
+                  </div>
                   <div class="detail-item" v-if="product.description">
                     <span class="detail-label">描述：</span>
                     <span class="detail-value">{{ product.description }}</span>
@@ -175,6 +179,20 @@
                   placeholder="例如：5"
                   min="0"
                   step="0.01"
+              >
+            </div>
+          </div>
+
+          <!-- 生产日期（使用你自己的日期选择器） -->
+          <div class="form-group">
+            <label><i class="fas fa-calendar-alt"></i> 生产日期</label>
+            <div class="input-wrapper" @click="openProduceDatePicker">
+              <input
+                  v-model="productForm.produceDate"
+                  type="text"
+                  class="form-input"
+                  placeholder="点击选择生产日期"
+                  readonly
               >
             </div>
           </div>
@@ -261,6 +279,7 @@ const productForm = reactive({
   category: '',
   unit: '',
   defaultPrice: null,
+  produceDate: '', // 新增
   description: ''
 })
 
@@ -269,26 +288,29 @@ const deleteConfirmVisible = ref(false)
 const deleteConfirmMessage = ref('')
 const deleteConfirmProduct = ref(null)
 
-// ==================== 计算属性 ====================
+// ==================== 打开生产日期选择器（你自己的） ====================
+const openProduceDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    title: '选择生产日期',
+    defaultDate: productForm.produceDate || new Date()
+  })
+  if (date) {
+    productForm.produceDate = date
+  }
+}
 
-// 分类名称列表（从props获取）
+// ==================== 计算属性 ====================
 const categoryNames = computed(() => {
   return props.categories.map(c => c.name).sort()
 })
-
-// 筛选分类列表（用于分类筛选器）
 const filterCategories = computed(() => {
   return props.categories.map(c => c.name).sort()
 })
-
-// 商品单位列表（使用业务服务）
 const productUnits = computed(() => {
   return productService.getProductUnits()
 })
 
 // ==================== 方法 ====================
-
-// 加载商品数据
 const loadProducts = async () => {
   loading.value = true
   try {
@@ -302,7 +324,6 @@ const loadProducts = async () => {
   }
 }
 
-// 筛选商品 - 使用业务服务
 const filterProducts = () => {
   filteredProducts.value = productService.filterProducts(products.value, {
     keyword: searchKeyword.value,
@@ -310,17 +331,14 @@ const filterProducts = () => {
   })
 }
 
-// 搜索商品
 const searchProducts = () => {
   filterProducts()
 }
 
-// 打开分类管理
 const openCategoryManagement = () => {
   emit('open-category')
 }
 
-// 打开新增商品模态框
 const openAddProductModal = () => {
   editingProductId.value = ''
   const defaultForm = productService.getProductFormDefault()
@@ -328,24 +346,23 @@ const openAddProductModal = () => {
   productForm.category = defaultForm.category
   productForm.unit = defaultForm.unit
   productForm.defaultPrice = defaultForm.defaultPrice
+  productForm.produceDate = '' // 重置
   productForm.description = defaultForm.description
   addEditModalVisible.value = true
 }
 
-// 编辑商品
 const editProduct = (product) => {
   editingProductId.value = product.id
   productForm.name = product.name
   productForm.category = product.category
   productForm.unit = product.unit
   productForm.defaultPrice = product.defaultPrice
+  productForm.produceDate = product.produceDate || '' // 赋值
   productForm.description = product.description || ''
   addEditModalVisible.value = true
 }
 
-// 保存商品 - 使用业务服务进行验证
 const saveProduct = async () => {
-  // 验证表单
   const validation = productService.validateProductForm(productForm)
   if (!validation.valid) {
     notificationService.showNotification(validation.errors.join('，'), 'error')
@@ -358,6 +375,7 @@ const saveProduct = async () => {
       category: productForm.category,
       unit: productForm.unit,
       defaultPrice: productForm.defaultPrice ? parseFloat(productForm.defaultPrice) : null,
+      produceDate: productForm.produceDate || null, // 保存
       description: productForm.description || '',
       updateTime: new Date().toISOString()
     }
@@ -379,14 +397,12 @@ const saveProduct = async () => {
   }
 }
 
-// 确认删除商品
 const confirmDeleteProduct = (product) => {
   deleteConfirmMessage.value = `确定要删除商品 "${product.name}" 吗？`
   deleteConfirmProduct.value = product
   deleteConfirmVisible.value = true
 }
 
-// 执行删除 - 使用业务服务
 const confirmDelete = async () => {
   if (!deleteConfirmProduct.value) return
 
@@ -404,18 +420,15 @@ const confirmDelete = async () => {
   }
 }
 
-// 关闭新增/编辑模态框
 const closeAddEditModal = () => {
   addEditModalVisible.value = false
   editingProductId.value = ''
 }
 
-// 关闭主模态框
 const close = () => {
   emit('update:visible', false)
 }
 
-// 点击遮罩层关闭
 const closeOnOverlay = (event) => {
   if (event.target.classList.contains('modal')) {
     close()
@@ -434,30 +447,25 @@ const closeConfirmOnOverlay = (event) => {
   }
 }
 
-// 格式化数字 - 使用业务服务
 const formatNumber = (num) => {
   return baseService.formatNumber(num)
 }
 
 // ==================== 监听器 ====================
-
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     loadProducts()
   }
 })
 
-// 监听筛选条件变化
 watch([selectedFilterCategory, searchKeyword], () => {
   filterProducts()
 })
 
-// 监听分类变化，当分类更新时刷新筛选列表
 watch(() => props.categories, () => {
   filterProducts()
 }, { deep: true })
 
-// ==================== 初始化 ====================
 onMounted(() => {
   if (props.visible) {
     loadProducts()
@@ -899,6 +907,7 @@ onMounted(() => {
   transition: all 0.3s;
   background-color: white;
   box-sizing: border-box;
+  cursor: pointer;
 }
 
 .form-input:focus {
@@ -933,6 +942,7 @@ onMounted(() => {
   min-height: 80px;
   resize: vertical;
   font-family: inherit;
+  cursor: text !important;
 }
 
 .input-group {

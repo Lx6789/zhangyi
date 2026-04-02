@@ -134,7 +134,13 @@
 
         <!-- 日期选择器 -->
         <div v-show="selectedTimeFilter === 'date'" class="date-selector">
-          <input type="date" v-model="selectedDate" class="date-input" @change="loadHistoryData">
+          <input
+              :value="selectedDate"
+              class="date-input"
+              placeholder="选择日期"
+              @click="openCustomDatePicker"
+              readonly
+          >
         </div>
       </div>
 
@@ -311,7 +317,14 @@
 
               <div class="form-group">
                 <label><i class="fas fa-calendar-alt"></i> 日期</label>
-                <input v-model="incomeForm.date" type="date" class="form-input" required>
+                <input
+                    :value="incomeForm.date"
+                    class="form-input"
+                    required
+                    placeholder="选择日期"
+                    readonly
+                    @click="openIncomeDatePicker"
+                >
               </div>
             </div>
 
@@ -416,7 +429,14 @@
 
               <div class="form-group">
                 <label><i class="fas fa-calendar-alt"></i> 日期</label>
-                <input v-model="expenseForm.date" type="date" class="form-input" required>
+                <input
+                    :value="expenseForm.date"
+                    class="form-input"
+                    required
+                    placeholder="选择日期"
+                    readonly
+                    @click="openExpenseDatePicker"
+                >
               </div>
             </div>
 
@@ -515,6 +535,33 @@ const selectedYear = ref(new Date().getFullYear())
 const selectedMonth = ref(new Date().getMonth() + 1)
 const selectedDate = ref(dateHelper.getTodayString())
 const selectedWeekOffset = ref(0)
+
+const openCustomDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    defaultDate: selectedDate.value,
+  });
+
+  if (date) {
+    selectedDate.value = date;
+    loadHistoryData();
+  }
+};
+
+const openIncomeDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    defaultDate: incomeForm.date,
+    title: '选择收入日期'
+  });
+  if (date) incomeForm.date = date;
+};
+
+const openExpenseDatePicker = async () => {
+  const date = await notificationService.datePicker({
+    defaultDate: expenseForm.date,
+    title: '选择支出日期'
+  });
+  if (date) expenseForm.date = date;
+};
 
 // ==================== 实时数据 ====================
 const totalIncome = ref('¥ 0.00')
@@ -1043,8 +1090,8 @@ const editCategory = (type, categoryName) => {
   }
 }
 
-const deleteCategory = (type, categoryName) => {
-  if (confirm(`确定要删除"${categoryName}"吗？`)) {
+const deleteCategory = async (type, categoryName) => {
+  if (await notificationService.confirm(`确定要删除"${categoryName}"吗？`)) {
     if (type === 'income') {
       const index = incomeCategories.value.findIndex(c => c.name === categoryName)
       if (index !== -1) {

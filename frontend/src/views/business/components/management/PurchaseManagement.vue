@@ -328,17 +328,27 @@
 
             <!-- 日期范围筛选 -->
             <div class="date-range-filter">
-              <input
-                  v-model="historyStartDate"
-                  type="date"
-                  class="date-input"
-              >
+              <div class="date-input-wrapper" @click="openDateRangePicker('start')">
+                <input
+                    :value="historyStartDate"
+                    type="text"
+                    class="date-input"
+                    readonly
+                    placeholder="开始日期"
+                >
+                <i class="fas fa-calendar-alt date-icon"></i>
+              </div>
               <span>至</span>
-              <input
-                  v-model="historyEndDate"
-                  type="date"
-                  class="date-input"
-              >
+              <div class="date-input-wrapper" @click="openDateRangePicker('end')">
+                <input
+                    :value="historyEndDate"
+                    type="text"
+                    class="date-input"
+                    readonly
+                    placeholder="结束日期"
+                >
+                <i class="fas fa-calendar-alt date-icon"></i>
+              </div>
             </div>
 
             <!-- 历史记录列表 -->
@@ -629,22 +639,31 @@
                 <!-- 采购日期 -->
                 <div class="form-group">
                   <label>采购日期</label>
-                  <input
-                      v-model="orderForm.orderDate"
-                      type="date"
-                      class="form-input"
-                      required
-                  >
+                  <div class="date-input-wrapper" @click="openDatePicker('orderDate')">
+                    <input
+                        :value="orderForm.orderDate"
+                        type="text"
+                        class="form-input"
+                        readonly
+                        placeholder="请选择日期"
+                    >
+                    <i class="fas fa-calendar-alt date-icon"></i>
+                  </div>
                 </div>
 
                 <!-- 预计送达 -->
                 <div class="form-group">
                   <label>预计送达</label>
-                  <input
-                      v-model="orderForm.expectedDate"
-                      type="date"
-                      class="form-input"
-                  >
+                  <div class="date-input-wrapper" @click="openDatePicker('expectedDate')">
+                    <input
+                        :value="orderForm.expectedDate"
+                        type="text"
+                        class="form-input"
+                        readonly
+                        placeholder="请选择日期"
+                    >
+                    <i class="fas fa-calendar-alt date-icon"></i>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1047,6 +1066,9 @@ const supplierForm = reactive({
   note: ''
 })
 
+// 当前选择的日期范围字段
+const currentDateRangeField = ref(null)
+
 // ==================== 计算属性 ====================
 
 // 统计数据（使用 service 方法）
@@ -1163,6 +1185,104 @@ const formatDate = (dateStr) => {
 // 格式化数字（使用 baseService）
 const formatNumber = (num) => {
   return baseService.formatNumber(num)
+}
+
+// ==================== 自定义日期选择器方法 ====================
+
+/**
+ * 打开日期选择器（用于订单表单）
+ * @param {string} field - 字段名 'orderDate' 或 'expectedDate'
+ */
+const openDatePicker = async (field) => {
+  let defaultDate = new Date()
+
+  if (field === 'orderDate' && orderForm.orderDate) {
+    defaultDate = new Date(orderForm.orderDate)
+  } else if (field === 'expectedDate' && orderForm.expectedDate) {
+    defaultDate = new Date(orderForm.expectedDate)
+  }
+
+  // 确保日期有效
+  if (isNaN(defaultDate.getTime())) {
+    defaultDate = new Date()
+  }
+
+  const selectedDate = await notificationService.datePicker({
+    title: field === 'orderDate' ? '选择采购日期' : '选择预计送达日期',
+    defaultDate: defaultDate,
+    minDate: field === 'expectedDate' && orderForm.orderDate ? orderForm.orderDate : null,
+    confirmText: '确定',
+    cancelText: '取消'
+  })
+
+  if (selectedDate) {
+    orderForm[field] = selectedDate
+    // 如果预计送达日期早于采购日期，自动调整
+    if (field === 'orderDate' && orderForm.expectedDate && orderForm.expectedDate < selectedDate) {
+      orderForm.expectedDate = selectedDate
+    }
+  }
+}
+
+/**
+ * 打开日期范围选择器（用于采购历史筛选）
+ * @param {string} type - 'start' 或 'end'
+ */
+const openDateRangePicker = async (type) => {
+  let defaultDate = new Date()
+  let title = ''
+  let minDate = null
+  let maxDate = null
+
+  if (type === 'start') {
+    title = '选择开始日期'
+    if (historyStartDate.value) {
+      defaultDate = new Date(historyStartDate.value)
+    }
+    if (historyEndDate.value) {
+      maxDate = historyEndDate.value
+    }
+  } else {
+    title = '选择结束日期'
+    if (historyEndDate.value) {
+      defaultDate = new Date(historyEndDate.value)
+    }
+    if (historyStartDate.value) {
+      minDate = historyStartDate.value
+    }
+    maxDate = new Date().toISOString().split('T')[0] // 不能超过今天
+  }
+
+  // 确保日期有效
+  if (isNaN(defaultDate.getTime())) {
+    defaultDate = new Date()
+  }
+
+  const selectedDate = await notificationService.datePicker({
+    title: title,
+    defaultDate: defaultDate,
+    minDate: minDate,
+    maxDate: maxDate,
+    confirmText: '确定',
+    cancelText: '取消'
+  })
+
+  if (selectedDate) {
+    if (type === 'start') {
+      historyStartDate.value = selectedDate
+      // 如果开始日期大于结束日期，自动调整结束日期
+      if (historyEndDate.value && historyStartDate.value > historyEndDate.value) {
+        historyEndDate.value = historyStartDate.value
+      }
+    } else {
+      historyEndDate.value = selectedDate
+      // 如果结束日期小于开始日期，自动调整开始日期
+      if (historyStartDate.value && historyEndDate.value < historyStartDate.value) {
+        historyStartDate.value = historyEndDate.value
+      }
+    }
+    filterHistory()
+  }
 }
 
 // ==================== 导出功能 ====================
@@ -2114,19 +2234,37 @@ onMounted(() => {
   border: 1px solid #D5EBE1;
 }
 
-.date-input {
+.date-input-wrapper {
   flex: 1;
-  padding: 10px 15px;
+  position: relative;
+  cursor: pointer;
+}
+
+.date-input {
+  width: 100%;
+  padding: 10px 35px 10px 15px;
   border: 1px solid #B1D5C8;
   border-radius: 12px;
   font-size: 14px;
   background: white;
+  cursor: pointer;
+  box-sizing: border-box;
 }
 
 .date-input:focus {
   outline: none;
   border-color: #80A492;
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
+}
+
+.date-input-wrapper .date-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #80A492;
+  pointer-events: none;
+  font-size: 16px;
 }
 
 .date-range-filter span {
@@ -2718,6 +2856,7 @@ onMounted(() => {
   background-color: #f8fafc;
   color: #666;
   border-color: #D5EBE1;
+  cursor: pointer;
 }
 
 .form-select {
@@ -2770,6 +2909,28 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 20px;
+}
+
+/* ==================== 日期输入包装器 ==================== */
+.date-input-wrapper {
+  position: relative;
+  cursor: pointer;
+}
+
+.date-input-wrapper .form-input {
+  cursor: pointer;
+  background-color: white;
+  padding-right: 35px;
+}
+
+.date-input-wrapper .date-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #80A492;
+  pointer-events: none;
+  font-size: 16px;
 }
 
 /* ==================== 输入组 ==================== */

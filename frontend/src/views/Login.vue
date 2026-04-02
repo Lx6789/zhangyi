@@ -57,6 +57,7 @@
             placeholder="请输入密码"
             v-model="loginForm.password"
             @input="clearError('loginPasswordError')"
+            autocomplete="new-password"
             required
         >
         <button
@@ -176,9 +177,6 @@
             <div v-else class="captcha-placeholder">
               点击加载
             </div>
-            <div class="captcha-refresh">
-              <i class="fas fa-redo-alt"></i>
-            </div>
           </div>
         </div>
         <div class="error-message" v-if="errors.captchaError">
@@ -255,12 +253,12 @@
         <label>安全提示答案</label>
         <i class="fas fa-key input-icon"></i>
         <input
-            type="password"
+            type="text"
             class="form-input"
             placeholder="请输入答案"
             v-model="registerForm.securityAnswer"
             @input="clearError('securityAnswerError')"
-            required
+            autocomplete="off"
         >
         <div class="error-message" v-if="errors.securityAnswerError">
           <i class="fas fa-exclamation-circle"></i> <span>{{ errors.securityAnswerError }}</span>
@@ -393,9 +391,6 @@
                 </div>
                 <div v-else class="captcha-placeholder">
                   点击加载
-                </div>
-                <div class="captcha-refresh">
-                  <i class="fas fa-redo-alt"></i>
                 </div>
               </div>
             </div>
@@ -701,6 +696,7 @@ export default {
       showLoginPassword: false,
       showRegisterPassword: false,
       showRegisterConfirmPassword: false,
+      showSecurityAnswer: false,
 
       // 忘记密码相关数据
       showForgotPasswordModal: false,
@@ -864,6 +860,13 @@ export default {
       }
     },
 
+    /**
+     * 切换安全问题答案显示状态（新增）
+     */
+    toggleSecurityAnswer() {
+      this.showSecurityAnswer = !this.showSecurityAnswer
+    },
+
     // ==================== 弹窗相关 ====================
 
     /**
@@ -951,19 +954,26 @@ export default {
      * 刷新忘记密码验证码
      */
     async refreshForgotCaptcha() {
-      if (this.forgotPasswordLoading || this.forgotCaptcha?.loading) {
+      // 只检查验证码是否正在加载
+      if (this.forgotCaptcha?.loading) {
         console.log('验证码正在加载中，请稍候...')
-        return
+        return false
       }
 
+      console.log('开始刷新验证码...')
+
+      // 清空验证码输入框
       this.forgotPasswordForm.captcha = ''
       this.clearForgotError('captchaError')
 
       try {
         await this.forgotCaptcha.refresh()
+        console.log('验证码刷新成功，新验证码key:', this.forgotCaptcha.key)
+        return true
       } catch (error) {
         console.error('刷新忘记密码验证码失败:', error)
         this.showNotification('刷新验证码失败，请重试', 'error')
+        return false
       }
     },
 
@@ -1390,7 +1400,7 @@ export default {
 
       if (!this.forgotCaptcha?.key) {
         this.setForgotError('captchaError', '验证码已失效，请刷新重试')
-        this.forgotCaptcha.refresh()
+        this.refreshForgotCaptcha()  // 不使用 await
         return
       }
 
@@ -1408,10 +1418,30 @@ export default {
           this.forgotPasswordStep = 2
           this.showNotification('验证成功，请回答问题', 'success')
         } else {
-          this.setForgotError('phoneError', response?.message || '获取安全问题失败')
+          const errorMsg = response?.message || '获取安全问题失败'
+          this.setForgotError('phoneError', errorMsg)
+          // 失败时刷新验证码
+          this.refreshForgotCaptcha()
         }
       } catch (error) {
-        this.handleForgotPasswordException(error)
+        console.error('获取安全问题失败:', error)
+
+        let errorMessage = '网络错误，请稍后重试'
+        if (error.response?.data?.message) {
+          errorMessage = error.response.data.message
+        }
+
+        // 根据错误类型设置错误信息
+        if (errorMessage.includes('手机号') || errorMessage.includes('用户')) {
+          this.setForgotError('phoneError', errorMessage)
+        } else if (errorMessage.includes('验证码')) {
+          this.setForgotError('captchaError', errorMessage)
+        } else {
+          this.showNotification(errorMessage, 'error')
+        }
+
+        // 刷新验证码（不使用 await）
+        this.refreshForgotCaptcha()
       } finally {
         this.forgotPasswordLoading = false
       }
@@ -1507,15 +1537,19 @@ export default {
             this.setForgotError('phoneError', errorMessage)
           } else if (errorMessage.includes('验证码')) {
             this.setForgotError('captchaError', errorMessage)
-            this.forgotCaptcha.refresh()
           } else {
             this.showNotification(errorMessage, 'error')
           }
+          // 无论什么错误，都刷新验证码
+          this.refreshForgotCaptcha()
         } else {
           this.showNotification(errorMessage, 'error')
         }
       } else {
         this.showNotification(errorMessage, 'error')
+        if (this.forgotPasswordStep === 1) {
+          this.refreshForgotCaptcha()
+        }
       }
     },
 

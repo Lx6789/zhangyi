@@ -383,7 +383,16 @@
 
           <div class="form-group">
             <label><i class="fas fa-calendar-alt"></i> 还款日期</label>
-            <input v-model="repaymentForm.date" type="date" class="form-input" required>
+            <div class="date-input-wrapper" @click="openRepaymentDatePicker">
+              <input
+                  :value="repaymentForm.date"
+                  type="text"
+                  class="form-input"
+                  readonly
+                  placeholder="请选择日期"
+              >
+              <i class="fas fa-calendar-alt date-icon"></i>
+            </div>
           </div>
 
           <div class="form-group">
@@ -662,6 +671,34 @@ const recordRepayment = (customer) => {
 }
 
 /**
+ * 打开还款日期选择器
+ */
+const openRepaymentDatePicker = async () => {
+  let defaultDate = new Date()
+
+  if (repaymentForm.date) {
+    defaultDate = new Date(repaymentForm.date)
+  }
+
+  // 确保日期有效
+  if (isNaN(defaultDate.getTime())) {
+    defaultDate = new Date()
+  }
+
+  const selectedDate = await notificationService.datePicker({
+    title: '选择还款日期',
+    defaultDate: defaultDate,
+    maxDate: new Date().toISOString().split('T')[0], // 不能超过今天
+    confirmText: '确定',
+    cancelText: '取消'
+  })
+
+  if (selectedDate) {
+    repaymentForm.date = selectedDate
+  }
+}
+
+/**
  * 提交还款
  */
 const submitRepayment = async () => {
@@ -672,6 +709,11 @@ const submitRepayment = async () => {
 
   if (parseFloat(repaymentForm.amount) > (selectedCustomer.value.creditInfo?.balance || 0)) {
     notificationService.showNotification('还款金额不能大于当前欠款', 'error')
+    return
+  }
+
+  if (!repaymentForm.date) {
+    notificationService.showNotification('请选择还款日期', 'error')
     return
   }
 
@@ -1209,6 +1251,13 @@ onMounted(async () => {
   box-shadow: 0 0 0 2px rgba(128, 164, 146, 0.2);
 }
 
+.form-input[readonly] {
+  background-color: #f8fafc;
+  color: #666;
+  border-color: #D5EBE1;
+  cursor: pointer;
+}
+
 .form-select {
   width: 100%;
   padding: 12px 35px 12px 15px;
@@ -1315,6 +1364,28 @@ onMounted(async () => {
 
 .input-group .form-input:focus {
   box-shadow: none;
+}
+
+/* 日期输入包装器 */
+.date-input-wrapper {
+  position: relative;
+  cursor: pointer;
+}
+
+.date-input-wrapper .form-input {
+  cursor: pointer;
+  background-color: white;
+  padding-right: 35px;
+}
+
+.date-input-wrapper .date-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #80A492;
+  pointer-events: none;
+  font-size: 16px;
 }
 
 /* 赊账信息卡片 */
