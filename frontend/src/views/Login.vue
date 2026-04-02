@@ -424,13 +424,18 @@
             <label for="securityAnswer">您的答案</label>
             <i class="fas fa-key input-icon"></i>
             <input
-                type="password"
+                type="text"
                 id="securityAnswer"
                 class="form-input"
                 placeholder="请输入安全问题的答案"
                 v-model="forgotPasswordForm.securityAnswer"
                 @input="clearForgotError('securityAnswerError')"
                 :disabled="verifyAnswerLoading"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                style="ime-mode: active;"
             >
             <div class="error-message" v-if="forgotPasswordErrors.securityAnswerError">
               <i class="fas fa-exclamation-circle"></i>
