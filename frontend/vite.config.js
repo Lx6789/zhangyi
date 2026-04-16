@@ -92,6 +92,15 @@ export default defineConfig({
             return '/'
           }
         }
+      },
+      '/version': {
+        target: 'http://localhost:8085',
+        changeOrigin: true,
+        bypass(req, res, options) {
+          if (req.headers.accept && req.headers.accept.includes('text/html')) {
+            return '/'
+          }
+        }
       }
     }
   }

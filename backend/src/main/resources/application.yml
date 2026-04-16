@@ -24,6 +24,15 @@ spring:
         min-idle: 0
       timeout: 2000  # 连接超时时间
 
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+  web:
+    resources:
+      static-locations: classpath:/static/,file:${apk.storage.path}
+
 mybatis-plus:
   mapper-locations: classpath:/mapper/*.xml
   type-aliases-package: org.lx.pojo
@@ -42,7 +51,7 @@ jwt:
   # JWT 存储的请求头
   tokenHeader: Authorization
   # JWT 密钥
-  secret: zhangyi-secret
+  secret: zhangyi-secret-123456789012345678901234567890
   # JWT 超限时间 60 * 60 * 24
   expiration: 86400
   # JWT 30 * 24 * 60 * 60L;
@@ -72,3 +81,12 @@ captcha:
   width: 120                 # 验证码图片宽度
   height: 40                 # 验证码图片高度
   length: 4                  # 验证码字符长度
+
+apk:
+  storage:
+#    path: "/var/www/apk"
+    path: "D:/apk"
+    base-url: http://111.229.172.186:8085
+    version:
+      update-password: 123456
+

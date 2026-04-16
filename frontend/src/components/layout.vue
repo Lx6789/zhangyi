@@ -300,16 +300,24 @@ const handleLogout = async () => {
   width: 100%;
 }
 
-/* 头部样式 */
+/* 头部样式 - 增加高度适配手机状态栏 */
 .header {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  height: 70px;
   background: var(--white);
   z-index: 100;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* 适配 iOS 和 Android 状态栏安全区域 */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .header {
+    padding-top: env(safe-area-inset-top);
+    height: calc(70px + env(safe-area-inset-top));
+  }
 }
 
 .header-content {
@@ -385,14 +393,21 @@ const handleLogout = async () => {
   border-radius: 2px;
 }
 
-/* 主要内容区域 */
+/* 主要内容区域 - 调整 padding-top 匹配新的头部高度 */
 .main-content {
   flex: 1;
   overflow-y: auto;
   background-color: var(--gray-bg);
   width: 100%;
-  padding-top: 60px;
+  padding-top: 70px;
   padding-bottom: 60px;
+}
+
+/* 适配安全区域 */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .main-content {
+    padding-top: calc(70px + env(safe-area-inset-top));
+  }
 }
 
 .main-container {

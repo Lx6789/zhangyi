@@ -133,8 +133,8 @@ export async function getDepositRecords(planId) {
 
 export async function getSavingRecordsByUserId(userId) {
     // 注意：这个路径在 API 常量中可能没有定义，保持原样但需要加上 /api 前缀
-    // return request.get(`/api/savings/group/${userId}/records`);
-    return request.get(`/savings/group/${userId}/records`);
+    return request.get(`/api/savings/group/${userId}/records`);
+    // return request.get(`/savings/group/${userId}/records`);
 }
 
 /**

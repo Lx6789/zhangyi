@@ -692,6 +692,8 @@ import formHelperService from '@/services/utils/form-helper.service'
 import captchaHelperService from '@/services/utils/captcha-helper.service'
 // 导入数据初始化服务
 import initDataService from '@/services/init-data.service.js'
+// 导入版本服务
+import versionService from '@/services/api/version.service'
 
 export default {
   name: 'LoginPage',
@@ -795,7 +797,7 @@ export default {
     })
 
     this.forgotCaptcha = captchaHelperService.createManager({
-      autoLoad: false, // 不自动加载，等弹窗打开后再加载
+      autoLoad: false,
       onLoaded: () => {
         console.log('忘记密码验证码加载完成')
       },
@@ -805,7 +807,7 @@ export default {
     })
   },
 
-  mounted() {
+  async mounted() {
     // 检查记住的邮箱
     const rememberedEmail = localStorage.getItem('rememberedEmail')
     if (rememberedEmail) {
@@ -817,7 +819,11 @@ export default {
     if (this.isAuthenticated && this.$route.path.includes('/login')) {
       console.log('已登录，重定向到首页')
       this.$router.replace('/')
+      return
     }
+
+    // 在登录前检查版本更新
+    await this.checkAppVersion()
   },
 
   methods: {
@@ -866,7 +872,7 @@ export default {
     },
 
     /**
-     * 切换安全问题答案显示状态（新增）
+     * 切换安全问题答案显示状态
      */
     toggleSecurityAnswer() {
       this.showSecurityAnswer = !this.showSecurityAnswer
@@ -920,7 +926,6 @@ export default {
       this.isLoginMode = false
       formHelperService.clearForm(this.errors)
       formHelperService.clearForm(this.registerForm)
-      // 加载注册验证码
       if (this.registerCaptcha) {
         await this.$nextTick()
         try {
@@ -959,15 +964,12 @@ export default {
      * 刷新忘记密码验证码
      */
     async refreshForgotCaptcha() {
-      // 只检查验证码是否正在加载
       if (this.forgotCaptcha?.loading) {
         console.log('验证码正在加载中，请稍候...')
         return false
       }
 
       console.log('开始刷新验证码...')
-
-      // 清空验证码输入框
       this.forgotPasswordForm.captcha = ''
       this.clearForgotError('captchaError')
 
@@ -982,6 +984,73 @@ export default {
       }
     },
 
+    // ==================== 版本检查相关 ====================
+
+    /**
+     * 检查应用版本更新
+     */
+    async checkAppVersion() {
+      try {
+        // 获取当前 APP 版本信息
+        const appVersion = versionService.getAppVersion()
+        console.log('当前 APP 版本:', appVersion)
+
+        // 检查更新
+        const updateInfo = await versionService.checkUpdate()
+
+        if (updateInfo.needUpdate) {
+          console.log('发现新版本:', updateInfo.latestVersion)
+          this.showVersionUpdateDialog(updateInfo)
+        } else {
+          console.log('当前已是最新版本')
+        }
+      } catch (error) {
+        console.error('版本检查失败:', error)
+      }
+    },
+
+    showVersionUpdateDialog(updateInfo) {
+      const latest = updateInfo.latestVersion
+      const fileSizeMB = latest.fileSize ? (latest.fileSize / 1024 / 1024).toFixed(2) : null
+
+      notificationService.showVersionUpdateDialog({
+        title: updateInfo.isForceUpdate ? '强制更新提醒' : '发现新版本',
+        versionName: latest.versionName,
+        updateContent: latest.updateContent || '优化用户体验',
+        fileSize: fileSizeMB,
+        isForceUpdate: updateInfo.isForceUpdate,
+        onConfirm: async () => {
+          // 确认更新，下载并安装APK
+          if (latest.downloadUrl) {
+            // 先关闭弹窗
+            // 开始下载并安装
+            await versionService.downloadAndInstall(latest.downloadUrl, {
+              versionName: latest.versionName,
+              onProgress: (progress) => {
+                console.log(`下载进度: ${progress}%`)
+              },
+              onSuccess: () => {
+                console.log('下载完成，准备安装')
+              },
+              onError: (error) => {
+                console.error('下载失败:', error)
+                this.showNotification('下载失败，请稍后重试', 'error')
+              }
+            })
+          } else {
+            this.showNotification('下载地址不存在，请稍后重试', 'error')
+          }
+        },
+        onCancel: () => {
+          if (updateInfo.isForceUpdate) {
+            this.showNotification('请更新应用后再使用', 'warning')
+          } else {
+            this.showNotification('已取消更新', 'info')
+          }
+        }
+      })
+    },
+
     // ==================== 登录相关 ====================
 
     /**
@@ -990,7 +1059,6 @@ export default {
     async handleLogin() {
       const {identifier, password, rememberMe} = this.loginForm
 
-      // 验证表单
       if (!this.validateLoginForm()) {
         return
       }
@@ -998,7 +1066,6 @@ export default {
       this.loginLoading = true
 
       try {
-        // 调用登录API
         const response = await authService.login({
           identifier,
           password,
@@ -1007,7 +1074,6 @@ export default {
 
         console.log('登录响应:', response)
 
-        // 从响应中提取数据（兼容不同结构）
         const responseData = response.data || response
         const token = responseData.token
         const user = responseData.user
@@ -1015,14 +1081,15 @@ export default {
         if (token) {
           // 保存认证信息
           authHelperService.saveAuthData(token, user)
-
-          // 同时保存一份到旧的键名，兼容现有代码
           localStorage.setItem('token', token)
 
-          // ✅ 关键修复：设置 savingService 的当前用户ID
+          // ✅ 统一使用 versionService 获取版本号
+          const appVersion = versionService.getAppVersion()
+          versionService.setCurrentVersion(appVersion.versionCode, appVersion.versionName)
+          console.log('保存版本信息:', appVersion)
+
           const userId = user?.id || responseData.userId
           if (userId) {
-            // 动态导入 savingService 避免循环依赖
             import('@/services/api/saving.service').then(module => {
               const savingService = module.default
               savingService.setCurrentUser(userId)
@@ -1031,17 +1098,14 @@ export default {
               console.error('【登录】导入 savingService 失败:', err)
             })
 
-            // 也保存到 localStorage 备用
             localStorage.setItem('userId', userId)
 
-            // ==================== 🔥 登录成功后初始化数据库 ====================
             console.log('【登录】开始初始化数据库...')
 
             try {
-              // 调用数据库初始化服务，静默模式（不显示通知）
               const initResult = await initDataService.initAllTables(userId, {
-                forceRefresh: false,  // 不强制刷新，只初始化空表
-                silent: true          // 静默模式，不显示通知
+                forceRefresh: false,
+                silent: true
               })
 
               if (initResult.success) {
@@ -1051,9 +1115,7 @@ export default {
                   耗时: initResult.duration + 'ms'
                 })
 
-                // ✅ 修复：添加空值检查
                 if (initResult.tables) {
-                  // 打印各表初始化详情
                   Object.keys(initResult.tables).forEach(tableName => {
                     const result = initResult.tables[tableName]
                     if (result.skipped) {
@@ -1070,12 +1132,9 @@ export default {
               }
             } catch (error) {
               console.error('【登录】数据库初始化异常:', error)
-              // 数据库初始化失败不影响登录流程
             }
-            // ==================== 数据初始化结束 ====================
           }
 
-          // 记住我功能
           if (rememberMe) {
             localStorage.setItem('rememberedEmail', identifier)
           } else {
@@ -1084,7 +1143,6 @@ export default {
 
           this.showNotification('登录成功！', 'success')
 
-          // 处理重定向
           setTimeout(() => {
             const queryParams = new URLSearchParams(window.location.search)
             let redirect = queryParams.get('redirect') || localStorage.getItem('redirectAfterLogin')
@@ -1157,7 +1215,6 @@ export default {
     handleLoginError(error) {
       let errorMessage = '网络错误，请稍后重试'
 
-      // 根据错误响应处理
       if (error.response?.data?.message) {
         errorMessage = error.response.data.message
       } else if (error.message) {
@@ -1177,7 +1234,6 @@ export default {
         return
       }
 
-      // 验证验证码
       if (!this.registerForm.captcha) {
         this.setFormError('captchaError', '请输入图形验证码')
         return
@@ -1218,7 +1274,6 @@ export default {
 
       this.clearAllErrors()
 
-      // 验证手机号
       if (!phone) {
         this.setFormError('registerPhoneError', '请输入手机号')
         return false
@@ -1229,19 +1284,16 @@ export default {
         return false
       }
 
-      // 验证密码
       if (!validationService.isValidPassword(password)) {
         this.setFormError('registerPasswordError', '密码需6-20位')
         return false
       }
 
-      // 验证确认密码
       if (!validationService.isPasswordMatch(password, confirmPassword)) {
         this.setFormError('registerConfirmPasswordError', '两次输入的密码不一致')
         return false
       }
 
-      // 验证安全问题
       if (!securityQuestion?.trim()) {
         this.setFormError('securityQuestionError', '请输入安全提示问题')
         return false
@@ -1252,7 +1304,6 @@ export default {
         return false
       }
 
-      // 验证服务条款
       if (!agreeTerms) {
         this.showNotification('请阅读并同意服务条款和隐私政策', 'error')
         return false
@@ -1271,7 +1322,6 @@ export default {
         this.registerCaptcha.clear()
       }
 
-      // 切换到登录模式
       this.switchToLogin()
     },
 
@@ -1284,7 +1334,6 @@ export default {
       if (error.response?.data?.message) {
         errorMessage = error.response.data.message
 
-        // 根据错误信息设置对应的字段错误
         if (errorMessage.includes('手机号') || errorMessage.includes('已注册')) {
           this.setFormError('registerPhoneError', errorMessage)
         } else if (errorMessage.includes('验证码')) {
@@ -1296,7 +1345,6 @@ export default {
         this.showNotification(errorMessage, 'error')
       }
 
-      // 刷新验证码
       if (this.registerCaptcha) {
         this.registerCaptcha.refresh()
       }
@@ -1329,7 +1377,6 @@ export default {
       this.showForgotPasswordModal = true
       this.resetForgotPasswordForm()
 
-      // 加载验证码
       await this.$nextTick()
       if (!this.forgotCaptcha) return
       setTimeout(async () => {
@@ -1385,7 +1432,6 @@ export default {
     async handleGetSecurityQuestion() {
       const {phone, captcha} = this.forgotPasswordForm
 
-      // 验证输入
       this.clearAllForgotErrors()
 
       if (!phone) {
@@ -1405,7 +1451,7 @@ export default {
 
       if (!this.forgotCaptcha?.key) {
         this.setForgotError('captchaError', '验证码已失效，请刷新重试')
-        this.refreshForgotCaptcha()  // 不使用 await
+        this.refreshForgotCaptcha()
         return
       }
 
@@ -1425,7 +1471,6 @@ export default {
         } else {
           const errorMsg = response?.message || '获取安全问题失败'
           this.setForgotError('phoneError', errorMsg)
-          // 失败时刷新验证码
           this.refreshForgotCaptcha()
         }
       } catch (error) {
@@ -1436,7 +1481,6 @@ export default {
           errorMessage = error.response.data.message
         }
 
-        // 根据错误类型设置错误信息
         if (errorMessage.includes('手机号') || errorMessage.includes('用户')) {
           this.setForgotError('phoneError', errorMessage)
         } else if (errorMessage.includes('验证码')) {
@@ -1445,7 +1489,6 @@ export default {
           this.showNotification(errorMessage, 'error')
         }
 
-        // 刷新验证码（不使用 await）
         this.refreshForgotCaptcha()
       } finally {
         this.forgotPasswordLoading = false
@@ -1536,7 +1579,6 @@ export default {
       if (error.response?.data?.message) {
         errorMessage = error.response.data.message
 
-        // 根据当前步骤设置错误
         if (this.forgotPasswordStep === 1) {
           if (errorMessage.includes('手机号') || errorMessage.includes('用户')) {
             this.setForgotError('phoneError', errorMessage)
@@ -1545,7 +1587,6 @@ export default {
           } else {
             this.showNotification(errorMessage, 'error')
           }
-          // 无论什么错误，都刷新验证码
           this.refreshForgotCaptcha()
         } else {
           this.showNotification(errorMessage, 'error')
@@ -1609,7 +1650,7 @@ export default {
 </script>
 
 <style scoped>
-/* 保持原有的CSS样式不变，新增服务条款和隐私政策弹窗样式 */
+/* 修改后的完整CSS样式 */
 :root {
   --primary-color: #D5EBE1; /* 天缥 */
   --secondary-color: #B1D5C8; /* 沧浪 */
@@ -1623,16 +1664,15 @@ export default {
   --success-color: #2ecc71;
 }
 
+/* 修改 body 样式 - 移除椭圆形背景效果 */
 body {
+  margin: 0;
+  padding: 0;
   background-color: var(--primary-color);
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
 }
 
-/* 登录/注册卡片 */
+/* 登录/注册卡片 - 完美居中 */
 .auth-card {
   background-color: var(--white);
   border-radius: 25px;
@@ -1640,6 +1680,10 @@ body {
   box-shadow: 0 15px 30px rgba(0, 0, 0, 0.1);
   width: 100%;
   max-width: 450px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .auth-header {
@@ -1716,6 +1760,7 @@ body {
   color: var(--text-dark);
   transition: all 0.3s;
   background-color: rgba(213, 235, 225, 0.1);
+  box-sizing: border-box;
 }
 
 .form-input:focus {
@@ -1779,16 +1824,6 @@ body {
   padding: 0 5px;
 }
 
-.captcha-refresh {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  background-color: rgba(255, 255, 255, 0.8);
-  padding: 2px 5px;
-  font-size: 12px;
-  color: var(--accent-color);
-}
-
 /* 表单选项 */
 .form-options {
   display: flex;
@@ -1842,6 +1877,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 10px;
+  box-sizing: border-box;
 }
 
 .auth-button:hover:not(:disabled) {
@@ -1869,7 +1905,8 @@ body {
   margin-bottom: 20px;
 }
 
-.divider::before, .divider::after {
+.divider::before,
+.divider::after {
   content: '';
   flex: 1;
   height: 1px;
@@ -2154,6 +2191,7 @@ body {
   justify-content: center;
   gap: 10px;
   margin-top: 20px;
+  box-sizing: border-box;
 }
 
 .modal-button:hover:not(:disabled) {
@@ -2211,33 +2249,11 @@ body {
   margin-bottom: 30px;
 }
 
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(50px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes bounce {
-  0%, 20%, 50%, 80%, 100% {
-    transform: translateY(0);
-  }
-  40% {
-    transform: translateY(-20px);
-  }
-  60% {
-    transform: translateY(-10px);
-  }
-}
-
 /* 响应式调整 */
 @media (max-width: 480px) {
   .auth-card {
     padding: 25px 20px;
+    width: calc(100% - 40px);
   }
 
   .auth-title {
@@ -2283,6 +2299,33 @@ body {
 }
 
 /* 动画效果 */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bounce {
+  0%,
+  20%,
+  50%,
+  80%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-20px);
+  }
+  60% {
+    transform: translateY(-10px);
+  }
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

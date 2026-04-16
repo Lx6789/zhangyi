@@ -1,14 +1,20 @@
 package org.lx.config.security;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.SignatureException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
+import java.nio.charset.StandardCharsets;
+import java.security.Key;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -30,9 +36,15 @@ public class JwtTokenUtil {
 
     private final Map<String, Claims> claimsCache = new ConcurrentHashMap<>();
 
+    // 新增：签名密钥对象（缓存复用）
+    private Key signingKey;
+
     @PostConstruct
     public void init() {
         log.info("JWT secret 初始化完成: {}", secret);
+        // 初始化签名密钥（新版 JJWT 要求）
+        this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        log.info("JWT 签名密钥初始化完成");
     }
 
     /**
@@ -126,8 +138,10 @@ public class JwtTokenUtil {
             // 打印完整的token（注意：生产环境不要这样做，这里仅用于调试）
             log.debug("完整token: {}", token);
 
-            Claims claims = Jwts.parser()
-                    .setSigningKey(secret)
+            // 【修改点1】使用 parserBuilder() 替代 parser()，并设置签名密钥
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(signingKey)  // 使用 Key 对象而非字符串
+                    .build()
                     .parseClaimsJws(token)
                     .getBody();
 
@@ -135,14 +149,14 @@ public class JwtTokenUtil {
             claimsCache.put(token, claims);
             log.debug("token解析成功，已存入缓存");
             return claims;
-        } catch (io.jsonwebtoken.ExpiredJwtException e) {
+        } catch (ExpiredJwtException e) {
             log.error("token已过期: {}", e.getMessage());
             return null;
-        } catch (io.jsonwebtoken.SignatureException e) {
+        } catch (SignatureException e) {
             log.error("token签名验证失败: {}", e.getMessage());
             log.error("使用的secret: {}", secret);
             return null;
-        } catch (io.jsonwebtoken.MalformedJwtException e) {
+        } catch (MalformedJwtException e) {
             log.error("token格式错误: {}", e.getMessage());
             log.error("错误信息中的token部分: {}", e.getMessage());
             return null;
@@ -177,15 +191,17 @@ public class JwtTokenUtil {
         String token = Jwts.builder()
                 .setClaims(claims)
                 .setExpiration(generateExpirationDate(rememberMe))
-                .signWith(SignatureAlgorithm.HS512, secret)
+                .signWith(signingKey, SignatureAlgorithm.HS256)  // 使用 Key 对象和指定的签名算法
                 .compact();
 
         log.info("生成新token，长度: {}", token.length());
 
         // 生成token时也存入缓存
         try {
-            Claims parsedClaims = Jwts.parser()
-                    .setSigningKey(secret)
+            // 【修改点3】解析时也使用 parserBuilder()
+            Claims parsedClaims = Jwts.parserBuilder()
+                    .setSigningKey(signingKey)
+                    .build()
                     .parseClaimsJws(token)
                     .getBody();
             claimsCache.put(token, parsedClaims);

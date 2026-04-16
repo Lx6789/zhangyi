@@ -626,14 +626,14 @@ class NotificationService {
     }
 
     /**
-     * 显示加载提示
+     * 显示加载提示（返回可更新的对象）
      */
     showLoading(message = '加载中...') {
-        const existing = document.querySelector('.custom-loading');
-        if (existing) existing.remove();
+        const existing = document.querySelector('.custom-loading')
+        if (existing) existing.remove()
 
-        const loadingDiv = document.createElement('div');
-        loadingDiv.className = 'custom-loading';
+        const loadingDiv = document.createElement('div')
+        loadingDiv.className = 'custom-loading'
         this.applyStyles(loadingDiv, {
             position: 'fixed',
             top: '0',
@@ -647,16 +647,36 @@ class NotificationService {
             justifyContent: 'center',
             flexDirection: 'column',
             gap: '16px'
-        });
+        })
+
+        const messageSpan = document.createElement('div')
+        this.applyStyles(messageSpan, {
+            color: this.colors.white,
+            fontSize: '14px',
+            background: `${this.colors.textDark}80`,
+            padding: '8px 16px',
+            borderRadius: '40px'
+        })
+        messageSpan.textContent = message
 
         loadingDiv.innerHTML = `
-            <div style="width: 48px; height: 48px; border: 3px solid ${this.colors.secondary}; border-top-color: ${this.colors.accent}; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-            <div style="color: ${this.colors.white}; font-size: 14px; background: ${this.colors.textDark}80; padding: 8px 16px; border-radius: 40px;">${message}</div>
-            <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
-        `;
+        <div style="width: 48px; height: 48px; border: 3px solid ${this.colors.secondary}; border-top-color: ${this.colors.accent}; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    `
+        loadingDiv.appendChild(messageSpan)
+        document.body.appendChild(loadingDiv)
 
-        document.body.appendChild(loadingDiv);
-        return loadingDiv;
+        // 返回一个可以更新消息的对象
+        return {
+            updateMessage: (newMessage) => {
+                messageSpan.textContent = newMessage
+            },
+            close: () => {
+                if (loadingDiv.parentNode) {
+                    loadingDiv.remove()
+                }
+            }
+        }
     }
 
     hideLoading(loadingElement) {
@@ -665,6 +685,177 @@ class NotificationService {
         } else {
             const existing = document.querySelector('.custom-loading');
             if (existing) existing.remove();
+        }
+    }
+
+    /**
+     * 版本更新弹窗（专用）
+     * @param {Object} options - 配置选项
+     * @param {string} options.title - 标题
+     * @param {string} options.message - 消息内容
+     * @param {string} options.versionName - 版本名称
+     * @param {string} options.updateContent - 更新内容
+     * @param {string} options.fileSize - 文件大小（MB）
+     * @param {boolean} options.isForceUpdate - 是否强制更新
+     * @param {Function} options.onConfirm - 确认回调
+     * @param {Function} options.onCancel - 取消回调
+     */
+    showVersionUpdateDialog(options) {
+        const {
+            title = '发现新版本',
+            versionName = '',
+            updateContent = '优化用户体验',
+            fileSize = null,
+            isForceUpdate = false,
+            onConfirm,
+            onCancel
+        } = options;
+
+        const existingModal = document.querySelector('.version-update-modal');
+        if (existingModal) existingModal.remove();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'version-update-overlay';
+        this.applyStyles(overlay, {
+            position: 'fixed',
+            top: '0',
+            left: '0',
+            right: '0',
+            bottom: '0',
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: '10001',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: '0',
+            transition: 'opacity 0.3s ease'
+        });
+
+        const modal = document.createElement('div');
+        modal.className = 'version-update-modal';
+        this.applyStyles(modal, {
+            backgroundColor: this.colors.white,
+            borderRadius: '24px',
+            width: '90%',
+            maxWidth: '400px',
+            boxShadow: `0 20px 40px ${this.colors.shadow}`,
+            transform: 'scale(0.9)',
+            transition: 'transform 0.3s cubic-bezier(0.34, 1.2, 0.64, 1)',
+            overflow: 'hidden'
+        });
+
+        // 格式化文件大小
+        const fileSizeText = fileSize ? `${fileSize} MB` : '未知';
+
+        // 构建更新内容HTML
+        const updateContentHtml = updateContent.split('\n').map(line =>
+            `<p style="margin: 0 0 6px 0; font-size: 14px; color: ${this.colors.textLight}; line-height: 1.5;">${line}</p>`
+        ).join('');
+
+        modal.innerHTML = `
+        <div style="text-align: center; padding: 28px 24px 20px;">
+            <!-- 图标 -->
+            <div style="width: 70px; height: 70px; margin: 0 auto 16px; background: linear-gradient(135deg, ${this.colors.primary} 0%, ${this.colors.secondary} 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="${this.colors.accent}"/>
+                </svg>
+            </div>
+            <!-- 标题 -->
+            <h3 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: ${this.colors.accent};">${title}</h3>
+            <!-- 版本号 -->
+            <div style="display: inline-block; background: ${this.colors.primary}; padding: 4px 12px; border-radius: 40px; margin-bottom: 20px;">
+                <span style="font-size: 13px; font-weight: 600; color: ${this.colors.accent};">版本 ${versionName}</span>
+            </div>
+        </div>
+        
+        <div style="padding: 0 24px;">
+            <!-- 更新内容区域 -->
+            <div style="background: ${this.colors.primary}30; border-radius: 16px; padding: 16px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="${this.colors.accent}"/>
+                    </svg>
+                    <span style="font-size: 14px; font-weight: 600; color: ${this.colors.accent};">更新内容</span>
+                </div>
+                <div style="margin-left: 26px;">
+                    ${updateContentHtml || '<p style="margin: 0; font-size: 14px; color: #666;">优化用户体验</p>'}
+                </div>
+            </div>
+            
+            ${fileSize ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid ${this.colors.secondary}40; margin-top: 8px;">
+                <span style="font-size: 13px; color: ${this.colors.textLight};">文件大小</span>
+                <span style="font-size: 13px; font-weight: 500; color: ${this.colors.textDark};">${fileSizeText}</span>
+            </div>
+            ` : ''}
+            
+            ${isForceUpdate ? `
+            <div style="background: ${this.colors.warning}20; border-radius: 12px; padding: 10px; margin: 16px 0; display: flex; align-items: center; gap: 10px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="${this.colors.warning}"/>
+                </svg>
+                <span style="font-size: 12px; color: ${this.colors.warning}; font-weight: 500;">此为强制更新，更新后方可继续使用</span>
+            </div>
+            ` : ''}
+        </div>
+        
+        <div style="display: flex; gap: 12px; padding: 20px 24px 28px;">
+            ${!isForceUpdate ? `
+            <button class="update-cancel" style="flex: 1; padding: 14px; border-radius: 40px; background: ${this.colors.white}; color: ${this.colors.textLight}; font-size: 15px; font-weight: 500; cursor: pointer; transition: all 0.2s; box-shadow: 0 0 0 1px ${this.colors.secondary} inset; border: none;">
+                稍后提醒
+            </button>
+            ` : ''}
+            <button class="update-confirm" style="flex: 1; padding: 14px; border-radius: 40px; background: ${this.colors.accent}; color: white; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; border: none;">
+                ${isForceUpdate ? '立即更新' : '立即更新'}
+            </button>
+        </div>
+    `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        setTimeout(() => {
+            overlay.style.opacity = '1';
+            modal.style.transform = 'scale(1)';
+        }, 10);
+
+        const close = (result) => {
+            overlay.style.opacity = '0';
+            modal.style.transform = 'scale(0.9)';
+            setTimeout(() => {
+                if (overlay.parentNode) overlay.remove();
+            }, 300);
+            if (result === 'confirm' && onConfirm) onConfirm();
+            if (result === 'cancel' && onCancel) onCancel();
+        };
+
+        const confirmBtn = modal.querySelector('.update-confirm');
+        if (confirmBtn) {
+            confirmBtn.onclick = () => close('confirm');
+            confirmBtn.onmouseenter = () => confirmBtn.style.opacity = '0.9';
+            confirmBtn.onmouseleave = () => confirmBtn.style.opacity = '1';
+        }
+
+        if (!isForceUpdate) {
+            const cancelBtn = modal.querySelector('.update-cancel');
+            if (cancelBtn) {
+                cancelBtn.onclick = () => close('cancel');
+                cancelBtn.onmouseenter = () => {
+                    cancelBtn.style.backgroundColor = this.colors.grayBg;
+                    cancelBtn.style.boxShadow = `0 0 0 1px ${this.colors.tertiary} inset`;
+                };
+                cancelBtn.onmouseleave = () => {
+                    cancelBtn.style.backgroundColor = this.colors.white;
+                    cancelBtn.style.boxShadow = `0 0 0 1px ${this.colors.secondary} inset`;
+                };
+            }
+        }
+
+        // 点击遮罩层，非强制更新时可关闭
+        if (!isForceUpdate) {
+            overlay.onclick = (e) => {
+                if (e.target === overlay) close('cancel');
+            };
         }
     }
 }

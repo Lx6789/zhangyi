@@ -90,7 +90,10 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 "/v2/api-docs/**",
                 "/test/soft-delete",
                 "/test/all",
-                "/test/recover"
+                "/test/recover",
+                "/version/update",
+                "/version/latest",
+                "/version/download/{versionId}"
         );
     }
 
