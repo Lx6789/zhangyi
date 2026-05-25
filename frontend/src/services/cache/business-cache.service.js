@@ -1732,6 +1732,38 @@ class BusinessCacheService {
     }
 
     /**
+     * 获取所有业务记录（日常+收入+支出）
+     * 用于统计分析等需要全局数据的场景
+     */
+    async getAllBusinessRecords() {
+        try {
+            const [dailyRecords, incomeRecords, expenseRecords] = await Promise.all([
+                this.getDailyRecordsWithDecrypt(),
+                this.getAllIncomeRecords(),
+                this.getAllExpenseRecords()
+            ])
+
+            const allRecords = [
+                ...dailyRecords.map(r => ({ ...r, _sourceTable: 'daily_records' })),
+                ...incomeRecords.map(r => ({ ...r, _sourceTable: 'income_records' })),
+                ...expenseRecords.map(r => ({ ...r, _sourceTable: 'expense_records' }))
+            ]
+
+            console.log('获取所有业务记录:', {
+                daily: dailyRecords.length,
+                income: incomeRecords.length,
+                expense: expenseRecords.length,
+                total: allRecords.length
+            })
+
+            return allRecords
+        } catch (error) {
+            console.error('获取所有业务记录失败:', error)
+            return []
+        }
+    }
+
+    /**
      * 清理所有数据（慎用）
      */
     async clearAll() {

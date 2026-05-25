@@ -366,17 +366,17 @@ const paymentMethods = expenseService.getPaymentMethods()
 
 // 支出类型选项
 const expenseTypeOptions = [
-  { value: '进货采购', label: '📦 进货采购 (更新库存)', icon: '📦' },
-  { value: '租金水电', label: '🏢 租金水电', icon: '🏢' },
-  { value: '员工工资', label: '👥 员工工资', icon: '👥' },
-  { value: '设备工具', label: '🔧 设备工具', icon: '🔧' },
-  { value: '包装物料', label: '📦 包装物料', icon: '📦' },
-  { value: '运输费用', label: '🚚 运输费用', icon: '🚚' },
-  { value: '平台费用', label: '📱 平台费用', icon: '📱' },
-  { value: '税费杂费', label: '📄 税费杂费', icon: '📄' },
-  { value: '库存损耗', label: '⚠️ 库存损耗 (减少库存)', icon: '⚠️' },
-  { value: '退货退款', label: '🔄 退货退款 (减少库存)', icon: '🔄' },
-  { value: '其他支出', label: '📌 其他支出', icon: '📌' }
+  { value: '进货采购', label: '进货采购 (更新库存)', icon: '📦' },
+  { value: '租金水电', label: '租金水电', icon: '🏢' },
+  { value: '员工工资', label: '员工工资', icon: '👥' },
+  { value: '设备工具', label: '设备工具', icon: '🔧' },
+  { value: '包装物料', label: '包装物料', icon: '📦' },
+  { value: '运输费用', label: '运输费用', icon: '🚚' },
+  { value: '平台费用', label: '平台费用', icon: '📱' },
+  { value: '税费杂费', label: '税费杂费', icon: '📄' },
+  { value: '库存损耗', label: '库存损耗 (减少库存)', icon: '⚠️' },
+  { value: '退货退款', label: '退货退款 (减少库存)', icon: '🔄' },
+  { value: '其他支出', label: '其他支出', icon: '📌' }
 ]
 
 // 损耗原因选项

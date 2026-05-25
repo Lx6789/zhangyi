@@ -466,9 +466,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { authHelperService, notificationService } from '@/services/index.js'
+import {ref, reactive, onMounted, computed, watch} from 'vue'
+import {useRouter} from 'vue-router'
+import {authHelperService, notificationService} from '@/services/index.js'
 import userDataService from '@/services/user-data.service.js'
 import businessDataService from '@/services/cache/business-cache.service.js'
 import indexedDBService from '@/services/db/indexed-db.service.js'
@@ -630,7 +630,12 @@ const getAllRecords = async () => {
       expenseService.getExpenseRecords()
     ])
 
-    const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]
+    // 给每条记录标记来源表，便于后续删除操作
+    const allRecords = [
+      ...dailyRecords.map(r => ({...r, _sourceTable: 'daily_records'})),
+      ...incomeRecords.map(r => ({...r, _sourceTable: 'income_records'})),
+      ...expenseRecords.map(r => ({...r, _sourceTable: 'expense_records'}))
+    ]
 
     console.log('获取记录完成:', {
       daily: dailyRecords.length,
@@ -654,7 +659,13 @@ const getAllRecords = async () => {
         expenseService.getExpenseRecords()
       ])
 
-      const allRecords = [...dailyRecords, ...incomeRecords, ...expenseRecords]
+      // 给每条记录标记来源表
+      const allRecords = [
+        ...dailyRecords.map(r => ({...r, _sourceTable: 'daily_records'})),
+        ...incomeRecords.map(r => ({...r, _sourceTable: 'income_records'})),
+        ...expenseRecords.map(r => ({...r, _sourceTable: 'expense_records'}))
+      ]
+
       console.log('重新获取成功，记录数:', allRecords.length)
       return allRecords
     } catch (retryError) {
@@ -676,16 +687,18 @@ const deleteRecord = async (record) => {
   if (!confirmed) return
 
   try {
-    // 根据记录类型调用不同的删除方法
-    if (record.source) {
-      // 收入记录
-      await incomeService.deleteIncomeRecord(record.id)
-    } else if (record.subtype) {
-      // 支出记录
-      await expenseService.deleteExpenseRecord(record.id)
-    } else {
-      // 日常记录
-      await businessDataService.deleteDailyRecord(record.id)
+    // 根据记录的来源表调用对应的删除方法
+    switch (record._sourceTable) {
+      case 'income_records':
+        await incomeService.deleteIncomeRecord(record.id)
+        break
+      case 'expense_records':
+        await expenseService.deleteExpenseRecord(record.id)
+        break
+      case 'daily_records':
+      default:
+        await businessDataService.deleteDailyRecord(record.id)
+        break
     }
 
     notificationService.showNotification('删除成功', 'success')
@@ -700,7 +713,8 @@ const deleteRecord = async (record) => {
  * 编辑记录
  */
 const editRecord = (record) => {
-  editingRecord.value = record
+  // 深拷贝，避免响应式引用问题
+  editingRecord.value = JSON.parse(JSON.stringify(record))
   recordType.value = record.type
 
   if (record.type === '收入') {
@@ -1352,8 +1366,6 @@ const closeModalOnOverlay = (event) => {
 }
 
 const submitRecord = async () => {
-  let record
-
   const currentUser = authHelperService.getCurrentUser()
   const userId = currentUser?.id
 
@@ -1364,9 +1376,8 @@ const submitRecord = async () => {
     }
 
     if (editingRecord.value) {
-      // 更新现有记录
-      record = {
-        ...editingRecord.value,
+      // ✅ 修改：传 id 和 data 两个参数
+      await businessDataService.updateDailyRecord(editingRecord.value.id, {
         category: incomeForm.category,
         source: incomeForm.source,
         amount: parseFloat(incomeForm.amount),
@@ -1374,12 +1385,11 @@ const submitRecord = async () => {
         paymentMethod: incomeForm.paymentMethod,
         note: incomeForm.note,
         updateTime: new Date().toISOString()
-      }
-      await businessDataService.updateDailyRecord(record)
+      })
     } else {
       // 新增记录
       const recordId = idGenerator.generateDailyRecordId(userId)
-      record = {
+      const record = {
         id: recordId,
         type: '收入',
         category: incomeForm.category,
@@ -1403,9 +1413,8 @@ const submitRecord = async () => {
     }
 
     if (editingRecord.value) {
-      // 更新现有记录
-      record = {
-        ...editingRecord.value,
+      // ✅ 修改：传 id 和 data 两个参数
+      await businessDataService.updateDailyRecord(editingRecord.value.id, {
         category: expenseForm.category,
         subtype: expenseForm.subtype,
         amount: parseFloat(expenseForm.amount),
@@ -1413,12 +1422,11 @@ const submitRecord = async () => {
         supplier: expenseForm.supplier || '无',
         note: expenseForm.note,
         updateTime: new Date().toISOString()
-      }
-      await businessDataService.updateDailyRecord(record)
+      })
     } else {
       // 新增记录
       const recordId = idGenerator.generateDailyRecordId(userId)
-      record = {
+      const record = {
         id: recordId,
         type: '支出',
         category: expenseForm.category,
@@ -1437,9 +1445,8 @@ const submitRecord = async () => {
     }
   }
 
-  console.log(`${editingRecord.value ? '更新' : '保存'}记录成功:`, record)
   await refreshData()
-  notificationService.showNotification(`${recordType.value}记录${editingRecord.value ? '更新' : '保存'}成功：¥${record.amount.toFixed(2)}`)
+  notificationService.showNotification(`${recordType.value}记录${editingRecord.value ? '更新' : '保存'}成功`)
   closeRecordModal()
 }
 

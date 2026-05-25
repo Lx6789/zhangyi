@@ -14,17 +14,17 @@ class ExpenseService {
      */
     getExpenseTypes() {
         return [
-            { value: '进货采购', label: '📦 进货采购', icon: 'fa-boxes', affectsInventory: true, effect: 'increase' },
-            { value: '租金水电', label: '🏢 租金水电', icon: 'fa-building', affectsInventory: false },
-            { value: '员工工资', label: '👥 员工工资', icon: 'fa-users', affectsInventory: false },
-            { value: '设备工具', label: '🔧 设备工具', icon: 'fa-tools', affectsInventory: false },
-            { value: '包装物料', label: '📦 包装物料', icon: 'fa-box', affectsInventory: false },
-            { value: '运输费用', label: '🚚 运输费用', icon: 'fa-truck', affectsInventory: false },
-            { value: '平台费用', label: '📱 平台费用', icon: 'fa-mobile-alt', affectsInventory: false },
-            { value: '税费杂费', label: '📄 税费杂费', icon: 'fa-file-invoice', affectsInventory: false },
-            { value: '库存损耗', label: '⚠️ 库存损耗', icon: 'fa-exclamation-triangle', affectsInventory: true, effect: 'decrease' },
-            { value: '退货退款', label: '🔄 退货退款', icon: 'fa-undo-alt', affectsInventory: true, effect: 'decrease' },
-            { value: '其他支出', label: '📌 其他支出', icon: 'fa-tag', affectsInventory: false }
+            { value: '进货采购', label: '进货采购', icon: 'fa-boxes', affectsInventory: true, effect: 'increase' },
+            { value: '租金水电', label: '租金水电', icon: 'fa-building', affectsInventory: false },
+            { value: '员工工资', label: '员工工资', icon: 'fa-users', affectsInventory: false },
+            { value: '设备工具', label: '设备工具', icon: 'fa-tools', affectsInventory: false },
+            { value: '包装物料', label: '包装物料', icon: 'fa-box', affectsInventory: false },
+            { value: '运输费用', label: '运输费用', icon: 'fa-truck', affectsInventory: false },
+            { value: '平台费用', label: '平台费用', icon: 'fa-mobile-alt', affectsInventory: false },
+            { value: '税费杂费', label: '税费杂费', icon: 'fa-file-invoice', affectsInventory: false },
+            { value: '库存损耗', label: '库存损耗', icon: 'fa-exclamation-triangle', affectsInventory: true, effect: 'decrease' },
+            { value: '退货退款', label: '退货退款', icon: 'fa-undo-alt', affectsInventory: true, effect: 'decrease' },
+            { value: '其他支出', label: '其他支出', icon: 'fa-tag', affectsInventory: false }
         ]
     }
 

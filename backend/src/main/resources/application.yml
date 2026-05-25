@@ -8,6 +8,8 @@ spring:
     druid:
       driver-class-name: com.mysql.cj.jdbc.Driver
       url: jdbc:mysql://localhost:3306/zhangyi?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true
+#      username: zhangyi
+#      password: Gr2ix5Ep5MAZsYFW
       username: root
       password: 123456
 
@@ -57,7 +59,7 @@ jwt:
   # JWT 30 * 24 * 60 * 60L;
   rememberMeExpiration: 2592000
   # JWT 负载中拿到的开头
-  tokenHead: Bearer
+  tokenHead: "Bearer "
 
 # 验证码配置
 kaptcha:
@@ -84,8 +86,8 @@ captcha:
 
 apk:
   storage:
-#    path: "/var/www/apk"
-    path: "D:/apk"
+    path: "/var/www/apk"
+#    path: "D:/apk"
     base-url: http://111.229.172.186:8085
     version:
       update-password: 123456

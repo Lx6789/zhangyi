@@ -8,26 +8,26 @@ const API_BASE = '/api'
 export const API = {
     // 认证相关
     AUTH: {
-        LOGIN: `/auth/login`,
-        REGISTER: `/auth/register`,
-        GENERATE_CAPTCHA: `/auth/captcha/generate`,
-        VERIFY_CAPTCHA: `/auth/captcha/verify`,
-        LOGOUT: `$/auth/logout`,
-        USER_INFO: `/auth/userInfo`,
-        FORGOT_PASSWORD_QUESTION: `/auth/forgot-password/question`,
-        FORGOT_PASSWORD_VERIFY: `/auth/forgot-password/verify`,
-        FORGOT_PASSWORD_RESET: `/auth/forgot-password/reset`
+        LOGIN: `${API_BASE}/auth/login`,
+        REGISTER: `${API_BASE}/auth/register`,
+        GENERATE_CAPTCHA: `${API_BASE}/auth/captcha/generate`,
+        VERIFY_CAPTCHA: `${API_BASE}/auth/captcha/verify`,
+        LOGOUT: `${API_BASE}/auth/logout`,
+        USER_INFO: `${API_BASE}/auth/userInfo`,
+        FORGOT_PASSWORD_QUESTION: `${API_BASE}/auth/forgot-password/question`,
+        FORGOT_PASSWORD_VERIFY: `${API_BASE}/auth/forgot-password/verify`,
+        FORGOT_PASSWORD_RESET: `${API_BASE}/auth/forgot-password/reset`
     },
 
     // 版本管理相关
     VERSION: {
-        LATEST: `/version/latest`,
-        CHECK: `/version/check`,
-        UPDATE: `/version/update`,
-        DOWNLOAD: `/version/download/{versionId}`,
-        LIST: `/version/list`,
-        DETAIL: `/version/detail/{versionId}`,
-        DELETE: `/version/delete/{versionId}`
+        LATEST: `${API_BASE}/version/latest`,
+        CHECK: `${API_BASE}/version/check`,
+        UPDATE: `${API_BASE}/version/update`,
+        DOWNLOAD: `${API_BASE}/version/download/{versionId}`,
+        LIST: `${API_BASE}/version/list`,
+        DETAIL: `${API_BASE}/version/detail/{versionId}`,
+        DELETE: `${API_BASE}/version/delete/{versionId}`
     },
 
     // 业务相关
@@ -84,12 +84,12 @@ export const API = {
 // 扁平化导出
 export const API_FLAT = {
     // 认证相关
-    LOGIN: `/auth/login`,
-    REGISTER: `/auth/register`,
-    GENERATE_CAPTCHA: `/auth/captcha/generate`,
-    VERIFY_CAPTCHA: `/auth/captcha/verify`,
-    LOGOUT: `/auth/logout`,
-    USER_INFO: `/auth/userInfo`,
+    LOGIN: `${API_BASE}/auth/login`,
+    REGISTER: `${API_BASE}/auth/register`,
+    GENERATE_CAPTCHA: `${API_BASE}/auth/captcha/generate`,
+    VERIFY_CAPTCHA: `${API_BASE}/auth/captcha/verify`,
+    LOGOUT: `${API_BASE}/auth/logout`,
+    USER_INFO: `${API_BASE}/auth/userInfo`,
 
     // 忘记密码相关
     FORGOT_PASSWORD_QUESTION: `${API_BASE}/auth/forgot-password/question`,
@@ -97,13 +97,13 @@ export const API_FLAT = {
     FORGOT_PASSWORD_RESET: `${API_BASE}/auth/forgot-password/reset`,
 
     // 版本管理相关
-    VERSION_LATEST: `/version/latest`,
-    VERSION_CHECK: `/version/check`,
-    VERSION_UPDATE: `/version/update`,
-    VERSION_DOWNLOAD: `/version/download/{versionId}`,
-    VERSION_LIST: `/version/list`,
-    VERSION_DETAIL: `/version/detail/{versionId}`,
-    VERSION_DELETE: `/version/delete/{versionId}`,
+    VERSION_LATEST: `${API_BASE}/version/latest`,
+    VERSION_CHECK: `${API_BASE}/version/check`,
+    VERSION_UPDATE: `${API_BASE}/version/update`,
+    VERSION_DOWNLOAD: `${API_BASE}/version/download/{versionId}`,
+    VERSION_LIST: `${API_BASE}/version/list`,
+    VERSION_DETAIL: `${API_BASE}/version/detail/{versionId}`,
+    VERSION_DELETE: `${API_BASE}/version/delete/{versionId}`,
 
     // 业务相关
     BUSINESS_LIST: `${API_BASE}/business/list`,
